@@ -1,0 +1,6 @@
+/luamerge
+/go-luamerge
+dist/
+coverage.out
+coverage.out.tmp
+/vendor/

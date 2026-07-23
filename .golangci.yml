@@ -1,0 +1,94 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  # Disable limits on the number of printed issues.
+  max-issues-per-linter: 0 # 0 = no limit
+  max-same-issues: 0 # 0 = no limit
+
+linters:
+  default: all
+
+  disable:
+    - cyclop # Cyclomatic complexity is an abstract metric that leads to strange
+      # linter behaviour; the parser/graph code is naturally branchy.
+    - dupl # A lot of near-identical table-driven test cases and transform steps.
+    - funlen # Function length limits are too restrictive for the emit templates.
+    - gocognit # Cognitive complexity is too restrictive for the same reason.
+    - godox # Allow TODO comments for unimplemented functionality.
+    - ireturn # Returning interfaces is intentional for the parser/transform APIs.
+    - maintidx # Maintainability index is an opaque metric with no clear action.
+    - nlreturn # Duplicated by wsl_v5.return check.
+    - wsl # Obsolete; using wsl_v5 instead.
+
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test.go
+        linters:
+          - err113
+          - funlen
+          - wrapcheck
+      # The emit templates contain verbatim Lua (`end` on consecutive lines),
+      # which dupword misreads as an English duplicate-word typo.
+      - path: internal/emit/template.go
+        linters:
+          - dupword
+
+  settings:
+    varnamelen:
+      ignore-names:
+        - i
+        - j
+        - k
+        - n
+        - w
+        - r
+        - g
+        - ok
+        - tt
+        - tb
+        - id
+      ignore-decls:
+        - t testing.T
+        - b testing.B
+        - w io.Writer
+        - r io.Reader
+    lll:
+      line-length: 120
+      tab-width: 4
+    godot:
+      scope: all
+    wsl_v5:
+      allow-first-in-block: true
+      allow-whole-block: false
+      branch-max-lines: 2
+    depguard:
+      rules:
+        main:
+          files:
+            - "$all"
+            - "!$test"
+          allow:
+            - $gostd
+            - "github.com/tarantool/go-luamerge"
+            - "github.com/tarantool/go-config"
+            - "github.com/spf13/pflag"
+            - "github.com/yuin/gopher-lua"
+        test:
+          files:
+            - "$test"
+          allow:
+            - $gostd
+            - "github.com/tarantool/go-luamerge"
+            - "github.com/tarantool/go-config"
+            - "github.com/spf13/pflag"
+            - "github.com/stretchr/testify"
+            - "github.com/yuin/gopher-lua"

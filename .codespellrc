@@ -1,0 +1,5 @@
+[codespell]
+
+skip = ./vendor,./.git,./testdata,./go.sum
+ignore-words-list = ue
+check-filenames = true

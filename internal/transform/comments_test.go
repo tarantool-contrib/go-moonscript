@@ -1,0 +1,83 @@
+package transform_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tarantool/go-luamerge/internal/transform"
+)
+
+func TestCommentTransformer(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		input  string
+		output string
+	}{
+		{
+			name:   "line comment",
+			input:  "print('hello') -- comment\nprint('world')",
+			output: "print('hello') \nprint('world')",
+		},
+		{
+			name:   "block comment",
+			input:  "print('hello') --[[ block comment ]] print('world')",
+			output: "print('hello')  print('world')",
+		},
+		{
+			name:   "nested block comment with equals",
+			input:  "print('hello') --[==[ nested ]==] print('world')",
+			output: "print('hello')  print('world')",
+		},
+		{
+			name:   "comment in string",
+			input:  `str = "-- not a comment" -- actual comment`,
+			output: `str = "-- not a comment" `,
+		},
+		{
+			name:   "single quote string",
+			input:  `str = '-- not a comment' -- actual comment`,
+			output: `str = '-- not a comment' `,
+		},
+		{
+			name:   "escape in string",
+			input:  `str = "quote \" -- not comment" -- comment`,
+			output: `str = "quote \" -- not comment" `,
+		},
+		{
+			name:   "long string",
+			input:  `str = [[-- not a comment]] -- comment`,
+			output: `str = [[-- not a comment]] `,
+		},
+		{
+			name:   "multiple comments",
+			input:  "a -- c1\nb -- c2\nc",
+			output: "a \nb \nc",
+		},
+		{
+			name:   "empty input",
+			input:  "",
+			output: "",
+		},
+		{
+			name:   "only comment",
+			input:  "-- comment only",
+			output: "",
+		},
+	}
+
+	transformer := &transform.CommentTransformerForTest{}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := transformer.Transform([]byte(tt.input))
+			require.NoError(t, err, "Transform() error = %v", err)
+			assert.Equal(t, tt.output, string(got), "Transform() = %q, want %q", string(got), tt.output)
+		})
+	}
+}
