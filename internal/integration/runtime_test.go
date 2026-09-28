@@ -300,3 +300,72 @@ func TestBundle_SuffixKeepsReturnValues(t *testing.T) {
 		})
 	}
 }
+
+// TestBundle_FailedLoadIsNotCached: after a module raised while loading, a
+// second require of it fails again, as natively (Lua 5.2 and later run the
+// module again; Lua 5.1, LuaJIT and Tarantool report the previous error), so
+// the common `pcall(require, ...)` feature check keeps its answer.
+func TestBundle_FailedLoadIsNotCached(t *testing.T) {
+	t.Parallel()
+
+	spec := cliCase(luatest.Project{
+		"main.lua": "print(\"first: \", pcall(require, \"flaky\"))\n" +
+			"print(\"second:\", pcall(require, \"flaky\"))\n",
+		"flaky.lua": "error(\"init failed\")\n",
+	})
+	spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+		t.Helper()
+
+		// The caught messages carry positions: ./flaky.lua:1 natively,
+		// bundle.lua:<line> in the bundle.
+		assert.Equal(t, luatest.StripPositions(orig.Stdout), luatest.StripPositions(bundle.Stdout),
+			"what the two requires returned (positions stripped)\n=== original: %s=== bundle: %s", orig, bundle)
+		luatest.AssertSameExitCode(t, orig, bundle)
+		luatest.AssertSameStderr(t, orig, bundle)
+	}
+
+	luatest.Differential(t, spec)
+}
+
+// assertFailsLikeACycle asserts that the bundle fails on a require cycle the
+// way the original does. Lua 5.1, LuaJIT and Tarantool mark a module in
+// package.loaded while it loads, and a require that finds the mark reports
+// the loop: the messages must agree. Lua 5.2 and later keep no mark, so the
+// cycle recurses until the C stack is exhausted, and where that is noticed
+// decides the message: a file searcher's loader adds "error loading module
+// ... from file", and Lua 5.2 and 5.3 may run out of C levels in the parser
+// ("too many C levels") before the stack overflows. There only the
+// exhaustion is asserted.
+func assertFailsLikeACycle(t *testing.T, orig, bundle luatest.Result) {
+	t.Helper()
+
+	require.NotEqual(t, 0, orig.ExitCode, "the original must fail on the cycle\n%s", orig)
+	assert.NotEqual(t, 0, bundle.ExitCode, "the bundle must fail on the cycle too\n%s", bundle)
+	luatest.AssertSameStdout(t, orig, bundle)
+
+	if strings.Contains(orig.Message(), "loop or previous error loading module") {
+		luatest.AssertSameStderr(t, orig, bundle)
+
+		return
+	}
+
+	exhausted := `C stack overflow|too many C levels`
+	assert.Regexp(t, exhausted, orig.Message(), "the original\n%s", orig)
+	assert.Regexp(t, exhausted, bundle.Message(), "the bundle\n%s", bundle)
+}
+
+// TestBundle_RequireCycleFails: a require cycle fails natively on every Lua,
+// so it fails in the bundle too, instead of handing the module that is still
+// loading a placeholder value.
+func TestBundle_RequireCycleFails(t *testing.T) {
+	t.Parallel()
+
+	spec := cliCase(luatest.Project{
+		"main.lua": "local a = require(\"a\")\nprint(\"main: a.name =\", a.name)\n",
+		"a.lua":    "local b = require(\"b\")\nreturn { name = \"a\" }\n",
+		"b.lua":    "local a = require(\"a\")\nprint(\"b sees a =\", a)\nreturn {}\n",
+	})
+	spec.Check = assertFailsLikeACycle
+
+	luatest.Differential(t, spec)
+}

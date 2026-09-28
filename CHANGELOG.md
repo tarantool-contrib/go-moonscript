@@ -101,5 +101,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bundle built with `--suffix` failed to load with a syntax error: the
   suffix was emitted after the final `return`. The suffix now runs after the
   entry, and the bundle still returns every value the entry returns.
+- A module that raised an error while loading was cached as `true`, so the
+  next `require` of it, such as a second `pcall(require, ...)` feature check,
+  reported success; and a require cycle, which fails natively on every Lua,
+  ran with the module that was still loading bound to `true`. The bundle no
+  longer sets `package.loaded` before a module runs: `require` manages it, as
+  natively.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

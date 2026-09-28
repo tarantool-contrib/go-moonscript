@@ -102,9 +102,9 @@ func TestIntegration(t *testing.T) {
 	testDirs, err := filepath.Glob("../../testdata/*")
 	require.NoError(t, err)
 
-	skip := map[string]string{
-		"circular": "known: circular requires break the original program, which fails on the cycle, " +
-			"while the bundle breaks the cycle; TestCircularDependency pins the bundle's behaviour",
+	checks := map[string]func(t *testing.T, orig, bundle luatest.Result){
+		// The fixture's requires form a cycle, which fails natively.
+		"circular": assertFailsLikeACycle,
 	}
 	tweaks := map[string]func(cfg *config.Config){
 		// require(modname) cannot be resolved statically: the bundler warns and
@@ -127,12 +127,10 @@ func TestIntegration(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reason, known := skip[name]
-			if known {
-				t.Skip(reason)
-			}
+			spec := differential(nil, dir, bundler(emitOptions(false, false), tweaks[name]))
+			spec.Check = checks[name]
 
-			luatest.Differential(t, differential(nil, dir, bundler(emitOptions(false, false), tweaks[name])))
+			luatest.Differential(t, spec)
 		})
 	}
 
@@ -175,27 +173,23 @@ func TestDebugTraceback(t *testing.T) {
 	luatest.Differential(t, spec)
 }
 
-// TestCircularDependency verifies that the bundle resolves a require() cycle
-// (a -> b -> a). Circular requires break the original program: it fails on
-// the cycle, so TestIntegration skips this fixture. Here only the bundle runs,
-// from an empty directory, and it must succeed; this is what the
-// `package.loaded[name] = true` guard buys. Until the bundle fails like the
-// original, this pins what the bundle does.
+// TestCircularDependency verifies that a require() cycle (a -> b -> a) fails
+// in the bundle the way it fails in the original program, in both modes:
+// require itself manages package.loaded, so nothing hands the module that is
+// still loading a placeholder value.
 func TestCircularDependency(t *testing.T) {
 	t.Parallel()
 
-	luatest.Interpreters(t)
+	for name, debug := range map[string]bool{"default": false, "debug": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	bundle := bundler(emitOptions(false, false), nil)(t, luatest.CopyDir(t, "../../testdata/circular"))
+			spec := differential(nil, "../../testdata/circular", bundler(emitOptions(debug, false), nil))
+			spec.Check = assertFailsLikeACycle
 
-	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
-		t.Helper()
-
-		r := luatest.RunBundle(t, interp, bundle, luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0})
-		assert.Equal(t, 0, r.ExitCode, "circular bundle should run without error\n%s", r)
-		assert.Empty(t, r.Stderr, "circular bundle should run without error\n%s", r)
-		assert.Equal(t, "circular test\na\nb\n", r.Stdout)
-	})
+			luatest.Differential(t, spec)
+		})
+	}
 }
 
 // TestFallbackOnDiskOverride verifies that in fallback mode an on-disk module

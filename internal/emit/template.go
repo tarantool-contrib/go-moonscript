@@ -10,9 +10,13 @@ import (
 // lives in the enclosing `do` block (not the function body) so it becomes the
 // loader's first upvalue, which Lua 5.2's `module`/`_ENV` handling relies on.
 // `local arg = _G.arg` counters the implicit `arg` local that Lua 5.1
-// (LUA_COMPAT_VARARG) injects into vararg functions. `package.loaded[name]` is
-// set before the body runs to break circular requires. Aliases delegate to the
+// (LUA_COMPAT_VARARG) injects into vararg functions. Aliases delegate to the
 // primary name so the body executes exactly once regardless of how it's required.
+//
+// The loader leaves package.loaded to require, which runs it: a module that
+// raises while loading is not cached, and a require cycle fails as it does
+// natively (Lua 5.1, LuaJIT and Tarantool report the loop; later versions
+// recurse until the C stack overflows).
 //
 // By default loaders go into package.preload, which the built-in preload
 // searcher consults before searching package.path — so embedded modules win.
@@ -55,7 +59,6 @@ end
 local _ENV = _ENV
 package.{{$.RegTable}}[{{q $primary}}] = function(...)
   local name = ...
-  package.loaded[name] = true
 {{if not $.NoArgFix}}  local arg = _G.arg
 {{end}}{{if $.Debug}}  return assert((loadstring or load)({{bracket .Source}}, {{q (chunkname .Path)}}))(...)
 {{else}}{{indent .Source 0}}{{end}}end
