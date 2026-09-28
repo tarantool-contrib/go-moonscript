@@ -94,6 +94,13 @@ func TestEmptyLineTransformer(t *testing.T) {
 			output: "t[1]\n",
 		},
 		{
+			// The white space around the tokens of a line stays, on the first
+			// and the last line of the source too.
+			name:   "white space on the first and the last line",
+			input:  "  x = 1\n\ny = 2  ",
+			output: "  x = 1\ny = 2  ",
+		},
+		{
 			name:   "CR line endings",
 			input:  "a\r\r  \rb\r",
 			output: "a\rb\r",

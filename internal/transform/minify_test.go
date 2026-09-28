@@ -160,6 +160,17 @@ func TestMinifyTransformer(t *testing.T) {
 			input:  "-- a\n--[[ b ]]\n",
 			output: "",
 		},
+		{
+			// The source ends in a comment, with no line break after it.
+			name:   "line break before a comment at the end",
+			input:  "x = 1\n-- end",
+			output: "x=1\n",
+		},
+		{
+			name:   "line break inside a long comment at the end",
+			input:  "x = 1 --[[\n]]",
+			output: "x=1\n",
+		},
 	}
 
 	transformer := &transform.MinifyTransformerForTest{}
