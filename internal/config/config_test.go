@@ -147,6 +147,25 @@ func TestLoadConfig_EnvironmentLists(t *testing.T) {
 	assert.Equal(t, []string{}, cfg.IncludePackages, "an empty value is the empty list")
 }
 
+// TestLoadConfig_IgnoresUnprefixedVariables checks that only variables with
+// the LUAMERGE_ prefix are configuration: a variable named like a list
+// setting, in any case, sets nothing.
+func TestLoadConfig_IgnoresUnprefixedVariables(t *testing.T) {
+	// t.Setenv forbids t.Parallel().
+	t.Setenv("SEARCH", "lib")
+	t.Setenv("SKIP_PACKAGES", "cjson")
+	t.Setenv("include_packages", "plugin")
+
+	// A named file, so that no luamerge.yaml of the working directory is read.
+	path := filepath.Join(t.TempDir(), "luamerge.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("# no settings\n"), 0o600))
+
+	cfg, err := config.LoadConfig(path)
+
+	require.NoError(t, err)
+	assert.Equal(t, config.Default(), cfg)
+}
+
 // TestSplitList checks how a comma-separated list value is split.
 func TestSplitList(t *testing.T) {
 	t.Parallel()
@@ -226,7 +245,7 @@ func TestLoadConfigSchemaRejectsUnknownKey(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte("entry: main.lua\nbogus_key: 1\n"), 0600))
 
 	_, err := config.LoadConfig(configPath)
-	require.Error(t, err, "unknown config key should fail schema validation")
+	require.ErrorContains(t, err, "bogus_key [schema]", "unknown config key should fail schema validation")
 }
 
 // TestLoadConfig_RejectsStripShebang: transform.strip_shebang is gone, like
@@ -255,11 +274,12 @@ func TestLoadConfigSchemaRejectsBadBoolString(t *testing.T) {
 	t.Parallel()
 
 	configPath := filepath.Join(t.TempDir(), "luamerge.yaml")
-	// "yes" is not accepted by strconv.ParseBool, so the boolish pattern must reject it.
+	// "yes" is not accepted by strconv.ParseBool, so the schema must reject it,
+	// before the value is ever decoded into a bool.
 	require.NoError(t, os.WriteFile(configPath, []byte(`strict: "yes"`+"\n"), 0600))
 
 	_, err := config.LoadConfig(configPath)
-	require.Error(t, err, "non-parseable bool string should fail schema validation")
+	require.ErrorContains(t, err, "strict [type]", "non-parseable bool string should fail schema validation")
 }
 
 func TestLoadConfigSchemaRejectsListAsScalar(t *testing.T) {
@@ -270,7 +290,49 @@ func TestLoadConfigSchemaRejectsListAsScalar(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte("skip_packages: cjson\n"), 0600))
 
 	_, err := config.LoadConfig(configPath)
-	require.Error(t, err, "scalar for a list field should fail schema validation")
+	require.ErrorContains(t, err, "skip_packages [type]", "scalar for a list field should fail schema validation")
+}
+
+// TestLoadConfig_RejectsNonStringListItems checks that the items of a list
+// setting must be strings: a number, a map or a null in the list is an error,
+// not a module named "1" or "map[a:1]".
+func TestLoadConfig_RejectsNonStringListItems(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"search", "skip_packages", "include_packages"} {
+		for _, list := range []string{"[1]", "[lib, {a: 1}]", "[null]"} {
+			t.Run(key+" "+list, func(t *testing.T) {
+				t.Parallel()
+
+				configPath := filepath.Join(t.TempDir(), "luamerge.yaml")
+				require.NoError(t, os.WriteFile(configPath, []byte(key+": "+list+"\n"), 0o600))
+
+				_, err := config.LoadConfig(configPath)
+
+				require.ErrorContains(t, err, key+" [items]")
+			})
+		}
+	}
+}
+
+// TestLoadConfig_RejectsEmptyOutputAndPath checks that output and path may
+// not be empty in the configuration: an empty output names no file, and an
+// empty path no template.
+func TestLoadConfig_RejectsEmptyOutputAndPath(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"output", "path"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+
+			configPath := filepath.Join(t.TempDir(), "luamerge.yaml")
+			require.NoError(t, os.WriteFile(configPath, []byte(key+": \"\"\n"), 0o600))
+
+			_, err := config.LoadConfig(configPath)
+
+			require.ErrorContains(t, err, key+" [minLength]")
+		})
+	}
 }
 
 func TestLoadConfigSchemaAcceptsBoolStringForms(t *testing.T) {
@@ -379,7 +441,7 @@ func TestLoadConfigSchemaRejectsWrongType(t *testing.T) {
 	require.NoError(t, os.WriteFile(configPath, []byte("entry:\n  - a\n  - b\n"), 0600))
 
 	_, err := config.LoadConfig(configPath)
-	require.Error(t, err, "wrong-typed config value should fail schema validation")
+	require.ErrorContains(t, err, "entry [type]", "wrong-typed config value should fail schema validation")
 }
 
 func TestLoadConfigWithStripPrefix(t *testing.T) {
