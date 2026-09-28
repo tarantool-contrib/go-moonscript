@@ -28,7 +28,7 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 ## Features
 
 - **Static dependency analysis** — finds `require()` calls by parsing source, no runtime instrumentation.
-- **Faithful `require()` semantics** — modules registered in `package.preload`, so caching, run-once, and circular deps work via Lua's own machinery.
+- **Faithful `require()` semantics** — modules registered in `package.preload`, so `require` itself caches them, runs each once, and reports a failed load or a require cycle as it does natively.
 - **Accurate tracebacks** (`--debug`) — runtime errors report the original `file:line`, not an offset into the bundle.
 - **Dev overrides** (`--fallback`) — ship a bundle but let an on-disk module take precedence during development.
 - **Directly executable output** (`--shebang`) — prepend a shebang and run the bundle as a program.
@@ -74,46 +74,40 @@ luamerge --entry project/main.lua --output bundle.lua
 lua bundle.lua
 ```
 
-`bundle.lua` contains every reachable module wrapped in a `package.preload` loader, followed by `return require("main")` to start execution.
+`bundle.lua` contains every reachable module wrapped in a `package.preload` loader, followed by the code of `main.lua`, which runs as the bundle's main chunk.
 
 ## How it works
 
-Each module is registered into Lua's native `package.preload` table instead of being inlined at its call site:
+Each module is registered into Lua's native `package.preload` table instead of being inlined at its call site. The entry is not a module: its code comes last and is the bundle's own main chunk.
 
 ```lua
 -- Amalgamated by luamerge
 -- Entry: main
 
 do
-local _ENV = _ENV
-package.preload["lib.utils"] = function(...)
-  local name = ...
-  package.loaded[name] = true
-  local arg = _G.arg
+local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
+local __luamerge_loader = function(...)
+if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 -- ... original module source, verbatim ...
 end
+if package.preload["lib.utils"] == nil then package.preload["lib.utils"] = __luamerge_loader end
 end
-do
-local _ENV = _ENV
-package.preload["main"] = function(...)
-  local name = ...
-  package.loaded[name] = true
-  local arg = _G.arg
--- ... entry module source, verbatim ...
-end
-end
-return require("main")
+-- ... entry source, verbatim ...
 ```
 
 Why each piece is there:
 
-- **`package.preload[name]`** — standard `require()` finds the loader here before searching the filesystem, so the embedded copy is used and caching in `package.loaded` works unchanged.
-- **`local _ENV = _ENV` in the enclosing `do` block** — makes `_ENV` the loader's *first upvalue*, which Lua 5.2's `module`/`_ENV` handling depends on. It lives outside the function on purpose.
-- **`package.loaded[name] = true` before the body runs** — breaks circular `require()` chains the same way Lua's own loader does.
-- **`local arg = _G.arg`** — restores the global `arg` table inside vararg functions (Lua 5.1 `LUA_COMPAT_VARARG` would otherwise shadow it). Disable with `--no-arg-fix`.
+- **`package.preload[name]`** — standard `require()` finds the loader here before searching the filesystem, so the embedded copy is used, and `require` itself manages `package.loaded`: a module is cached once it has loaded, a module that raised while loading is not, and a require cycle fails as it does natively (Lua 5.1, LuaJIT and Tarantool report the loop; later versions run out of C stack).
+- **Registered only when the slot is empty** — a loader the embedding application put in `package.preload` before running the program wins over the embedded copy, as it wins over the file on `package.path` natively; so does LuaJIT's built-in `table.new`.
+- **The `_ENV` local in the enclosing `do` block** — makes `_ENV` the loader's *first upvalue*, which Lua 5.2's `module`/`_ENV` handling depends on. It lives outside the function on purpose. On Lua 5.1, LuaJIT and Tarantool `_ENV` is an ordinary name, and the `and` keeps the line from reading it as a global, which strict mode would reject.
+- **`local __luamerge_loader = function(...)`** — the name comes into scope only after the function, so the module's code sees no local of the wrapper: its globals stay globals whatever their names, and the function's local variable slots are all the module's.
+- **The `arg` line** — PUC Lua 5.1 (`LUA_COMPAT_VARARG`) gives every vararg function an implicit local `arg`, which would hide the global `arg` from the module; there the line fills that local with the global table. On every other interpreter the condition is false and the line touches nothing, so an assignment to `arg` in a module stays global. It reads the global with `rawget`, so a strict `_G` without a global `arg` does not make it raise. Disable with `--no-arg-fix`.
 - **Module source is emitted verbatim** (no reindentation) so multi-line `[[ ... ]]` string literals keep their exact contents.
+- **The entry's code last, at the top level** — it runs the way the interpreter runs a script: its `...` holds the command-line arguments, all of its return values are the bundle's, an "am I the main script?" check sees a script, and it is neither looked up through the searchers nor cached in `package.loaded`. A second bundle, or a second `dofile` of the same bundle, runs its entry again, and a library bundled into `mylib.lua` loads with `require("mylib")`.
 
-A module reachable under several names (aliases) gets one real loader on its primary name; the other names delegate via `return require("primary")`, so the body executes exactly once no matter which name is required.
+A module reachable under several names is registered under each of them with the same loader: natively each name is a module of its own, which runs once per name and sees its own name in `...`, and so it does in the bundle. A module that requires the entry by name gets the entry the same way, as a module of its own, next to the main chunk. The names `--package-prefix` generates are different: each loads the name it was generated from (`return require("utils")`), so both give the same module; they are registered after every module and never take a name from a module of the project.
+
+`--prefix` code runs first, in a `do ... end` block of its own, so its locals are visible to nothing else. With `--suffix` the entry becomes a function: the bundle calls it with its own `...`, keeps every result, runs the suffix in a block of its own and returns the results.
 
 ## CLI flags
 
@@ -131,13 +125,13 @@ A module reachable under several names (aliases) gets one real loader on its pri
 | `--debug` | Load modules via `load(src, "@file")` so tracebacks keep the original `file:line` | `false` |
 | `--fallback` | Register modules in `package.postload` behind a searcher so on-disk modules win | `false` |
 | `--shebang` | Shebang written as the first line of the bundle (e.g. `#!/usr/bin/env lua`) | – |
-| `--no-arg-fix` | Omit the `local arg = _G.arg` alias (only needed on Lua 5.1 with `LUA_COMPAT_VARARG`) | – |
+| `--no-arg-fix` | Omit the `arg` line, which only acts on PUC Lua 5.1 (`LUA_COMPAT_VARARG`): there it restores the global `arg` inside module code | – |
 | `--remove-comments` | Strip Lua comments from output | `false` |
 | `--remove-empty-lines` | Strip empty/whitespace-only lines | `false` |
 | `--minify` | Minify source (subsumes comment / empty-line / shebang removal) | `false` |
 | `--strip-shebang` | Remove shebang lines from input module sources | `false` |
-| `--prefix` | Lua code inserted before the modules | – |
-| `--suffix` | Lua code appended after the entry `require` | – |
+| `--prefix` | Lua code run before the modules are registered, in a block of its own | – |
+| `--suffix` | Lua code run after the entry, in a block of its own | – |
 | `--package-prefix` | Add a prefix to all module names in output (e.g. `mypkg` → `require("mypkg.module")`) | – |
 | `--strip-prefix` | Strip a prefix from module names during resolution (e.g. `tuple_diff` → file `lib/foo.lua`) | – |
 | `--package-name` | Convenience: sets both `--strip-prefix` and `--package-prefix` to this value | – |
@@ -167,12 +161,12 @@ search:
 strict: false
 debug: false        # load() each module so tracebacks keep original file:line
 fallback: false     # prefer on-disk modules over embedded copies
-arg_fix: true       # emit `local arg = _G.arg` (set false for amalg's -a)
+arg_fix: true       # emit the arg line for PUC Lua 5.1 (set false for amalg's -a)
 shebang: ""         # e.g. "#!/usr/bin/env lua"
 
-# prefix: |          # Lua code inserted before modules
+# prefix: |          # Lua code run before the modules are registered
 #   print("starting")
-# suffix: |          # Lua code appended after the entry require
+# suffix: |          # Lua code run after the entry
 #   print("done")
 
 # package_name: "mypkg"     # convenience: strip + re-add the prefix
@@ -234,7 +228,7 @@ lua: bundle.lua:142: attempt to call a nil value
 lua: src/lib/parser.lua:17: attempt to call a nil value
 ```
 
-In debug mode each module is embedded as a string and run through `load(src, "@path")`, so the VM keeps the original chunk name and line numbers. Keep it **off for releases**: it adds a runtime dependency on `load`/`loadstring`, defeats `luac` precompilation, and is meaningless alongside line-altering transforms like `--minify`.
+In debug mode each module, and the entry, is embedded as a string and run through `load(src, "@path")` in the environment the bundle runs in, so the VM keeps the original chunk name and line numbers. A module is compiled only when it is first required. Keep it **off for releases**: it adds a runtime dependency on `load`/`loadstring`, defeats `luac` precompilation, and is meaningless alongside line-altering transforms like `--minify`.
 
 ### Ship a bundle but override a module locally
 
@@ -263,6 +257,8 @@ luamerge --entry src/main.lua \
   --suffix 'print("bundle loaded")' \
   --output bundle.lua
 ```
+
+The prefix runs before any module is registered, in a block of its own, and the bundle's own code reads no undeclared global, so it works under strict mode (Tarantool's `strict` here). The suffix runs after the entry; the bundle still returns whatever the entry returns.
 
 ### Package a library so it resolves to a flat file layout
 
@@ -379,38 +375,76 @@ Some projects name their modules with a package prefix that the directory layout
 
 ## Output format
 
-Normal (default):
+Normal (default) — a module required as both `mymod` and `mymod.init` is registered under both names:
 
 ```lua
 -- Amalgamated by luamerge
 -- Entry: main
 
 do
-local _ENV = _ENV
-package.preload["mymod"] = function(...)
-  local name = ...
-  package.loaded[name] = true
-  local arg = _G.arg
+local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
+local __luamerge_loader = function(...)
+if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 -- module source, verbatim
 end
+if package.preload["mymod"] == nil then package.preload["mymod"] = __luamerge_loader end
+if package.preload["mymod.init"] == nil then package.preload["mymod.init"] = __luamerge_loader end
 end
-return require("main")
+-- entry source, verbatim
 ```
 
-Debug (`--debug`) — bodies are loaded with their original chunk name:
+With `--package-prefix mypkg`, each generated name is registered after every module and loads the name it was generated from:
+
+```lua
+if package.preload["mypkg.mymod"] == nil then
+  package.preload["mypkg.mymod"] = function(...) return require("mymod") end
+end
+```
+
+With `--prefix` and `--suffix` — the prefix gets a block of its own, and the entry becomes a function whose results the bundle keeps while the suffix runs:
 
 ```lua
 do
-local _ENV = _ENV
-package.preload["mymod"] = function(...)
-  local name = ...
-  package.loaded[name] = true
-  local arg = _G.arg
-  return assert((loadstring or load)([[
+-- prefix code
+end
+
+-- ... modules ...
+local __luamerge_main = (function()
+local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
+return function(...)
+if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
+-- entry source, verbatim
+end
+end)()
+local __luamerge_n, __luamerge_results = (function(...) return select("#", ...), { ... } end)(__luamerge_main(...))
+do
+-- suffix code
+end
+return (table.unpack or unpack)(__luamerge_results, 1, __luamerge_n)
+```
+
+Debug (`--debug`) — bodies are embedded as strings and loaded with their file's path (absolute) as the chunk name, in the bundle's environment:
+
+```lua
+local __luamerge_load
+do
+local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
+__luamerge_load = function(source, chunkname)
+  local chunk = assert((rawget(_G, "loadstring") or load)(source, chunkname, "t", _ENV))
+  if _ENV == nil then setfenv(chunk, getfenv(1)) end
+  return chunk
+end
+end
+
+do
+local __luamerge_loader = function(...) return __luamerge_load([[
 -- module source, verbatim
-]], "@src/mymod.lua"))(...)
+]], "@/path/to/project/src/mymod.lua")(...) end
+if package.preload["mymod"] == nil then package.preload["mymod"] = __luamerge_loader end
 end
-end
+return __luamerge_load([[
+-- entry source, verbatim
+]], "@/path/to/project/src/main.lua")(...)
 ```
 
 Fallback (`--fallback`) — a searcher is appended and loaders go into `package.postload`:
@@ -437,6 +471,10 @@ end
 - **C modules** (`.so`/`.dll`) are not embedded; they remain runtime requires.
 - **Parsing is Lua 5.1 syntax** (via the gopher-lua parser); some Lua 5.2+ syntax may not parse. The *generated* bundle runs on 5.1–5.4 and LuaJIT.
 - **No asset embedding** — only `.lua` modules are bundled.
+- **Every module is compiled when the bundle loads.** Each module must compile on the interpreter that runs the bundle, even one the program only tries through `pcall(require, ...)`: natively such a module fails when it is required, in the bundle the whole bundle fails to load. With `--debug` a module is compiled when it is first required.
+- **Modules inherit the bundle's environment.** Natively `require` runs a module in the global environment; in a bundle, modules and the entry run in the environment the bundle itself was loaded with, in both modes. That differs only when a host loads the bundle with an environment of its own (`setfenv`, or `load`'s `env` argument).
+- **With `--suffix`, the entry runs one stack level deeper than a script**, inside a function the bundle calls and returns from before the suffix runs. A check that counts stack levels to tell whether it is the main script, such as `pcall(debug.getlocal, 4, 1)`, sees a module there on every interpreter but Tarantool. So does it with `--debug` on PUC Lua 5.1, where the bundle's call of the entry's chunk leaves a tail-call level.
+- **Module code runs inside a vararg function.** On PUC Lua 5.1 and Lua 5.5 such a function keeps one of its 200 local variable slots for itself, so a module can declare at most 199 locals at its top level there (200 natively); the same holds for the entry with `--suffix`. On PUC Lua 5.1 an assignment to `arg` in a module (or, with `--suffix`, in the entry) sets that function's implicit `arg` local, not the global.
 
 ## Contributing
 

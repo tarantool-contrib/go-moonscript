@@ -22,9 +22,10 @@ var errNoName = errors.New("the module has no name")
 
 // Options controls how the bundle is rendered.
 type Options struct {
-	// Prefix is Lua code inserted before the modules.
+	// Prefix is Lua code run before the modules are registered, in a block of
+	// its own.
 	Prefix string
-	// Suffix is Lua code run after the entry.
+	// Suffix is Lua code run after the entry, in a block of its own.
 	Suffix string
 	// Debug emits each module via load(source, "@path") so runtime errors
 	// report the original file name and line numbers instead of offsets into

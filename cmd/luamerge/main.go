@@ -68,13 +68,13 @@ func run() int {
 	pflag.Var(&fallback, "fallback",
 		"Register modules in package.postload behind a searcher so on-disk modules take precedence")
 	pflag.Var(&noArgFix, "no-arg-fix",
-		"Omit the 'local arg = _G.arg' alias (only needed on Lua 5.1 with LUA_COMPAT_VARARG)")
+		"Omit the arg line, which only acts on PUC Lua 5.1 (LUA_COMPAT_VARARG), where it restores the global arg")
 	pflag.Var(&removeComments, "remove-comments", "Strip Lua comments from output")
 	pflag.Var(&removeEmptyLines, "remove-empty-lines", "Strip empty lines from output")
 	pflag.Var(&minify, "minify", "Minify Lua source in output")
 	pflag.Var(&stripShebang, "strip-shebang", "Remove shebang line (#!/...) from Lua files")
-	pflag.StringVar(&prefix, "prefix", "", "Prefix Lua code inserted before modules")
-	pflag.StringVar(&suffix, "suffix", "", "Suffix Lua code appended after entry require")
+	pflag.StringVar(&prefix, "prefix", "", "Prefix Lua code run before the modules are registered")
+	pflag.StringVar(&suffix, "suffix", "", "Suffix Lua code run after the entry")
 	pflag.StringVar(&shebang, "shebang", "",
 		"Shebang line written as the first line of the bundle (e.g. '#!/usr/bin/env lua')")
 	pflag.StringVar(&packagePrefix, "package-prefix", "",

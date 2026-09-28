@@ -33,20 +33,23 @@ debug: false
 # for overriding a bundled module locally during development (default: false).
 fallback: false
 
-# Emit `local arg = _G.arg` inside each module to restore the global arg table
-# under Lua 5.1's LUA_COMPAT_VARARG. Set false for amalg's -a (default: true).
+# Emit the arg line in front of each module's code. It acts on PUC Lua 5.1
+# only, where LUA_COMPAT_VARARG hides the global arg table inside the function
+# around the module; the line restores it. Set false for amalg's -a
+# (default: true).
 arg_fix: true
 
 # Shebang written as the very first line of the bundle, making it directly
 # executable (optional). Example: "#!/usr/bin/env lua"
 # shebang: "#!/usr/bin/env lua"
 
-# Prefix Lua code inserted before modules (optional)
+# Prefix Lua code run before the modules are registered, in a block of its own
+# (optional)
 # prefix: |
 #   print("Bundle starting")
 #   -- initialization
 #
-# Suffix Lua code appended after entry require (optional)
+# Suffix Lua code run after the entry, in a block of its own (optional)
 # suffix: |
 #   print("Bundle loaded")
 #   -- extra initialization

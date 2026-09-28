@@ -5,8 +5,9 @@
 //
 // It performs static require() analysis — modules are discovered by parsing
 // source, without running the program — and registers each module into Lua's
-// native package.preload table, so the bundle relies on Lua's own loader for
-// caching and cycle-breaking.
+// native package.preload table, so the bundle relies on Lua's own require for
+// caching and for reporting failed loads and cycles. The entry's code is the
+// bundle's main chunk, so the program runs as a script does.
 //
 // This package is the public API, intended for embedding into other tools.
 // The command-line interface lives in cmd/luamerge and is a thin wrapper over
