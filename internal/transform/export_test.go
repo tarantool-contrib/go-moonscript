@@ -13,6 +13,3 @@ type EmptyLineTransformerForTest = emptyLineTransformer
 
 // MinifyTransformerForTest is minifyTransformer, exported for tests.
 type MinifyTransformerForTest = minifyTransformer
-
-// ShebangTransformerForTest is shebangTransformer, exported for tests.
-type ShebangTransformerForTest = shebangTransformer

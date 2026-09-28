@@ -38,7 +38,6 @@ type TransformConfig struct {
 	RemoveComments   bool `yaml:"remove_comments"`
 	RemoveEmptyLines bool `yaml:"remove_empty_lines"`
 	Minify           bool `yaml:"minify"`
-	StripShebang     bool `yaml:"strip_shebang"`
 }
 
 // Config is the fully resolved luamerge configuration, merged from defaults,
@@ -84,7 +83,6 @@ func Default() Config {
 			RemoveComments:   false,
 			RemoveEmptyLines: false,
 			Minify:           false,
-			StripShebang:     false,
 		},
 		Prefix:          "",
 		Suffix:          "",

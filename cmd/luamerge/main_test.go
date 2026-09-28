@@ -96,6 +96,19 @@ func TestCLI_Shebang(t *testing.T) {
 	assert.True(t, strings.HasPrefix(out, "#!/usr/bin/env lua\n"), "shebang must be first line")
 }
 
+// TestCLI_NoStripShebang: --strip-shebang is gone. Every file's header is
+// skipped the way the interpreter skips it, so the flag had nothing left to
+// do; it never did anything, since the bundler stripped a shebang anyway.
+func TestCLI_NoStripShebang(t *testing.T) {
+	t.Parallel()
+
+	dir := writeProject(t)
+	out, stderr, code := runCLI(t, append(base(dir), "--strip-shebang")...)
+	assert.Equal(t, 2, code, "an unknown flag is a usage error\n%s", stderr)
+	assert.Contains(t, stderr, "unknown flag: --strip-shebang")
+	assert.Empty(t, out, "no bundle is written")
+}
+
 func TestCLI_NoArgFix(t *testing.T) {
 	t.Parallel()
 

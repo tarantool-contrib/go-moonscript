@@ -1,6 +1,5 @@
 // Package transform implements source-to-source transformations applied to
-// merged Lua output, such as comment stripping, empty-line removal, shebang
-// stripping and minification.
+// merged Lua output: comment stripping, empty-line removal and minification.
 package transform
 
 import (

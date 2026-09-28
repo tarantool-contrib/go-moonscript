@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI (`cmd/luamerge`) with YAML config, `LUAMERGE_*` environment overrides and
   flags: entry/output/root/path/search, `--skip`/`--include`, `--strict`,
   `--debug`, `--fallback`, `--shebang`, transform flags
-  (`--remove-comments`, `--remove-empty-lines`, `--minify`, `--strip-shebang`),
+  (`--remove-comments`, `--remove-empty-lines`, `--minify`),
   `--prefix`/`--suffix`, and package-name remapping
   (`--package-prefix`, `--strip-prefix`, `--package-name`).
 - Configuration is assembled and merged (defaults → YAML file → `LUAMERGE_*`
@@ -66,6 +66,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   natively; a hyphenated root such as `my-app` still auto-strips `my_app.`,
   as before. Use `--strip-prefix` or `--package-name` for a prefix that
   isn't hyphenated.
+
+### Removed
+
+- `--strip-shebang`, the `transform.strip_shebang` setting and
+  `TransformOptions.StripShebang`. Every file's header is skipped the way
+  the interpreter skips it, so there is nothing left for them to do, and
+  they made no difference before either: the bundler stripped a shebang
+  from every file anyway. `--shebang` sets the first line of the bundle. As
+  no release had them, they are removed without a deprecation period: the
+  flag is an unknown flag now, and the setting an unknown key.
 
 ### Fixed
 

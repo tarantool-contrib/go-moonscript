@@ -32,7 +32,7 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 - **Accurate tracebacks** (`--debug`) — runtime errors report the original `file:line`, not an offset into the bundle.
 - **Dev overrides** (`--fallback`) — ship a bundle but let an on-disk module take precedence during development.
 - **Directly executable output** (`--shebang`) — prepend a shebang and run the bundle as a program.
-- **Source transforms** — strip comments, blank lines, shebangs, or minify.
+- **Source transforms** — strip comments or blank lines, or minify.
 - **Module-name remapping** — strip/add package prefixes so library modules resolve to a flat file layout.
 - **Cross-version output** — works on Lua 5.1–5.4 and LuaJIT (the `_ENV`/`arg` handling is version-aware).
 
@@ -131,7 +131,6 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 | `--remove-comments` | Remove comments, keeping line numbers (see [Source transforms](#source-transforms)) | `false` |
 | `--remove-empty-lines` | Remove lines that hold only white space, outside strings and comments | `false` |
 | `--minify` | Remove comments and the white space between tokens (see [Source transforms](#source-transforms)) | `false` |
-| `--strip-shebang` | Remove shebang lines from input module sources | `false` |
 | `--prefix` | Lua code run before the modules are registered, in a block of its own | – |
 | `--suffix` | Lua code run after the entry, in a block of its own | – |
 | `--package-prefix` | Add a prefix to all module names in output (e.g. `mypkg` → `require("mypkg.module")`) | – |
@@ -193,7 +192,6 @@ transform:
   remove_comments: false
   remove_empty_lines: false
   minify: false
-  strip_shebang: false
 ```
 
 ### Environment variables

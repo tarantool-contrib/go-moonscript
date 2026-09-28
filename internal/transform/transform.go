@@ -15,10 +15,6 @@ func BuildPipeline(cfg config.TransformConfig) []Transformer {
 	if cfg.Minify {
 		pipeline = append(pipeline, &minifyTransformer{})
 	} else {
-		if cfg.StripShebang {
-			pipeline = append(pipeline, &shebangTransformer{})
-		}
-
 		if cfg.RemoveComments {
 			pipeline = append(pipeline, &commentTransformer{})
 		}

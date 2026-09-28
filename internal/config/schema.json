@@ -69,10 +69,6 @@
                 "minify": {
                     "$ref": "#/$defs/bool",
                     "default": false
-                },
-                "strip_shebang": {
-                    "$ref": "#/$defs/bool",
-                    "default": false
                 }
             },
             "default": {}

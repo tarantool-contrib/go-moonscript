@@ -50,7 +50,7 @@ const (
 type Options = config.Config
 
 // TransformOptions controls source rewriting applied to each module before it
-// is embedded (comment/blank-line/shebang stripping and minification).
+// is embedded (comment and blank-line stripping, and minification).
 type TransformOptions = config.TransformConfig
 
 // Warning describes a non-fatal issue found while building the dependency

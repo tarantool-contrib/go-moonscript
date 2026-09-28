@@ -53,7 +53,6 @@ transform:
   remove_comments: true
   remove_empty_lines: false
   minify: false
-  strip_shebang: true
 `
 	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0600))
 
@@ -71,7 +70,6 @@ transform:
 	assert.True(t, cfg.Transform.RemoveComments, "Transform.RemoveComments = false, want true")
 	assert.False(t, cfg.Transform.RemoveEmptyLines, "Transform.RemoveEmptyLines = true, want false")
 	assert.False(t, cfg.Transform.Minify, "Transform.Minify = true, want false")
-	assert.True(t, cfg.Transform.StripShebang, "Transform.StripShebang = false, want true")
 	assert.Equal(t, "print(\"prefix\")\n", cfg.Prefix, "Prefix = %q, want %q", cfg.Prefix, "print(\"prefix\")\\n")
 	assert.Equal(t, "print(\"suffix\")\n", cfg.Suffix, "Suffix = %q, want %q", cfg.Suffix, "print(\"suffix\")\\n")
 }
@@ -84,6 +82,23 @@ func TestLoadConfigSchemaRejectsUnknownKey(t *testing.T) {
 
 	_, err := config.LoadConfig(configPath)
 	require.Error(t, err, "unknown config key should fail schema validation")
+}
+
+// TestLoadConfig_RejectsStripShebang: transform.strip_shebang is gone, like
+// the --strip-shebang flag, and an unknown key is an error, in the file and
+// in the environment.
+func TestLoadConfig_RejectsStripShebang(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "luamerge.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("transform:\n  strip_shebang: true\n"), 0600))
+
+	_, err := config.LoadConfig(configPath)
+	require.ErrorContains(t, err, "strip_shebang", "the key in the file")
+
+	// t.Setenv forbids t.Parallel().
+	t.Setenv("LUAMERGE_TRANSFORM_STRIP_SHEBANG", "true")
+
+	_, err = config.LoadConfig("does-not-exist.yaml")
+	require.ErrorContains(t, err, "strip_shebang", "the key in the environment")
 }
 
 func TestLoadConfigSchemaRejectsBadBoolString(t *testing.T) {
@@ -176,7 +191,6 @@ func TestSchemaDefaultsMatchDefault(t *testing.T) {
 		"remove_comments":    def.Transform.RemoveComments,
 		"remove_empty_lines": def.Transform.RemoveEmptyLines,
 		"minify":             def.Transform.Minify,
-		"strip_shebang":      def.Transform.StripShebang,
 	}
 	for key, want := range nested {
 		prop, ok := transform.Properties[key]
@@ -257,7 +271,6 @@ func TestResolveRoot(t *testing.T) {
 			RemoveComments:   false,
 			RemoveEmptyLines: false,
 			Minify:           false,
-			StripShebang:     false,
 		},
 		Prefix:          "",
 		Suffix:          "",
@@ -291,7 +304,6 @@ func TestResolveRootWithEntryMissing(t *testing.T) {
 			RemoveComments:   false,
 			RemoveEmptyLines: false,
 			Minify:           false,
-			StripShebang:     false,
 		},
 		Prefix:          "",
 		Suffix:          "",
@@ -323,7 +335,6 @@ func TestShouldSkip(t *testing.T) {
 			RemoveComments:   false,
 			RemoveEmptyLines: false,
 			Minify:           false,
-			StripShebang:     false,
 		},
 		Prefix:          "",
 		Suffix:          "",

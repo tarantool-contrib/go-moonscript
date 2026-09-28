@@ -42,7 +42,6 @@ func run() int {
 		removeComments   optionalBool
 		removeEmptyLines optionalBool
 		minify           optionalBool
-		stripShebang     optionalBool
 		debug            optionalBool
 		fallback         optionalBool
 		noArgFix         optionalBool
@@ -72,7 +71,6 @@ func run() int {
 	pflag.Var(&removeComments, "remove-comments", "Strip Lua comments from output")
 	pflag.Var(&removeEmptyLines, "remove-empty-lines", "Strip empty lines from output")
 	pflag.Var(&minify, "minify", "Minify Lua source in output")
-	pflag.Var(&stripShebang, "strip-shebang", "Remove shebang line (#!/...) from Lua files")
 	pflag.StringVar(&prefix, "prefix", "", "Prefix Lua code run before the modules are registered")
 	pflag.StringVar(&suffix, "suffix", "", "Suffix Lua code run after the entry")
 	pflag.StringVar(&shebang, "shebang", "",
@@ -90,7 +88,7 @@ func run() int {
 	// swallows the next token as the flag's value).
 	for _, name := range []string{
 		"strict", "remove-comments", "remove-empty-lines",
-		"minify", "strip-shebang", "debug", "fallback", "no-arg-fix",
+		"minify", "debug", "fallback", "no-arg-fix",
 	} {
 		pflag.Lookup(name).NoOptDefVal = "true"
 	}
@@ -149,7 +147,6 @@ func run() int {
 		{removeComments, &cfg.Transform.RemoveComments},
 		{removeEmptyLines, &cfg.Transform.RemoveEmptyLines},
 		{minify, &cfg.Transform.Minify},
-		{stripShebang, &cfg.Transform.StripShebang},
 	}
 	for _, ov := range boolOverrides {
 		if ov.flag.set {

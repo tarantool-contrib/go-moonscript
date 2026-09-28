@@ -89,13 +89,10 @@ arg_fix: true
 transform:
   # Remove Lua comments (-- line, --[[ block ]])
   remove_comments: false
-  
-  # Remove empty/whitespace-only lines  
+
+  # Remove empty/whitespace-only lines
   remove_empty_lines: false
-  
+
   # Minify Lua source (implies remove_comments and remove_empty_lines)
   # Basic minification: reduces whitespace, removes comments and empty lines
   minify: false
-  
-  # Remove shebang line (#!/usr/bin/env lua) from the beginning of Lua files
-  strip_shebang: false

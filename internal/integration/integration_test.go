@@ -43,7 +43,6 @@ func bundler(opts emit.Options, tweak func(cfg *config.Config)) luatest.Bundler 
 				RemoveComments:   false,
 				RemoveEmptyLines: false,
 				Minify:           false,
-				StripShebang:     false,
 			},
 			Prefix:          "",
 			Suffix:          "",
