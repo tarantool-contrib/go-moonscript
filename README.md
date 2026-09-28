@@ -373,13 +373,14 @@ func build() error {
 }
 ```
 
-Public API:
+Public API — every type is declared in package `luamerge` itself, so `go doc github.com/tarantool/go-luamerge Options` lists each setting with its documentation:
 
-- `luamerge.Options` — all bundling settings (entry, root, path, transforms, `Debug`, `Fallback`, `Shebang`, `ArgFix`, prefixes, skip/include, …). `Bundle` writes to the `io.Writer` you give it and ignores `Options.Output`.
+- `luamerge.Options` — all bundling settings (entry, root, path, `Transform` (a `TransformOptions`), `Debug`, `Fallback`, `Shebang`, `ArgFix`, prefixes, skip/include, …). `Bundle` writes to the `io.Writer` you give it and ignores `Options.Output`.
 - `luamerge.DefaultOptions() Options` — defaults matching the CLI.
-- `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars. `""` means `luamerge.yaml` in the working directory, which may be absent; a file named explicitly must exist (a missing one is an error matching `fs.ErrNotExist`). The options come back as given, with the `package_name` convenience left to `Bundle`, so any field can still be changed.
+- `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars. `""` means `luamerge.yaml` in the working directory, which may be absent; a file named explicitly must exist (a missing one is an error matching `fs.ErrNotExist`). A setting fills the field of the same name (`skip_packages` is `SkipPackages`). The options come back as given, with the `package_name` convenience left to `Bundle`, so any field can still be changed.
 - `luamerge.Bundle(opts Options, w io.Writer) (*Result, error)` — runs the full pipeline; resolves the root and the `package_name` convenience itself.
-- `luamerge.Result{ Warnings []Warning; Files []string }` — non-fatal issues, and the absolute path of every source file embedded in the bundle (the entry first). Each `Warning` is machine-readable: `Kind` (`WarnDynamicRequire`, `WarnSkipped`, `WarnUnresolved`, `WarnCModule`, `WarnNonLua`, `WarnIndirectRequire`, `WarnShadowsBuiltin`, `WarnTokenScan`), `Module` (the require name), plus `File`/`Line`/`Message` for display.
+- `luamerge.Result{ Warnings []Warning; Files []string }` — non-fatal issues, and the absolute path of every source file embedded in the bundle (the entry first). Each `Warning` is machine-readable: `Kind`, a `WarningKind` (`WarnDynamicRequire`, `WarnSkipped`, `WarnUnresolved`, `WarnCModule`, `WarnNonLua`, `WarnIndirectRequire`, `WarnShadowsBuiltin`, `WarnTokenScan`) whose `String()` is its name (`dynamic-require`, `skipped`, `unresolved`, `c-module`, `non-lua`, `indirect-require`, `shadows-builtin`, `token-scan`), `Module` (the require name), plus `File`/`Line`/`Message` for display.
+- `luamerge.ErrNoEntry`, `luamerge.ErrModuleNotFound` and `*luamerge.UnresolvedError` — the errors to classify, below.
 
 Errors are classifiable rather than string-matched:
 
@@ -394,7 +395,7 @@ case errors.Is(err, luamerge.ErrModuleNotFound):
 }
 ```
 
-Implementation packages live under `internal/` and are intentionally not importable; build against the facade above.
+Implementation packages live under `internal/` and are intentionally not importable, and none of their types or methods is part of the API; build against the facade above.
 
 ## Finding requires
 

@@ -125,14 +125,14 @@ func run() int {
 
 	// Only a file named with --config must exist. Without the flag, or with
 	// an empty value, the default file is read if it is there. configPath is
-	// what LoadConfig takes, and config.FilePath(configPath) the file it reads.
+	// what LoadOptions takes, and config.FilePath(configPath) the file it
+	// reads.
 	if !flags.Changed("config") {
 		configPath = ""
 	}
 
-	// Load defaults, the YAML config file and LUAMERGE_ environment variables
-	// via go-config.
-	cfg, err := config.LoadConfig(configPath)
+	// Load defaults, the YAML config file and LUAMERGE_ environment variables.
+	opts, err := luamerge.LoadOptions(configPath)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
@@ -145,17 +145,17 @@ func run() int {
 		val  string
 		dst  *string
 	}{
-		{"entry", entry, &cfg.Entry},
-		{"root", root, &cfg.Root},
-		{"path", path, &cfg.Path},
-		{"prefix", prefix, &cfg.Prefix},
-		{"suffix", suffix, &cfg.Suffix},
-		{"shebang", shebang, &cfg.Shebang},
+		{"entry", entry, &opts.Entry},
+		{"root", root, &opts.Root},
+		{"path", path, &opts.Path},
+		{"prefix", prefix, &opts.Prefix},
+		{"suffix", suffix, &opts.Suffix},
+		{"shebang", shebang, &opts.Shebang},
 		// strip-prefix / package-prefix / package-name must run before the
 		// package_name convenience is applied by Bundle.
-		{"strip-prefix", stripPrefix, &cfg.StripPrefix},
-		{"package-prefix", packagePrefix, &cfg.PackagePrefix},
-		{"package-name", packageName, &cfg.PackageName},
+		{"strip-prefix", stripPrefix, &opts.StripPrefix},
+		{"package-prefix", packagePrefix, &opts.PackagePrefix},
+		{"package-name", packageName, &opts.PackageName},
 	}
 	for _, ov := range stringOverrides {
 		if flags.Changed(ov.name) {
@@ -166,7 +166,7 @@ func run() int {
 	// An empty --output leaves the output to the configuration, whose default
 	// is stdout, as the flag's help says; a file named "" does not exist.
 	if flags.Changed("output") && output != "" {
-		cfg.Output = output
+		opts.Output = output
 	}
 
 	// optionalBool flags are tri-state: apply only when the flag was given.
@@ -174,12 +174,12 @@ func run() int {
 		flag optionalBool
 		dst  *bool
 	}{
-		{strict, &cfg.Strict},
-		{debug, &cfg.Debug},
-		{fallback, &cfg.Fallback},
-		{removeComments, &cfg.Transform.RemoveComments},
-		{removeEmptyLines, &cfg.Transform.RemoveEmptyLines},
-		{minify, &cfg.Transform.Minify},
+		{strict, &opts.Strict},
+		{debug, &opts.Debug},
+		{fallback, &opts.Fallback},
+		{removeComments, &opts.Transform.RemoveComments},
+		{removeEmptyLines, &opts.Transform.RemoveEmptyLines},
+		{minify, &opts.Transform.Minify},
 	}
 	for _, ov := range boolOverrides {
 		if ov.flag.set {
@@ -188,7 +188,7 @@ func run() int {
 	}
 	// --no-arg-fix is the CLI inverse of the positive arg_fix config option.
 	if noArgFix.set {
-		cfg.ArgFix = !noArgFix.value
+		opts.ArgFix = !noArgFix.value
 	}
 
 	// A list flag replaces the configured list, as every flag overrides its
@@ -198,9 +198,9 @@ func run() int {
 		val  multiString
 		dst  *[]string
 	}{
-		{"search", search, &cfg.Search},
-		{"skip", skip, &cfg.SkipPackages},
-		{"include", include, &cfg.IncludePackages},
+		{"search", search, &opts.Search},
+		{"skip", skip, &opts.SkipPackages},
+		{"include", include, &opts.IncludePackages},
 	}
 	for _, ov := range listOverrides {
 		if flags.Changed(ov.name) {
@@ -209,24 +209,24 @@ func run() int {
 	}
 
 	// Entry is required.
-	if cfg.Entry == "" {
+	if opts.Entry == "" {
 		_, _ = fmt.Fprintln(os.Stderr, "error: --entry is required (or set in config file)")
 		return 1
 	}
 
 	// Render the whole bundle into memory before touching the output (the
-	// library Bundle ignores cfg.Output), so that nothing is written unless the
-	// build succeeds.
+	// library Bundle ignores opts.Output), so that nothing is written unless
+	// the build succeeds.
 	var bundle bytes.Buffer
 
-	res, err := luamerge.Bundle(cfg, &bundle)
+	res, err := luamerge.Bundle(opts, &bundle)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
 
 	// The config file is as much an input as the sources are.
-	err = putOutput(cfg.Output, bundle.Bytes(), slices.Concat(res.Files, []string{config.FilePath(configPath)}))
+	err = putOutput(opts.Output, bundle.Bytes(), slices.Concat(res.Files, []string{config.FilePath(configPath)}))
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tarantool/go-luamerge/internal/config"
 	"github.com/tarantool/go-luamerge/internal/emit"
 	"github.com/tarantool/go-luamerge/internal/graph"
 	"github.com/tarantool/go-luamerge/internal/parse"
@@ -26,49 +25,31 @@ var ErrModuleNotFound = resolve.ErrModuleNotFound
 // (`pcall(require, "x")`, `xpcall(require, h, "x")`), which stays a
 // WarnUnresolved warning. Recover it with errors.As, or test the cause with
 // errors.Is(err, ErrModuleNotFound).
-type UnresolvedError = graph.UnresolvedError
-
-// WarningKind classifies a Warning; see the Warn* constants.
-type WarningKind = graph.WarningKind
-
-// Warning kinds, re-exported from the graph package.
-const (
-	WarnDynamicRequire = graph.WarnDynamicRequire
-	WarnSkipped        = graph.WarnSkipped
-	WarnUnresolved     = graph.WarnUnresolved
-	WarnCModule        = graph.WarnCModule
-	WarnNonLua         = graph.WarnNonLua
-	// WarnIndirectRequire is require used other than by a call — aliased
-	// (`local r = require`), stored or passed on as a value — so the modules
-	// loaded through it are not embedded; list them in
+type UnresolvedError struct {
+	// Module is the name of the module that cannot be found.
+	Module string
+	// File is the file of the require, empty for a module of
 	// Options.IncludePackages.
-	WarnIndirectRequire = graph.WarnIndirectRequire
-	// WarnShadowsBuiltin is a module of the project required by the name of
-	// a module some runtimes have built in (a pure-Lua bit.lua or utf8.lua,
-	// a csv.lua on Tarantool). The module is embedded, but where the runtime
-	// has its own module of that name require loads that one, as natively;
-	// the message names those runtimes.
-	WarnShadowsBuiltin = graph.WarnShadowsBuiltin
-	// WarnTokenScan is a module the parser cannot read, usually for a syntax
-	// error. It is embedded, and its requires were found by scanning its
-	// tokens: the calls of require are found, but a local named require is
-	// taken for the global one. Line is where the parser failed.
-	WarnTokenScan = graph.WarnTokenScan
-)
+	File string
+	// Line is the line of the require in File, 0 without a file.
+	Line int
+	// Err is the cause, which names the files the module was looked for in
+	// and wraps ErrModuleNotFound.
+	Err error
+}
 
-// Options configures a bundling run. The zero value is not valid — at minimum
-// Entry must be set; prefer starting from DefaultOptions. The Output field is
-// ignored by Bundle (which writes to the io.Writer it is given) and exists for
-// callers that load options from a config file.
-type Options = config.Config
+// Error returns the module's name, the position of the require, when there is
+// one, and the cause.
+func (e *UnresolvedError) Error() string {
+	if e.File == "" {
+		return fmt.Sprintf("unresolved require %q: %v", e.Module, e.Err)
+	}
 
-// TransformOptions controls source rewriting applied to each module before it
-// is embedded (comment and blank-line stripping, and minification).
-type TransformOptions = config.TransformConfig
+	return fmt.Sprintf("unresolved require %q at %s:%d: %v", e.Module, e.File, e.Line, e.Err)
+}
 
-// Warning describes a non-fatal issue found while building the dependency
-// graph, such as a dynamic or unresolved require that could not be bundled.
-type Warning = graph.Warning
+// Unwrap returns the cause, Err.
+func (e *UnresolvedError) Unwrap() error { return e.Err }
 
 // Result is returned by Bundle alongside the written output.
 type Result struct {
@@ -88,28 +69,6 @@ type Result struct {
 	Files []string
 }
 
-// DefaultOptions returns Options populated with the same defaults the CLI uses
-// (stdout output, `?.lua;?/init.lua` path, arg-fix on, all transforms off).
-func DefaultOptions() Options {
-	return config.Default()
-}
-
-// LoadOptions reads Options from a YAML config file and LUAMERGE_* environment
-// variables, layered over the defaults. An empty path means luamerge.yaml in
-// the working directory, which may be absent: then the defaults plus the
-// environment are returned. A file named explicitly must exist; a missing one
-// is an error matching fs.ErrNotExist. The options are returned as given, with
-// the package_name convenience left to Bundle, so any field may still be
-// changed.
-func LoadOptions(path string) (Options, error) {
-	cfg, err := config.LoadConfig(path)
-	if err != nil {
-		return Options{}, fmt.Errorf("luamerge: load options: %w", err)
-	}
-
-	return cfg, nil
-}
-
 // Bundle amalgamates the project described by opts and writes the resulting Lua
 // source to w. It resolves the project root and the package_name convenience
 // itself, so a caller only needs to set the fields it cares about. opts is
@@ -119,30 +78,31 @@ func Bundle(opts Options, w io.Writer) (*Result, error) {
 		return nil, ErrNoEntry
 	}
 
-	opts.ApplyPackageName()
+	cfg := configFromOptions(opts)
+	cfg.ApplyPackageName()
 
-	err := opts.ResolveRoot()
+	err := cfg.ResolveRoot()
 	if err != nil {
 		return nil, fmt.Errorf("luamerge: %w", err)
 	}
 
 	parser := parse.New()
-	resolver := resolve.NewWithPrefix(opts.Root, opts.Search, opts.Path, opts.StripPrefix)
+	resolver := resolve.NewWithPrefix(cfg.Root, cfg.Search, cfg.Path, cfg.StripPrefix)
 
-	g, err := graph.Build(&opts, parser, resolver)
+	g, err := graph.Build(&cfg, parser, resolver)
 	if err != nil {
-		return nil, fmt.Errorf("luamerge: build graph: %w", err)
+		return nil, fmt.Errorf("luamerge: build graph: %w", unresolvedFromGraph(err))
 	}
 
-	transforms := transform.BuildPipeline(opts.Transform)
+	transforms := transform.BuildPipeline(cfg.Transform)
 
 	emitOpts := emit.Options{
-		Prefix:   opts.Prefix,
-		Suffix:   opts.Suffix,
-		Shebang:  opts.Shebang,
-		Debug:    opts.Debug,
-		Fallback: opts.Fallback,
-		NoArgFix: !opts.ArgFix,
+		Prefix:   cfg.Prefix,
+		Suffix:   cfg.Suffix,
+		Shebang:  cfg.Shebang,
+		Debug:    cfg.Debug,
+		Fallback: cfg.Fallback,
+		NoArgFix: !cfg.ArgFix,
 	}
 
 	err = emit.Emit(w, g, transforms, emitOpts)
@@ -156,5 +116,22 @@ func Bundle(opts Options, w io.Writer) (*Result, error) {
 		files[i] = mod.FilePath
 	}
 
-	return &Result{Warnings: g.Warnings, Files: files}, nil
+	return &Result{Warnings: warningsFromGraph(g.Warnings), Files: files}, nil
+}
+
+// unresolvedFromGraph returns err, an error of graph.Build, with the
+// *graph.UnresolvedError it may be, which Build returns unwrapped, replaced by
+// an *UnresolvedError.
+func unresolvedFromGraph(err error) error {
+	var unresolved *graph.UnresolvedError
+	if !errors.As(err, &unresolved) {
+		return err
+	}
+
+	return &UnresolvedError{
+		Module: unresolved.Module,
+		File:   unresolved.File,
+		Line:   unresolved.Line,
+		Err:    unresolved.Err,
+	}
 }

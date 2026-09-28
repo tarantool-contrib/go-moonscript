@@ -78,6 +78,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A value of `--search`, `--skip` or `--include` is a comma-separated list, as
   in the environment: `--skip cjson,socket` skips both, and `--skip ''` clears
   the list from the config file. The comma used to be part of one item.
+- The types of the public API are declared in package `luamerge` itself.
+  `Options`, `TransformOptions`, `Warning`, `WarningKind` and
+  `UnresolvedError` were aliases of types of internal packages, so `go doc`
+  showed none of their fields, and the methods of the internal configuration
+  (`ApplyPackageName`, `ResolveRoot`, `ShouldSkip`) could be called on
+  `Options`. The fields, the `Warn*` constants and their names stay the same,
+  and so do `errors.As` and `errors.Is(err, ErrModuleNotFound)`. `Options`
+  has no YAML struct tags: `LoadOptions` reads the configuration file.
 
 ### Removed
 

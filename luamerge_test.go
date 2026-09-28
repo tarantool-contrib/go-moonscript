@@ -2,6 +2,7 @@ package luamerge_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,7 +54,7 @@ func TestBundle(t *testing.T) {
 	res, err := luamerge.Bundle(opts, &buf)
 	require.NoError(t, err)
 	require.NotNil(t, res)
-	assert.Empty(t, res.Warnings)
+	assert.Nil(t, res.Warnings, "no warnings: the zero value")
 
 	out := buf.String()
 	assert.Contains(t, out, `package.preload["module"]`)
@@ -238,6 +239,61 @@ func TestBundleStrictError(t *testing.T) {
 	require.ErrorAs(t, err, &ue)
 	assert.Equal(t, "does_not_exist", ue.Module)
 	assert.ErrorIs(t, err, luamerge.ErrModuleNotFound)
+}
+
+// TestBundle_UnresolvedError checks the error Bundle returns in strict mode
+// for a module that cannot be found: its fields, its message, which gives the
+// position of the require when there is one, and its cause.
+func TestBundle_UnresolvedError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		main    string
+		include []string
+		module  string
+		line    int
+		inFile  bool
+	}{
+		{name: "require", main: "local x\nrequire(\"nope\")\n", include: nil, module: "nope", line: 2, inFile: true},
+		{name: "include", main: "return 1\n", include: []string{"none"}, module: "none", line: 0, inFile: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange.
+			dir := testResolvedDir(t)
+			entry := filepath.Join(dir, "main.lua")
+			require.NoError(t, os.WriteFile(entry, []byte(tt.main), 0o600))
+
+			opts := luamerge.DefaultOptions()
+			opts.Entry = entry
+			opts.IncludePackages = tt.include
+			opts.Strict = true
+
+			file, position := "", ""
+			if tt.inFile {
+				file = entry
+				position = fmt.Sprintf(" at %s:%d", entry, tt.line)
+			}
+
+			// Act.
+			_, err := luamerge.Bundle(opts, &bytes.Buffer{})
+
+			// Assert.
+			var unresolved *luamerge.UnresolvedError
+			require.ErrorAs(t, err, &unresolved)
+			assert.Equal(t, tt.module, unresolved.Module)
+			assert.Equal(t, file, unresolved.File)
+			assert.Equal(t, tt.line, unresolved.Line)
+			require.ErrorIs(t, unresolved.Err, luamerge.ErrModuleNotFound, "the cause")
+			assert.Equal(t,
+				fmt.Sprintf("luamerge: build graph: unresolved require %q%s: %v", tt.module, position, unresolved.Err),
+				err.Error(), "the message")
+		})
+	}
 }
 
 func TestBundleMissingEntry(t *testing.T) {
