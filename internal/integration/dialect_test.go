@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,6 +39,15 @@ func pucLuaFrom(minor int) dialects {
 		n, ok := pucLuaMinor(interp)
 
 		return ok && n >= minor
+	}
+}
+
+// pucLuaOnly is PUC Lua 5.minor for each of minors.
+func pucLuaOnly(minors ...int) dialects {
+	return func(interp luatest.Interpreter) bool {
+		n, ok := pucLuaMinor(interp)
+
+		return ok && slices.Contains(minors, n)
 	}
 }
 
@@ -135,8 +145,28 @@ type dialectCase struct {
 	readers dialects
 }
 
-// dialectCases are the constructs of every dialect.
+// dialectCases are the constructs of every dialect: first each on its own,
+// then next to requires, which must be found.
 func dialectCases() []dialectCase {
+	return slices.Concat([]dialectCase{
+		{name: "floor division", module: "return 7 // 2\n", stdout: "3\n", readers: pucLuaFrom(3)},
+		{name: "bitwise operators", module: "return 5 & 3 | 8\n", stdout: "9\n", readers: pucLuaFrom(3)},
+		{name: "shift", module: "return 1 << 4\n", stdout: "16\n", readers: pucLuaFrom(3)},
+		{name: "const", module: "local x <const> = 42 return x\n", stdout: "42\n", readers: pucLuaFrom(4)},
+		{
+			name: "hexadecimal float", module: "return 0x1p4 == 16\n", stdout: "true\n",
+			readers: anyDialect(pucLuaFrom(2), luaJIT),
+		},
+		{name: "global declaration", module: "global print; return \"g\"\n", stdout: "g\n", readers: pucLuaFrom(5)},
+		{name: "unsigned 64-bit integer", module: "return tostring(1ULL)\n", stdout: "1ULL\n", readers: luaJIT},
+		{name: "64-bit integer", module: "return tostring(0x10LL)\n", stdout: "16LL\n", readers: luaJIT},
+		{name: "imaginary number", module: "return tostring(2i)\n", stdout: "0+2i\n", readers: luaJIT},
+	}, dialectRequireCases())
+}
+
+// dialectRequireCases are modules that require n.lua next to the constructs
+// of a dialect.
+func dialectRequireCases() []dialectCase {
 	return []dialectCase{
 		{
 			name:    "form feed and vertical tab",
@@ -149,6 +179,85 @@ func dialectCases() []dialectCase {
 			module:  "local s = \"c\\z\n           d\"\nlocal n = require(\"n\")\nreturn s .. n\n",
 			stdout:  "cdn\n",
 			readers: anyDialect(pucLuaFrom(2), luaJIT),
+		},
+		{
+			name: "Lua 5.3 operators",
+			module: "local n = require(\"n\")\n" +
+				"local v = 7 // 2 + (5 & 3 | 8) + (1 << 4) + (~0 ~ 1) + (256 >> 4)\n" +
+				"local m = require(\"n\")\n" +
+				"return v .. n .. m\n",
+			stdout:  "42nn\n",
+			readers: pucLuaFrom(3),
+		},
+		{
+			name: "Lua 5.4 attributes",
+			module: "local n <const> = require(\"n\")\n" +
+				"local c <close> = nil\n" +
+				"local m <const> = require(\"n\")\n" +
+				"return n .. m\n",
+			stdout:  "nn\n",
+			readers: pucLuaFrom(4),
+		},
+		{
+			name: "Lua 5.5 declarations",
+			module: "local <const> a, b = require(\"n\"), 1\n" +
+				"global <const> print, require, tostring\n" +
+				"local m = require(\"n\")\n" +
+				"global function twice(s) return s .. s end\n" +
+				"return twice(a) .. m .. tostring(b)\n",
+			stdout:  "nnn1\n",
+			readers: pucLuaFrom(5),
+		},
+		{
+			name: "LuaJIT numerals",
+			module: "local n = require(\"n\")\n" +
+				"local v = 0x10LL + 1ULL + 0b101\n" +
+				"local m = require(\"n\")\n" +
+				"return tostring(v) .. n .. m\n",
+			stdout:  "22ULLnn\n",
+			readers: luaJIT,
+		},
+		{
+			name:    "LuaJIT names beyond ASCII",
+			module:  "local \xD0\xBF = require(\"n\")\nreturn \xD0\xBF\n",
+			stdout:  "n\n",
+			readers: luaJIT,
+		},
+		{
+			// Some LuaJIT builds read goto as a name too, Tarantool's
+			// among them; where the original runs, it is compared.
+			name:    "goto as a name",
+			module:  "local goto = require(\"n\")\nreturn goto\n",
+			stdout:  "n\n",
+			readers: pucLuaOnly(1),
+		},
+		{
+			name:    "Lua 5.2 statement after break",
+			module:  "local n\nfor i = 1, 2 do\n  n = require(\"n\")\n  break\n  n = nil\nend\nreturn n\n",
+			stdout:  "n\n",
+			readers: pucLuaFrom(2),
+		},
+		{
+			name: "Lua 5.2 call across a line break",
+			module: "local function id(...) return ... end\n" +
+				"local f = function() return id end\n" +
+				"local n = f()\n" +
+				"(require(\"n\"))\n" +
+				"return n\n",
+			stdout:  "n\n",
+			readers: pucLuaFrom(2),
+		},
+		{
+			name:    "Lua 5.1 numerals before a concatenation",
+			module:  "local n = 1e1..require(\"n\")\nreturn 0x10..n\n",
+			stdout:  "1610n\n",
+			readers: pucLuaOnly(1),
+		},
+		{
+			name:    "Lua 5.2 numeral before a keyword",
+			module:  "local x, n = 3, nil\nif x == 3then n = require(\"n\") end\nreturn n\n",
+			stdout:  "n\n",
+			readers: pucLuaOnly(2, 3),
 		},
 	}
 }

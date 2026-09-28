@@ -22,8 +22,8 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 ### Requirements
 
 - Go 1.26.5 or later (to build the CLI or import the library).
-- A Lua interpreter (5.1–5.4 or LuaJIT) to *run* the produced bundle. It is not
-  required to build one.
+- A Lua interpreter (Lua 5.1 to 5.5, LuaJIT or Tarantool) to *run* the produced
+  bundle. It is not required to build one.
 
 ## Features
 
@@ -34,7 +34,7 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 - **Directly executable output** (`--shebang`) — prepend a shebang and run the bundle as a program.
 - **Source transforms** — strip comments or blank lines, or minify.
 - **Module-name remapping** — strip/add package prefixes so library modules resolve to a flat file layout.
-- **Cross-version output** — works on Lua 5.1–5.4 and LuaJIT (the `_ENV`/`arg` handling is version-aware).
+- **Every Lua dialect** — modules may be written for Lua 5.1 to 5.5, LuaJIT or Tarantool, and the bundle works on each of them (the `_ENV`/`arg` handling is version-aware).
 
 ## Installation
 
@@ -396,6 +396,12 @@ case errors.Is(err, luamerge.ErrModuleNotFound):
 
 Implementation packages live under `internal/` and are intentionally not importable; build against the facade above.
 
+## Finding requires
+
+Every file is read with a lexer that knows the syntax of Lua 5.1 to 5.5, LuaJIT and Tarantool, and the [gopher-lua](https://github.com/yuin/gopher-lua) parser, which reads Lua 5.1, gets a copy of it with the newer syntax written the Lua 5.1 way: the operators of Lua 5.3 (`//`, `&`, `|`, `~`, `<<`, `>>`), the attributes of Lua 5.4 and 5.5 (`<const>`, `<close>`), the `global` declarations of Lua 5.5, hexadecimal floats, the numerals of LuaJIT and Tarantool (`1LL`, `0x10ULL`, `2i`, `0b101`), a statement after `break` (Lua 5.2), names beyond ASCII (LuaJIT) and the string escapes Lua 5.1 does not have. Every token of the copy stays on its line, so a warning names the line of the file. The copy is only read to find the requires: the bundle embeds every file as it is.
+
+Where the dialects read the same text differently, it is read the way the dialect that accepts it reads it. A string is decoded as Lua 5.2 and later, LuaJIT and Tarantool decode it: `require("\x61x")` loads the module `ax`, where Lua 5.1 reads an escape it does not know as the character after the backslash, `x61x`. `goto` is a name where it cannot start a `goto` statement (Lua 5.1, LuaJIT), and `global` wherever it does not start a Lua 5.5 declaration. A numeral ends before `..` where Lua 5.1 ends it (`1e5..x`), and before a letter where Lua 5.2 and 5.3 end it (`3then`).
+
 ## Module resolution
 
 A `require()` name is resolved the way Lua's own `require` finds a Lua module, with `package.searchpath`, as if the program ran from `root`:
@@ -528,7 +534,7 @@ end
 - **Dynamic requires** (`require(someVariable)`, `pcall(require, name)`) are detected but can't be resolved statically — they produce a `dynamic-require` warning and are left as runtime requires.
 - **Indirect uses of `require`** — aliasing it (`local r = require`), storing it in a table, passing it to a function — hide the calls made through it: they produce an `indirect-require` warning, and the modules loaded that way are embedded only if listed with `--include`. A presence check such as `if not require then` is reported the same way. Calls are recognized as `require(…)`, `_G.require(…)`, `_ENV.require(…)`, `pcall(require, …)` and `xpcall(require, handler, …)`, by name and without scope analysis: `local require = require` keeps the calls visible, and a local function named `require` is taken for the global one.
 - **C modules** (`.so`/`.dll`) are not embedded; they remain runtime requires.
-- **Parsing is Lua 5.1 syntax** (via the gopher-lua parser); some Lua 5.2+ syntax may not parse. The *generated* bundle runs on 5.1–5.4 and LuaJIT.
+- **Module names are decoded as Lua 5.2 and later decode them.** On Lua 5.1, which reads an escape it does not know as the character after the backslash, `require("\x61x")` loads the module `x61x`, but the bundler embeds `ax` (see [Finding requires](#finding-requires)).
 - **No asset embedding** — only `.lua` modules are bundled.
 - **Every module is compiled when the bundle loads.** Each module must compile on the interpreter that runs the bundle, even one the program only tries through `pcall(require, ...)`: natively such a module fails when it is required, in the bundle the whole bundle fails to load. With `--debug` a module is compiled when it is first required.
 - **Modules inherit the bundle's environment.** Natively `require` runs a module in the global environment; in a bundle, modules and the entry run in the environment the bundle itself was loaded with, in both modes. That differs only when a host loads the bundle with an environment of its own (`setfenv`, or `load`'s `env` argument).

@@ -296,5 +296,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for `x61x`, `u{62}ar` and `cz   z`, and the modules the program loads were
   not embedded. A string with a `\z` escape over a line break, and a form
   feed or a vertical tab between tokens, no longer fail the build.
+- A module written for Lua 5.2 to 5.5, LuaJIT or Tarantool bundles, and its
+  requires are found on their lines: next to the operators of Lua 5.3 (`//`,
+  `&`, `|`, `~`, `<<`, `>>`), the attributes of Lua 5.4 and 5.5
+  (`<const>`, `<close>`), the `global` declarations of Lua 5.5, hexadecimal
+  floats, the 64-bit integer, imaginary and binary numerals of LuaJIT and
+  Tarantool (`1ULL`, `0x10LL`, `2i`, `0b101`), a statement after `break`,
+  names beyond ASCII, and `goto` used as a name. Every module was parsed as
+  Lua 5.1, so any of these failed the whole build with a syntax error.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
