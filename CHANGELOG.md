@@ -70,5 +70,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Release archives now include a `darwin_arm64` build for Apple Silicon
   Macs. GoReleaser's build matrix excluded that target under a comment
   claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.
+- A module name resolves like Lua's `package.searchpath`: relative to the
+  root, then to each search directory, and never relative to the file that
+  requires it. A project with `util.lua` and `sub/util.lua` used to get
+  `sub/util.lua` embedded as `util` for every module, with no warning even
+  with `--strict`; now `util` is `util.lua`, as it is when the program runs
+  from the root. The `--strip-prefix`, `--package-name`, root-name and
+  search-directory-name prefix stripping applies only when that lookup finds
+  nothing, and one module name registered for two different files is an
+  error.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

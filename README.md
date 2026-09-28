@@ -360,22 +360,21 @@ Implementation packages live under `internal/` and are intentionally not importa
 
 ## Module resolution
 
-`require("foo.bar")` is resolved like Lua's `package.searchpath`:
+A `require()` name is resolved the way Lua's own `require` finds a Lua module, with `package.searchpath`, as if the program ran from `root`:
 
-1. Dots become the path separator (`foo/bar`).
-2. Each search location is tried in order: the entry's directory, `root`, then each `--search` directory.
-3. At each location, every template in `--path` is applied (`?.lua`, then `?/init.lua`, …).
-4. The first matching file wins.
+1. Dots become the directory separator (`foo.bar` → `foo/bar`). A name written as a path, one that contains a `/` or starts with a `.`, is used as it is.
+2. The result replaces the `?` of every template in `--path` (`?.lua`, then `?/init.lua`, …), relative to `root` and then relative to each `--search` directory, in order. For `--search lib` that is the `package.path` `./?.lua;./?/init.lua;lib/?.lua;lib/?/init.lua`.
+3. The first readable file wins.
 
-Relative/path-style requires (`require("./foo")`, `require("../bar")`) are supported.
+The file that contains the `require()` plays no part, as in Lua: `require("util")` is `root/util.lua` in every module, including one in `sub/` next to a `sub/util.lua`. One module name registered for two different files is an error.
 
 ### Prefix stripping
 
-For projects whose module names carry a package prefix that isn't mirrored in the directory layout:
+Some projects name their modules with a package prefix that the directory layout does not mirror. A name that the lookup above finds nowhere is tried again without such a prefix. Only then, so a prefix is never stripped from a name that Lua itself would load a file for:
 
-- **`--strip-prefix tuple_diff`** — strips `tuple_diff.` before resolution, so `require("tuple_diff.lib.foo")` finds `lib/foo.lua`.
-- **Auto-detection** — if the root directory name contains hyphens (e.g. `tuple-diff`), it's converted to `tuple_diff` and used as a strip prefix automatically.
-- **Search-directory prefix** — when a module is found under `lib/`, the `lib.` prefix is also stripped (`lib.config` → `config`).
+- **`--strip-prefix tuple_diff`** — strips `tuple_diff.`, so `require("tuple_diff.lib.foo")` finds `lib/foo.lua`.
+- **Root name** — when `--strip-prefix` does not apply, the root directory's name is stripped the same way, a hyphen in it read as an underscore (root `tuple-diff` strips `tuple_diff.`).
+- **Search-directory name** — in a search directory named `lib`, a leading `lib.` is stripped too, so `require("lib.config")` also finds `config.lua` there.
 - **`--package-name mypkg`** — strip *and* re-add the prefix, so a library bundles from a flat layout yet stays `require("mypkg.*")`-compatible.
 
 ## Output format

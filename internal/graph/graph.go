@@ -3,6 +3,7 @@
 package graph
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,6 +94,11 @@ func (e *UnresolvedError) Error() string {
 }
 
 func (e *UnresolvedError) Unwrap() error { return e.Err }
+
+// ErrNameConflict is the cause Build wraps when one module name is registered
+// for two different files. The bundle carries one loader per name, so one
+// file would silently replace the other for every caller.
+var ErrNameConflict = errors.New("module name conflict")
 
 // Module is a single Lua source file discovered while building the graph,
 // along with every require-string that resolves to it.
@@ -213,6 +219,13 @@ func addModuleName(mod *Module, name string) {
 	}
 }
 
+// Resolver locates the file of a require()d module name. A name resolves the
+// same wherever it is required from, as with Lua's own require.
+// *resolve.Resolver is the implementation.
+type Resolver interface {
+	Resolve(name string) (*resolve.Result, error)
+}
+
 // resolveTarget resolves a single require()/--include target against the
 // graph: it records a warning (or returns an *UnresolvedError in strict mode)
 // when the target can't be used, dedupes against an already-known module, and
@@ -221,9 +234,9 @@ func addModuleName(mod *Module, name string) {
 // produced only a warning, or deduped into an existing module) and needs no
 // further work.
 func resolveTarget(
-	g *Graph, resolver *resolve.Resolver, cfg *config.Config, searchDir string, target requireTarget,
+	g *Graph, resolver Resolver, cfg *config.Config, target requireTarget,
 ) (*Module, bool, error) {
-	result, err := resolver.Resolve(target.Name, searchDir)
+	result, err := resolver.Resolve(target.Name)
 	if err != nil {
 		if cfg.Strict {
 			return nil, false, &UnresolvedError{Module: target.Name, File: target.File, Line: target.Line, Err: err}
@@ -293,7 +306,7 @@ func resolveTarget(
 }
 
 func processIncludePackages(
-	g *Graph, resolver *resolve.Resolver, cfg *config.Config, queue []*Module,
+	g *Graph, resolver Resolver, cfg *config.Config, queue []*Module,
 ) ([]*Module, error) {
 	for _, incName := range cfg.IncludePackages {
 		if cfg.ShouldSkip(incName) {
@@ -310,7 +323,7 @@ func processIncludePackages(
 
 		target := requireTarget{Name: incName, File: "", Line: 0}
 
-		newMod, created, err := resolveTarget(g, resolver, cfg, cfg.Root, target)
+		newMod, created, err := resolveTarget(g, resolver, cfg, target)
 		if err != nil {
 			return nil, err
 		}
@@ -324,7 +337,7 @@ func processIncludePackages(
 }
 
 func processModuleRequires(
-	g *Graph, resolver *resolve.Resolver, cfg *config.Config, mod *Module, parser parse.Parser,
+	g *Graph, resolver Resolver, cfg *config.Config, mod *Module, parser parse.Parser,
 ) ([]*Module, error) {
 	requires, err := parser.Parse(mod.Source, mod.FilePath)
 	if err != nil {
@@ -376,7 +389,7 @@ func processModuleRequires(
 
 		target := requireTarget{Name: req.Name, File: mod.FilePath, Line: req.Line}
 
-		newMod, created, err := resolveTarget(g, resolver, cfg, filepath.Dir(mod.FilePath), target)
+		newMod, created, err := resolveTarget(g, resolver, cfg, target)
 		if err != nil {
 			return nil, err
 		}
@@ -389,10 +402,33 @@ func processModuleRequires(
 	return newMods, nil
 }
 
+// checkNames returns an error wrapping ErrNameConflict when a module name is
+// registered for two different files. A name resolves the same wherever it
+// is required from, so this guards against a resolver breaking that, and
+// against a name given to the entry by its path that another file resolves
+// to.
+func checkNames(g *Graph) error {
+	owners := make(map[string]*Module)
+
+	for _, mod := range g.Modules {
+		for _, name := range mod.Names {
+			owner, ok := owners[name]
+			if ok && owner != mod {
+				return fmt.Errorf("%w: %q is registered for both %s and %s",
+					ErrNameConflict, name, owner.FilePath, mod.FilePath)
+			}
+
+			owners[name] = mod
+		}
+	}
+
+	return nil
+}
+
 // Build parses cfg.Entry and every file it (transitively) requires into a
 // Graph, resolving require() targets via resolver and parsing source via
 // parser.
-func Build(cfg *config.Config, parser parse.Parser, resolver *resolve.Resolver) (*Graph, error) {
+func Build(cfg *config.Config, parser parse.Parser, resolver Resolver) (*Graph, error) {
 	err := cfg.ResolveRoot()
 	if err != nil {
 		return nil, fmt.Errorf("resolve root: %w", err)
@@ -447,6 +483,11 @@ func Build(cfg *config.Config, parser parse.Parser, resolver *resolve.Resolver) 
 		}
 
 		queue = append(queue, newMods...)
+	}
+
+	err = checkNames(g)
+	if err != nil {
+		return nil, err
 	}
 
 	applyPackagePrefix(g, cfg.PackagePrefix)

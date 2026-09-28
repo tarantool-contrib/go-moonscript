@@ -1,5 +1,5 @@
 // Package resolve implements Lua module name resolution against a
-// configurable search path, mirroring Lua's require() semantics.
+// configurable search path, mirroring Lua's package.searchpath.
 package resolve
 
 import (
@@ -14,12 +14,12 @@ import (
 // located in any search path. Check it with errors.Is.
 var ErrModuleNotFound = errors.New("module not found")
 
-// Resolver locates Lua source files for require()-style module names by
-// searching a root directory, a set of additional directories, and a list
-// of path templates.
+// Resolver locates Lua source files for require()-style module names the way
+// Lua's package.searchpath does, with every template relative to the root
+// and then relative to each search directory; see Resolve.
 type Resolver struct {
-	Root        string   // base directory.
-	SearchDirs  []string // additional directories to search.
+	Root        string   // base directory: where the program runs.
+	SearchDirs  []string // additional directories to search, after the root.
 	Templates   []string // e.g. ["?.lua", "?/init.lua"].
 	StripPrefix string   // if set, strip this prefix from module names (e.g., "tuple_diff").
 }
@@ -27,7 +27,7 @@ type Resolver struct {
 // Result is the outcome of a successful module resolution.
 type Result struct {
 	FilePath string // absolute normalized path to .lua file.
-	ModName  string // canonical module name (dots notation).
+	ModName  string // the module name as required.
 }
 
 // New creates a Resolver with no package-prefix stripping.
@@ -36,7 +36,7 @@ func New(root string, searchDirs []string, pathTemplate string) *Resolver {
 }
 
 // NewWithPrefix creates a Resolver that strips stripPrefix from module names
-// before searching.
+// the native lookup cannot find.
 func NewWithPrefix(root string, searchDirs []string, pathTemplate, stripPrefix string) *Resolver {
 	templates := splitTemplates(pathTemplate)
 
@@ -67,124 +67,156 @@ func splitTemplates(path string) []string {
 	return result
 }
 
-// Resolve locates the Lua source file for name, searching fromDir, the
-// resolver's root, and its configured search directories, in that order.
-func (r *Resolver) Resolve(name string, fromDir string) (*Result, error) {
-	primaryLocations := []string{fromDir, r.Root}
-
-	searchLocations := make([]string, 0, len(primaryLocations)+len(r.SearchDirs))
-	searchLocations = append(searchLocations, primaryLocations...)
-	searchLocations = append(searchLocations, r.SearchDirs...)
-
+// Resolve locates the Lua source file for the module name like Lua's
+// package.searchpath: the name in path form (see NormalizeRequireName) is
+// substituted for every "?" of each template, and the first file that can be
+// read wins, trying all templates relative to the root and then relative to
+// each search directory, in order. Where the name is required from plays no
+// part: Lua resolves every name against package.path, relative to the working
+// directory, so a name means the same file wherever it is required.
+//
+// Only when that lookup finds nothing anywhere are the name extensions tried
+// (see extensionNames). Whenever Lua itself would load a file, Resolve returns
+// that same file.
+func (r *Resolver) Resolve(name string) (*Result, error) {
 	var tried []string
 
-	for _, loc := range searchLocations {
-		if loc == "" {
-			continue
+	for _, candidate := range r.candidates(name) {
+		file, err := filepath.Abs(candidate)
+		if err != nil {
+			return nil, fmt.Errorf("resolve module %q: %w", name, err)
 		}
 
-		// Generate normalized names specific to this location.
-		normalizedNames := generateNormalizedNamesForLocation(name, r.StripPrefix, r.Root, loc)
-		for _, normalized := range normalizedNames {
-			for _, tmpl := range r.Templates {
-				candidate := strings.ReplaceAll(tmpl, "?", normalized)
-				fullPath := filepath.Join(loc, candidate)
-
-				absPath, err := filepath.Abs(fullPath)
-				if err != nil {
-					continue
-				}
-
-				if fileExists(absPath) {
-					canonicalName := canonicalModuleName(name, absPath)
-
-					return &Result{
-						FilePath: absPath,
-						ModName:  canonicalName,
-					}, nil
-				}
-
-				tried = append(tried, fullPath)
-			}
+		if readable(file) {
+			return &Result{FilePath: file, ModName: name}, nil
 		}
+
+		tried = append(tried, candidate)
 	}
 
 	return nil, fmt.Errorf("module %q not found in any search location; tried:\n  %s: %w",
 		name, strings.Join(tried, "\n  "), ErrModuleNotFound)
 }
 
-func generateNormalizedNamesForLocation(name, stripPrefix, rootDir, location string) []string {
-	if strings.Contains(name, "/") || strings.HasPrefix(name, ".") {
-		return []string{name}
+// candidates are the files Resolve tries for name, in order: first the native
+// lookup at every location, then the extension names at every location. A
+// file that comes up twice is tried once.
+func (r *Resolver) candidates(name string) []string {
+	locations := r.locations()
+
+	var files []string
+
+	for _, loc := range locations {
+		files = append(files, r.files(loc, name)...)
 	}
 
-	var namesToTry []string
-
-	namesToTry = append(namesToTry, name)
-
-	// First, apply package prefix stripping.
-	if stripPrefix != "" && strings.HasPrefix(name, stripPrefix+".") {
-		stripped := strings.TrimPrefix(name, stripPrefix+".")
-		namesToTry = append(namesToTry, stripped)
-	} else if rootDir != "" {
-		// Try to auto-detect prefix from root directory name.
-		base := filepath.Base(rootDir)
-		normalizedBase := strings.ReplaceAll(base, "-", "_")
-
-		if stripped, ok := strings.CutPrefix(name, normalizedBase+"."); ok {
-			namesToTry = append(namesToTry, stripped)
+	for _, loc := range locations {
+		for _, alt := range r.extensionNames(name, loc) {
+			files = append(files, r.files(loc, alt)...)
 		}
 	}
 
-	// For search directories, try stripping the directory name itself
-	// e.g., searching in "lib/" for "lib.tuple_config" -> try "tuple_config".
-	if location != "" && location != rootDir {
-		base := filepath.Base(location)
-		if base != "" && base != "." && base != "/" {
-			// Check if the current name (or stripped version) starts with base.
-			for _, n := range namesToTry {
+	seen := make(map[string]bool, len(files))
+	unique := files[:0]
+
+	for _, file := range files {
+		if !seen[file] {
+			seen[file] = true
+			unique = append(unique, file)
+		}
+	}
+
+	return unique
+}
+
+// locations are the directories the templates are relative to: the root,
+// then each search directory.
+func (r *Resolver) locations() []string {
+	locations := make([]string, 0, 1+len(r.SearchDirs))
+
+	for _, loc := range append([]string{r.Root}, r.SearchDirs...) {
+		if loc != "" {
+			locations = append(locations, loc)
+		}
+	}
+
+	return locations
+}
+
+// files are the candidate files for name at loc, one per template.
+func (r *Resolver) files(loc, name string) []string {
+	path := NormalizeRequireName(name)
+	files := make([]string, 0, len(r.Templates))
+
+	for _, tmpl := range r.Templates {
+		files = append(files, filepath.Join(loc, strings.ReplaceAll(tmpl, "?", path)))
+	}
+
+	return files
+}
+
+// extensionNames are the names tried at loc once the native lookup of name
+// has failed at every location. They are the documented extensions over
+// package.searchpath, in order: name without the explicit strip prefix or,
+// when that does not apply, without the root directory's name (a hyphen in it
+// read as an underscore); then, at a search directory, name and the stripped
+// name without the directory's own name.
+func (r *Resolver) extensionNames(name, loc string) []string {
+	if isPathStyle(name) {
+		return nil
+	}
+
+	var names []string
+
+	if r.StripPrefix != "" && strings.HasPrefix(name, r.StripPrefix+".") {
+		names = append(names, strings.TrimPrefix(name, r.StripPrefix+"."))
+	} else if r.Root != "" {
+		base := strings.ReplaceAll(filepath.Base(r.Root), "-", "_")
+		if stripped, ok := strings.CutPrefix(name, base+"."); ok {
+			names = append(names, stripped)
+		}
+	}
+
+	if loc != r.Root {
+		// Searching in "lib/" for "lib.tuple_config" also tries "tuple_config".
+		base := filepath.Base(loc)
+		if base != "." && base != string(filepath.Separator) {
+			for _, n := range append([]string{name}, names...) {
 				if stripped, ok := strings.CutPrefix(n, base+"."); ok {
-					namesToTry = append(namesToTry, stripped)
+					names = append(names, stripped)
 				}
 			}
 		}
 	}
 
-	// Convert each name to path representation.
-	var result []string
-
-	seen := make(map[string]bool)
-
-	for _, n := range namesToTry {
-		normalized := strings.ReplaceAll(n, ".", string(filepath.Separator))
-		if !seen[normalized] {
-			seen[normalized] = true
-			result = append(result, normalized)
-		}
-	}
-
-	return result
+	return names
 }
 
 // NormalizeRequireName converts a dotted require() module name into its
 // path representation, leaving already-path-like names untouched.
 func NormalizeRequireName(name string) string {
-	if strings.Contains(name, "/") || strings.HasPrefix(name, ".") {
+	if isPathStyle(name) {
 		return name
 	}
 
 	return strings.ReplaceAll(name, ".", string(filepath.Separator))
 }
 
-func canonicalModuleName(requireName, _ string) string {
-	if strings.Contains(requireName, "/") || strings.HasPrefix(requireName, ".") {
-		return requireName
-	}
-
-	return requireName
+// isPathStyle reports whether name is written as a path: it contains a "/"
+// or starts with ".".
+func isPathStyle(name string) bool {
+	return strings.Contains(name, "/") || strings.HasPrefix(name, ".")
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+// readable reports whether path can be opened for reading, which is Lua's own
+// test for a candidate file (a directory passes it, as it does fopen).
+func readable(path string) bool {
+	file, err := os.Open(path) // #nosec G304 -- a candidate built from the configured search path
+	if err != nil {
+		return false
+	}
+
+	_ = file.Close()
+
+	return true
 }
