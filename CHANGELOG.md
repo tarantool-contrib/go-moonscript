@@ -173,5 +173,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the project with the same name (`p.x` generated from `x` hid the
   project's `p/x.lua`), depending on the order of the modules in the bundle.
   Generated names are now registered after every module.
+- An absolute template in `--path` (`--path "$PWD/lib/?.lua"`) resolves: it
+  is tried as is, once, instead of being joined under `root` and every
+  `--search` directory into a path nothing exports. An empty entry in
+  `--path`, from a leading, trailing or doubled `;`, now stands for the
+  default templates `?.lua;?/init.lua` at that position, instead of being
+  silently dropped.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

@@ -34,6 +34,12 @@ end
 // without package.searchpath.
 const probeNoSearchpath = 3
 
+// absTemplatePlaceholder in an oracleLayout's templates is replaced with the
+// layout's own on-disk root once writeOracleLayout has created it, so a
+// layout can name an absolute template without knowing the temp directory
+// ahead of time.
+const absTemplatePlaceholder = "{root}"
+
 // oracleLayout is a project the oracle resolves every name in.
 type oracleLayout struct {
 	// name identifies the layout in failure messages.
@@ -101,6 +107,28 @@ func oracleLayouts() []oracleLayout {
 			search:     nil,
 			templates:  "?.lua;?/?.lua;src/?.lua;?/init.lua",
 		},
+		{
+			// An absolute template (its "?" spelled as {root}/abslib/?.lua,
+			// an absolute path once expanded) names a file the relative
+			// templates cannot reach, and must resolve exactly once even
+			// though it is tried against the root and a search directory
+			// both: LUA_PATH's own semantics never repeat an absolute entry
+			// per search location, because a location is not what it is
+			// relative to. The search directory is named "aux", not "lib" or
+			// "vendor", so it stays clear of the "lib."/"vendor." names in
+			// oracleNames that probe the resolver's own prefix-stripping
+			// extension (a deliberate divergence from package.searchpath
+			// that this oracle does not otherwise exercise, see oracleNames).
+			name: "absolute-template",
+			files: []string{
+				"proj/local.lua", "proj/aux/shared.lua", "proj/abslib/only.lua",
+			},
+			dirs:       nil,
+			unreadable: nil,
+			root:       "proj",
+			search:     []string{"aux"},
+			templates:  "?.lua;" + absTemplatePlaceholder + "/abslib/?.lua;?/init.lua",
+		},
 	}
 }
 
@@ -137,14 +165,15 @@ func TestResolve_MatchesSearchpath(t *testing.T) {
 
 			base := writeOracleLayout(t, layout)
 			root := filepath.Join(base, layout.root)
+			templates := strings.ReplaceAll(layout.templates, absTemplatePlaceholder, root)
 
 			searchDirs := make([]string, 0, len(layout.search))
 			for _, dir := range layout.search {
 				searchDirs = append(searchDirs, filepath.Join(root, dir))
 			}
 
-			resolver := resolve.New(root, searchDirs, layout.templates)
-			path := luaPath(layout)
+			resolver := resolve.New(root, searchDirs, templates)
+			path := luaPath(layout.search, templates)
 			probe := writeProbe(t, names)
 
 			luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
@@ -165,7 +194,7 @@ func TestResolve_MatchesSearchpath(t *testing.T) {
 				if len(mismatches) > 0 {
 					t.Errorf("layout %q (root %s, search %v, templates %q): %d of %d names resolve differently "+
 						"from package.searchpath(name, %q) on %s:\n%s",
-						layout.name, layout.root, layout.search, layout.templates, len(mismatches), len(names), path,
+						layout.name, layout.root, layout.search, templates, len(mismatches), len(names), path,
 						interp.Name, strings.Join(mismatches, "\n"))
 				}
 			})
@@ -199,19 +228,36 @@ func writeOracleLayout(t *testing.T, layout oracleLayout) string {
 	return base
 }
 
-// luaPath is the package.path equivalent to the resolver of layout, for Lua
-// running in the root: every template relative to the root, then relative to
-// each search directory.
-func luaPath(layout oracleLayout) string {
-	var templates []string
+// luaPath is the package.path equivalent to a resolver searching search
+// (relative to the root Lua runs in) with templates (already expanded, as
+// --path takes them): every relative template relative to the root, then
+// relative to each search directory, in order. An absolute template names
+// the same file wherever it is tried, so — as it does for Resolve — it
+// appears once, at the position it would take for the root, not once per
+// location.
+func luaPath(search []string, templates string) string {
+	var path []string
 
-	for _, loc := range append([]string{"."}, layout.search...) {
-		for tmpl := range strings.SplitSeq(layout.templates, ";") {
-			templates = append(templates, loc+"/"+tmpl)
+	seenAbsolute := make(map[string]bool)
+
+	for _, loc := range append([]string{"."}, search...) {
+		for tmpl := range strings.SplitSeq(templates, ";") {
+			if filepath.IsAbs(tmpl) {
+				if seenAbsolute[tmpl] {
+					continue
+				}
+
+				seenAbsolute[tmpl] = true
+				path = append(path, tmpl)
+
+				continue
+			}
+
+			path = append(path, loc+"/"+tmpl)
 		}
 	}
 
-	return strings.Join(templates, ";")
+	return strings.Join(path, ";")
 }
 
 // writeProbe writes searchpathProbe and the names file into a fresh directory,
@@ -253,7 +299,17 @@ func searchpath(t *testing.T, interp luatest.Interpreter, root, path, probe stri
 		case line == "-":
 			files = append(files, "")
 		case strings.HasPrefix(line, "+"):
-			files = append(files, filepath.Join(root, strings.TrimPrefix(line, "+")))
+			// package.searchpath prints the entry as found: relative to
+			// root when the matching template was relative (interp ran with
+			// root as its working directory), already absolute when the
+			// matching template was an absolute path — joining root onto
+			// that would double it, exactly the bug this oracle guards.
+			found := strings.TrimPrefix(line, "+")
+			if filepath.IsAbs(found) {
+				files = append(files, filepath.Clean(found))
+			} else {
+				files = append(files, filepath.Join(root, found))
+			}
 		default:
 			t.Fatalf("the probe printed %q\n%s", line, result)
 		}

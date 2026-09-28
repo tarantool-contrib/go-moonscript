@@ -308,3 +308,79 @@ func TestResolve_NotFound(t *testing.T) {
 		filepath.Join(lib, "nope", "init.lua"),
 	}, strings.Split(list, "\n  "))
 }
+
+// TestResolve_AbsolutePathTemplate reproduces the review's own repro: a
+// template given as an absolute path resolves the file it names, the way
+// LUA_PATH="$PWD/lib/?.lua" does natively. Before the fix, the absolute
+// template was joined under the root like a relative one, doubling the root
+// into the candidate path so the file was never found.
+func TestResolve_AbsolutePathTemplate(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "lib"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "lib", "m.lua"), []byte("return \"LIB\"\n"), 0o600))
+
+	resolver := resolve.New(root, nil, filepath.Join(root, "lib", "?.lua"))
+
+	result, err := resolver.Resolve("m")
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(root, "lib", "m.lua"), result.FilePath)
+}
+
+// TestResolve_AbsoluteTemplateTriedOnce checks that an absolute template
+// names the same file no matter how many locations Resolve otherwise
+// searches (the root and every --search directory): it must not be tried
+// once per location, which would still be wrong even where it happens to
+// resolve, because the "tried" error would blame the wrong number of
+// candidates and a slower, repeated stat of the same absolute file.
+func TestResolve_AbsoluteTemplateTriedOnce(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	libDir := filepath.Join(tmpDir, "lib")
+	require.NoError(t, os.MkdirAll(libDir, 0o750))
+
+	root := filepath.Join(tmpDir, "proj")
+	require.NoError(t, os.MkdirAll(root, 0o750))
+
+	search := filepath.Join(tmpDir, "vendor")
+	require.NoError(t, os.MkdirAll(search, 0o750))
+
+	resolver := resolve.New(root, []string{search}, filepath.Join(libDir, "?.lua"))
+
+	_, err := resolver.Resolve("missing")
+
+	require.ErrorIs(t, err, resolve.ErrModuleNotFound)
+
+	tried := strings.Count(err.Error(), filepath.Join(libDir, "missing.lua"))
+	assert.Equal(t, 1, tried, "the absolute template must be tried once, not once per location: %v", err)
+}
+
+// TestResolve_EmptyTemplateEntryUsesDefault checks that an empty entry in
+// --path — from a leading, trailing or doubled ";" — expands to the default
+// templates ?.lua;?/init.lua in place, the same convention LUA_PATH's own
+// ";;" uses for "the default path here", instead of being silently dropped.
+func TestResolve_EmptyTemplateEntryUsesDefault(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	resolver := resolve.New(root, nil, "custom/?.lua;;other/?.lua")
+
+	result, err := resolver.Resolve("m")
+
+	require.ErrorIs(t, err, resolve.ErrModuleNotFound)
+	assert.Nil(t, result)
+
+	_, list, found := strings.Cut(err.Error(), "; tried:\n  ")
+	require.True(t, found, "the error lists the candidates: %v", err)
+
+	list = strings.TrimSuffix(list, ": "+resolve.ErrModuleNotFound.Error())
+	assert.Equal(t, []string{
+		filepath.Join(root, "custom", "m.lua"),
+		filepath.Join(root, "m.lua"),
+		filepath.Join(root, "m", "init.lua"),
+		filepath.Join(root, "other", "m.lua"),
+	}, strings.Split(list, "\n  "))
+}

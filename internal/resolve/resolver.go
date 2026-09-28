@@ -48,20 +48,35 @@ func NewWithPrefix(root string, searchDirs []string, pathTemplate, stripPrefix s
 	}
 }
 
+// defaultTemplates are the templates Resolve falls back to: what --path uses
+// when it is empty, and what an empty entry within --path expands to, in
+// place (see splitTemplates).
+func defaultTemplates() []string {
+	return []string{"?.lua", "?/init.lua"}
+}
+
 func splitTemplates(path string) []string {
 	if path == "" {
-		return []string{"?.lua", "?/init.lua"}
+		return defaultTemplates()
 	}
 
 	parts := strings.Split(path, ";")
 
 	var result []string
 
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			// A leading, trailing or doubled ";" produces an empty entry,
+			// the same way Lua's own LUA_PATH reads a doubled ";;" as "the
+			// default path here"; expand it instead of dropping it, or a
+			// caller who appends a search location to --path loses the
+			// built-in templates they meant to keep alongside it.
+			result = append(result, defaultTemplates()...)
+			continue
 		}
+
+		result = append(result, part)
 	}
 
 	return result
@@ -144,13 +159,25 @@ func (r *Resolver) locations() []string {
 	return locations
 }
 
-// files are the candidate files for name at loc, one per template.
+// files are the candidate files for name at loc, one per template. A
+// relative template is joined under loc, as package.searchpath joins a
+// relative package.path entry under the current directory; an absolute
+// template names the same file at every location, so it is used as is,
+// without loc, and candidates' final dedup collapses the repeats that
+// produces into the single try it deserves.
 func (r *Resolver) files(loc, name string) []string {
 	path := NormalizeRequireName(name)
 	files := make([]string, 0, len(r.Templates))
 
 	for _, tmpl := range r.Templates {
-		files = append(files, filepath.Join(loc, strings.ReplaceAll(tmpl, "?", path)))
+		substituted := strings.ReplaceAll(tmpl, "?", path)
+
+		if filepath.IsAbs(tmpl) {
+			files = append(files, filepath.Clean(substituted))
+			continue
+		}
+
+		files = append(files, filepath.Join(loc, substituted))
 	}
 
 	return files
