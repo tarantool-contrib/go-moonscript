@@ -37,10 +37,12 @@ type Options struct {
 	// Shebang, when non-empty, is written as the first line of the bundle
 	// (e.g. "#!/usr/bin/env lua") so the output is directly executable.
 	Shebang string
-	// NoArgFix omits the `local arg = _G.arg` alias from each module. The alias
-	// is emitted by default to counter the implicit `arg` local that Lua 5.1
-	// (LUA_COMPAT_VARARG) injects into vararg functions; set this to drop it
-	// when targeting an interpreter that doesn't need it (amalg's -a).
+	// NoArgFix omits the arg line from the function around each module body
+	// (and around the entry when there is a suffix). PUC Lua 5.1 with
+	// LUA_COMPAT_VARARG gives every vararg function an implicit local `arg`,
+	// which hides the global `arg` from the body; the line fills that local
+	// with the global table and touches nothing on any other interpreter. Set
+	// this to drop it (amalg's -a).
 	NoArgFix bool
 }
 
@@ -100,8 +102,7 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 		data := moduleData{
 			PrimaryName: mod.Names[0],
 			AliasNames:  mod.Names[1:],
-			Source:      source,
-			Path:        mod.FilePath,
+			Code:        codeData{Source: source, Path: mod.FilePath, ArgFix: !opts.NoArgFix},
 		}
 		moduleDataList = append(moduleDataList, data)
 	}
@@ -113,14 +114,13 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 
 	data := templateData{
 		EntryName: g.EntryName,
-		Entry:     entryData{Source: entrySource, Path: g.Entry.FilePath},
+		Entry:     codeData{Source: entrySource, Path: g.Entry.FilePath, ArgFix: !opts.NoArgFix},
 		Modules:   moduleDataList,
 		Prefix:    prefix,
 		Suffix:    suffix,
 		Shebang:   strings.TrimRight(opts.Shebang, "\n"),
 		Debug:     opts.Debug,
 		Fallback:  opts.Fallback,
-		NoArgFix:  opts.NoArgFix,
 		RegTable:  regTable,
 	}
 

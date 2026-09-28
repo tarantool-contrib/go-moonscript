@@ -129,7 +129,7 @@ func TestEmit_ModuleWithAliases(t *testing.T) {
 	bundle := emitBundle(t, g, defaults())
 
 	// The primary name carries the real loader; aliases delegate to it.
-	assert.Contains(t, bundle, "package.preload[\"foo\"] = function(...)")
+	assert.Contains(t, bundle, "package.preload[\"foo\"] = __luamerge_loader")
 	assert.Contains(t, bundle, "package.preload[\"foo.bar\"] = function(...) return require(\"foo\") end")
 	assertRuns(t, bundle, "true\t1\n")
 }
@@ -215,8 +215,12 @@ func TestEmit_NoArgFix(t *testing.T) {
 	off := defaults()
 	off.NoArgFix = true
 
-	assert.Contains(t, emitBundle(t, g, defaults()), "local arg = _G.arg", "arg alias should be present by default")
-	assert.NotContains(t, emitBundle(t, g, off), "local arg = _G.arg", "NoArgFix should omit the arg alias")
+	// The line runs on PUC Lua 5.1 only: what it does is tested by running
+	// bundles there, what is checked here is that NoArgFix drops it.
+	line := "if _VERSION == \"Lua 5.1\" and not rawget(_G, \"jit\") then arg = rawget(_G, \"arg\") end\n"
+	assert.Contains(t, emitBundle(t, g, defaults()), line, "the arg line is present by default")
+	assert.NotContains(t, emitBundle(t, g, off), "arg = rawget", "NoArgFix drops the arg line")
+	assertRuns(t, emitBundle(t, g, off), "m\n")
 }
 
 func TestEmit_PreservesMultilineString(t *testing.T) {

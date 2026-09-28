@@ -107,5 +107,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ran with the module that was still loading bound to `true`. The bundle no
   longer sets `package.loaded` before a module runs: `require` manages it, as
   natively.
+- The function around a module body declared locals of its own. A global
+  `name` read as the module's require name in every module, and an
+  assignment to it stayed local; a module with 199 top-level locals failed to
+  load, while 200 are allowed natively. The wrapper now declares no local the
+  module can see.
+- A module whose first statement starts with `(` was parsed as a call on the
+  wrapper's last expression (`_G.arg(...)`; "ambiguous syntax" on LuaJIT).
+- An assignment to the global `arg` in a module changed a local of that
+  module only, because every module began with `local arg = _G.arg`. The arg
+  line is now an assignment that runs on PUC Lua 5.1 only, where it fills the
+  implicit `arg` local that every vararg function has; on other interpreters
+  it touches nothing. It reads the global with `rawget`, so a strict `_G`
+  without a global `arg` does not make it raise.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

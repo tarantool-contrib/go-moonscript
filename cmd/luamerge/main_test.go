@@ -103,8 +103,8 @@ func TestCLI_NoArgFix(t *testing.T) {
 	withFix, _, _ := runCLI(t, base(dir)...)
 	without, _, code := runCLI(t, append(base(dir), "--no-arg-fix")...)
 	assert.Equal(t, 0, code)
-	assert.Contains(t, withFix, "local arg = _G.arg", "arg alias present by default")
-	assert.NotContains(t, without, "local arg = _G.arg", "--no-arg-fix omits the arg alias")
+	assert.Contains(t, withFix, "arg = rawget(_G, \"arg\")", "the arg line is present by default")
+	assert.NotContains(t, without, "arg = rawget(_G, \"arg\")", "--no-arg-fix omits the arg line")
 }
 
 func TestCLI_Skip(t *testing.T) {

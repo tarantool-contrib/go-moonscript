@@ -1,7 +1,9 @@
 package integration_test
 
 import (
+	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -368,4 +370,199 @@ func TestBundle_RequireCycleFails(t *testing.T) {
 	spec.Check = assertFailsLikeACycle
 
 	luatest.Differential(t, spec)
+}
+
+// flagSets are the modes that change how module bodies are emitted: the
+// default, without the arg line, and debug, which loads each body as a chunk
+// of its own.
+func flagSets() map[string][]string {
+	return map[string][]string{"default": nil, "no-arg-fix": {"--no-arg-fix"}, "debug": {"--debug"}}
+}
+
+// TestBundle_GlobalNameIsNotShadowed: a module reads and writes the globals
+// of the program, whatever their names, not locals of the bundle's wrapper.
+func TestBundle_GlobalNameIsNotShadowed(t *testing.T) {
+	t.Parallel()
+
+	for name, flags := range flagSets() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			luatest.Differential(t, cliCase(luatest.Project{
+				"main.lua": "name = \"GLOBAL\"\nprint((require(\"m\")))\nprint(name)\n",
+				"m.lua":    "local seen = name\n" + "name = \"set by m\"\nreturn seen\n",
+			}, flags...))
+		})
+	}
+}
+
+// localsModule is a module that declares n locals at its top level and
+// returns the last one.
+func localsModule(n int) string {
+	var source strings.Builder
+	for i := 1; i <= n; i++ {
+		fmt.Fprintf(&source, "local v%d = %d\n", i, i)
+	}
+
+	fmt.Fprintf(&source, "return v%d\n", n)
+
+	return source.String()
+}
+
+// varargFunctionHolds reports whether interp compiles a vararg function that
+// declares n locals at its top level. A module body runs in one, while a
+// module file is compiled as a main chunk, and PUC Lua 5.1 (the implicit
+// `arg` of LUA_COMPAT_VARARG) and Lua 5.5 (the vararg table) keep one local
+// of their own in every vararg function but not in a main chunk.
+func varargFunctionHolds(t *testing.T, interp luatest.Interpreter, n int) bool {
+	t.Helper()
+
+	dir := luatest.WriteProject(t, luatest.Project{
+		"function.lua": "return function(...)\n" + localsModule(n) + "end\n",
+		"probe.lua":    "print(loadfile(\"function.lua\") and \"fits\" or \"too many\")\n",
+	})
+	r := luatest.Run(t, interp, dir, runOptions(), "probe.lua")
+	require.Equal(t, 0, r.ExitCode, "%s", r)
+
+	return r.Stdout == "fits\n"
+}
+
+// TestBundle_ModuleWithManyLocals: the wrapper around a module body declares
+// no local of its own, so a module holds as many top-level locals as a
+// vararg function can: 200, the limit, natively, and on the interpreters
+// whose vararg functions keep a local of their own (PUC Lua 5.1, Lua 5.5)
+// one less, which a module with 200 locals then exceeds.
+func TestBundle_ModuleWithManyLocals(t *testing.T) {
+	t.Parallel()
+
+	for _, n := range []int{199, 200} {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			t.Parallel()
+
+			spec := cliCase(luatest.Project{
+				"main.lua": "print((require(\"m\")))\n",
+				"m.lua":    localsModule(n),
+			})
+			spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+				t.Helper()
+
+				require.Equal(t, strconv.Itoa(n)+"\n", orig.Stdout, "the original\n%s", orig)
+
+				if varargFunctionHolds(t, orig.Interp, n) {
+					luatest.AssertSame(t, orig, bundle)
+
+					return
+				}
+
+				assert.NotEqual(t, 0, bundle.ExitCode, "the bundle\n%s", bundle)
+				assert.Contains(t, bundle.Message(), "local variables", "the bundle\n%s", bundle)
+			}
+
+			luatest.Differential(t, spec)
+		})
+	}
+}
+
+// TestBundle_ModuleStartsWithParenthesis: a module whose first statement
+// starts with `(` is a statement of its own, not the continuation of a
+// call on whatever the wrapper put before it.
+func TestBundle_ModuleStartsWithParenthesis(t *testing.T) {
+	t.Parallel()
+
+	for name, flags := range flagSets() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			luatest.Differential(t, cliCase(luatest.Project{
+				"main.lua": "require(\"m\")\nprint(\"main done\")\n",
+				"m.lua":    "(function() print(\"iife ran\") end)()\n",
+			}, flags...))
+		})
+	}
+}
+
+// isPUCLua51 reports whether interp is PUC Lua 5.1, not LuaJIT or Tarantool,
+// which report the same _VERSION.
+func isPUCLua51(interp luatest.Interpreter) bool {
+	return interp.Version == "Lua 5.1"
+}
+
+// TestBundle_ArgAssignmentStaysGlobal: a program that replaces the global
+// arg, e.g. to drop the options it consumed, replaces it for every module
+// that reads arg later.
+func TestBundle_ArgAssignmentStaysGlobal(t *testing.T) {
+	t.Parallel()
+
+	reader := "print(\"reader sees: \" .. tostring(arg[1]))\n"
+	projects := map[string]luatest.Project{
+		"entry": {
+			"main.lua":   "arg = { \"patched\" }\nrequire(\"reader\")\n",
+			"reader.lua": reader,
+		},
+		"module": {
+			"main.lua":    "require(\"patcher\")\nrequire(\"reader\")\n",
+			"patcher.lua": "arg = { \"patched\" }\n",
+			"reader.lua":  reader,
+		},
+	}
+
+	for mode, flags := range modes() {
+		for name, project := range projects {
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				spec := cliCase(project, flags...)
+				spec.Args = []string{"x"}
+				spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+					t.Helper()
+
+					require.Equal(t, "reader sees: patched\n", orig.Stdout, "the original\n%s", orig)
+
+					if name == "module" && mode == "default" && isPUCLua51(orig.Interp) {
+						// Known and documented: on PUC Lua 5.1 a module body
+						// runs in a vararg function, and an assignment to arg
+						// there sets the function's implicit arg local.
+						assert.Equal(t, "reader sees: x\n", bundle.Stdout, "the bundle\n%s", bundle)
+
+						return
+					}
+
+					luatest.AssertSame(t, orig, bundle)
+				}
+
+				luatest.Differential(t, spec)
+			})
+		}
+	}
+}
+
+// TestBundle_ModuleReadsCommandLineArguments: a module reads the
+// command-line arguments from the global arg, which on PUC Lua 5.1 the
+// implicit `arg` local of the function around its body would hide; and so
+// does the entry, which runs in such a function when there is a suffix.
+func TestBundle_ModuleReadsCommandLineArguments(t *testing.T) {
+	t.Parallel()
+
+	variants := map[string][]string{"suffix": {"--suffix", "-- a suffix that does nothing"}}
+	maps.Copy(variants, modes())
+
+	for name, flags := range variants {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			spec := cliCase(luatest.Project{
+				"main.lua":   "print(\"main sees: \" .. tostring(arg[1]), #arg)\nrequire(\"reader\")\n",
+				"reader.lua": "print(\"reader sees: \" .. tostring(arg[1]), #arg)\n",
+			}, flags...)
+			spec.Args = []string{"x"}
+			spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+				t.Helper()
+
+				require.Equal(t, "main sees: x\t1\nreader sees: x\t1\n", orig.Stdout, "the original\n%s", orig)
+				luatest.AssertSame(t, orig, bundle)
+			}
+
+			luatest.Differential(t, spec)
+		})
+	}
 }

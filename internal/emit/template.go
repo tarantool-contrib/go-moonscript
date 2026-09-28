@@ -6,12 +6,43 @@ import (
 	"text/template"
 )
 
-// Each module is wrapped following the lua-amalg pattern: `local _ENV = _ENV`
-// lives in the enclosing `do` block (not the function body) so it becomes the
-// loader's first upvalue, which Lua 5.2's `module`/`_ENV` handling relies on.
-// `local arg = _G.arg` counters the implicit `arg` local that Lua 5.1
-// (LUA_COMPAT_VARARG) injects into vararg functions. Aliases delegate to the
-// primary name so the body executes exactly once regardless of how it's required.
+// templateText renders the bundle. Each module becomes a loader function,
+// following the lua-amalg pattern:
+//
+//	do
+//	local _ENV = _ENV
+//	local __luamerge_loader = function(...)
+//	if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
+//	<the module's source, verbatim>
+//	end
+//	package.preload["name"] = __luamerge_loader
+//	end
+//
+// Why each piece is there:
+//
+//   - `local _ENV = _ENV` lives in the enclosing `do` block, not in the
+//     function, so that it is the loader's first upvalue, which Lua 5.2's
+//     `module` relies on.
+//   - The body is the whole block of the function and sees no local of the
+//     wrapper: `local f = function` brings f into scope only after the
+//     function. A module's globals stay globals whatever their names, and
+//     every local slot of the function is the module's. (A vararg function
+//     keeps one slot for itself on PUC Lua 5.1 and Lua 5.5.)
+//   - PUC Lua 5.1 (LUA_COMPAT_VARARG) gives every vararg function an implicit
+//     local `arg`, which would hide the global `arg` from the body; the arg
+//     line fills that local with the global table. It is an assignment, not
+//     a local: on every other interpreter the condition is false and the line
+//     touches nothing, so an assignment to arg in a module stays global.
+//     rawget, not _G.arg, so that a strict _G without a global arg does not
+//     raise. NoArgFix drops the line.
+//   - The line before the body is a statement that ends with `end`, so a body
+//     whose first statement starts with `(` cannot continue it as a call.
+//   - The source is emitted verbatim, not reindented, so multi-line string
+//     literals keep their contents.
+//
+// In debug mode the loader loads the body as a chunk of its own instead.
+// Aliases delegate to the primary name so the body executes exactly once
+// regardless of how it's required.
 //
 // The loader leaves package.loaded to require, which runs it: a module that
 // raises while loading is not cached, and a require cycle fails as it does
@@ -37,7 +68,17 @@ import (
 // trailing nil, which a table alone would lose; Lua 5.1 has no table.pack),
 // runs the suffix in a block of its own and returns the results. The call
 // puts one more level on the stack above the entry than a script has.
-const templateText = `{{if .Shebang}}{{.Shebang}}
+//
+// The "function" and "load" templates render the code of a module or of the
+// entry (a codeData) as a function in default mode and as a loaded chunk in
+// debug mode.
+const templateText = `{{define "function" -}}
+function(...)
+{{if .ArgFix}}if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
+{{end}}{{indent .Source 0}}end
+{{- end}}{{define "load" -}}
+assert((loadstring or load)({{bracket .Source}}, {{q (chunkname .Path)}}))
+{{- end}}{{if .Shebang}}{{.Shebang}}
 {{end}}-- Amalgamated by luamerge
 -- Entry: {{.EntryName}}
 
@@ -57,27 +98,22 @@ end
 
 {{end}}{{range .Modules}}{{$primary := .PrimaryName}}do
 local _ENV = _ENV
-package.{{$.RegTable}}[{{q $primary}}] = function(...)
-  local name = ...
-{{if not $.NoArgFix}}  local arg = _G.arg
-{{end}}{{if $.Debug}}  return assert((loadstring or load)({{bracket .Source}}, {{q (chunkname .Path)}}))(...)
-{{else}}{{indent .Source 0}}{{end}}end
+local __luamerge_loader = {{if $.Debug -}}
+function(...) return {{template "load" .Code}}(...) end
+{{- else}}{{template "function" .Code}}{{end}}
+package.{{$.RegTable}}[{{q $primary}}] = __luamerge_loader
 end
 {{range .AliasNames}}package.{{$.RegTable}}[{{q .}}] = function(...) return require({{q $primary}}) end
 {{end}}{{end}}{{with .Entry}}{{if $.Suffix}}local __luamerge_main = {{if $.Debug -}}
-assert((loadstring or load)({{bracket .Source}},
-  {{q (chunkname .Path)}})){{else}}(function()
+{{template "load" .}}{{else}}(function()
 local _ENV = _ENV
-return function(...)
-{{if not $.NoArgFix}}  local arg = _G.arg
-{{end}}{{indent .Source 0}}end
+return {{template "function" .}}
 end)(){{end}}
 local __luamerge_n, __luamerge_results = (function(...) return select("#", ...), { ... } end)(__luamerge_main(...))
 do
 {{$.Suffix}}end
 return (table.unpack or unpack)(__luamerge_results, 1, __luamerge_n)
-{{else if $.Debug}}return assert((loadstring or load)({{bracket .Source}},
-  {{q (chunkname .Path)}}))(...)
+{{else if $.Debug}}return {{template "load" .}}(...)
 {{else}}{{indent .Source 0}}{{end}}{{end}}`
 
 // indent prefixes every line of source with `spaces` spaces and normalizes the
@@ -172,28 +208,31 @@ var outputTemplate = template.Must(
 
 type templateData struct {
 	EntryName string
-	Entry     entryData
+	Entry     codeData
 	Modules   []moduleData
 	Prefix    string
 	Suffix    string
 	Shebang   string
 	Debug     bool
 	Fallback  bool
-	NoArgFix  bool
 	// RegTable is the package field loaders are registered in: "preload"
 	// normally, "postload" in fallback mode.
 	RegTable string
 }
 
-// entryData is the entry: its source and, for debug mode, its path.
-type entryData struct {
+// codeData is the code of a module or of the entry.
+type codeData struct {
+	// Source is the code, transforms applied.
 	Source string
-	Path   string
+	// Path is the file it comes from, the chunk name in debug mode.
+	Path string
+	// ArgFix adds the arg line in front of the code when it runs as a
+	// function.
+	ArgFix bool
 }
 
 type moduleData struct {
 	PrimaryName string
 	AliasNames  []string
-	Source      string
-	Path        string
+	Code        codeData
 }
