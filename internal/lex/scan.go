@@ -152,9 +152,11 @@ func (l *Lexer) shortString(quote byte) error {
 // escape moves past the escape sequence whose backslash has been read. Only
 // two escapes need more than their next byte to find the end of the string: a
 // backslash before a line break escapes the whole line break ("\r\n" is one),
-// and "\z" skips the white space after it, line breaks included. The other
-// escapes (\x41, \u{48}, \065, \n, \") continue with bytes that cannot end
-// the string.
+// and "\z" skips the white space after it, line breaks included. Any other
+// escape is taken as its next byte alone. The rest of a well-formed \x41,
+// \u{48} or \065 cannot end the string anyway; after a malformed one, such as
+// "\x" right before the closing quote, the string ends where Lua 5.1 ends it
+// (Lua 5.2 and later reject the escape).
 func (l *Lexer) escape() {
 	switch {
 	case isLineBreakByte(l.src[l.pos]):

@@ -29,15 +29,17 @@
 // tokens the lexer reads as separate are separate in every dialect. It is not
 // always the finest one. Lua 5.1 ends a numeral with an exponent or a hex
 // prefix before ".." (1e5..x is 1e5 .. x there), and Lua 5.2 and 5.3 end a
-// decimal numeral before a letter that is no hex digit (3then is 3 then);
-// every other dialect rejects both, and the lexer reads each as one numeral.
+// numeral before a letter that cannot continue it (3then is 3 then, and
+// 0x10then is 0x10 then); every other dialect rejects both, and the lexer
+// reads each as one numeral.
 //
 // Like Lua's own lexer this one leaves grammar to a parser: a byte that
 // starts no token is a token of kind Invalid, and which names are reserved
-// words is not its business (goto and global are reserved in some dialects
-// only). What it does refuse is what no dialect can read: a string, long
-// string or long comment without its end, and "[" followed by "=" signs but
-// no second "[".
+// words is not its business. goto is a name in some LuaJIT builds, and Lua
+// 5.5.1 reads global as a keyword only where it starts a declaration. What
+// the lexer does refuse is what no dialect can read: a string, long string
+// or long comment without its end, and "[" followed by "=" signs but no
+// second "[".
 package lex
 
 import (
