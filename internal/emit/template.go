@@ -15,7 +15,7 @@ import (
 //	if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 //	<the module's source, verbatim>
 //	end
-//	package.preload["name"] = __luamerge_loader
+//	if package.preload["name"] == nil then package.preload["name"] = __luamerge_loader end
 //	end
 //
 // Why each piece is there:
@@ -39,6 +39,9 @@ import (
 //     whose first statement starts with `(` cannot continue it as a call.
 //   - The source is emitted verbatim, not reindented, so multi-line string
 //     literals keep their contents.
+//   - A loader is registered only where the slot is still empty. Natively a
+//     loader the embedding application put in package.preload wins over the
+//     file on package.path, and LuaJIT's own table.new lives there too.
 //
 // In debug mode the loader loads the body as a chunk of its own instead.
 // Aliases delegate to the primary name so the body executes exactly once
@@ -101,9 +104,11 @@ local _ENV = _ENV
 local __luamerge_loader = {{if $.Debug -}}
 function(...) return {{template "load" .Code}}(...) end
 {{- else}}{{template "function" .Code}}{{end}}
-package.{{$.RegTable}}[{{q $primary}}] = __luamerge_loader
+if package.{{$.RegTable}}[{{q $primary}}] == nil then package.{{$.RegTable}}[{{q $primary}}] = __luamerge_loader end
 end
-{{range .AliasNames}}package.{{$.RegTable}}[{{q .}}] = function(...) return require({{q $primary}}) end
+{{range .AliasNames}}if package.{{$.RegTable}}[{{q .}}] == nil then
+  package.{{$.RegTable}}[{{q .}}] = function(...) return require({{q $primary}}) end
+end
 {{end}}{{end}}{{with .Entry}}{{if $.Suffix}}local __luamerge_main = {{if $.Debug -}}
 {{template "load" .}}{{else}}(function()
 local _ENV = _ENV

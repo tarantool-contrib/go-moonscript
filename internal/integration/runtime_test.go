@@ -566,3 +566,76 @@ func TestBundle_ModuleReadsCommandLineArguments(t *testing.T) {
 		})
 	}
 }
+
+// TestBundle_KeepsHostPreload: a module the embedding application registered
+// in package.preload before running the program wins over the file on
+// package.path natively, and so it does over the embedded copy.
+func TestBundle_KeepsHostPreload(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	project := luatest.Project{
+		"main.lua":  "print(\"codec impl: \" .. require(\"codec\").impl)\n",
+		"codec.lua": "return { impl = \"bundled pure-Lua fallback\" }\n",
+	}
+	host := "package.preload[\"codec\"] = function() return { impl = \"host\" } end\n" +
+		"dofile(arg[1])\n"
+
+	for mode, flags := range modes() {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+
+			bundle := bundleProject(t, project, append([]string{"--entry", "main.lua"}, flags...)...)
+
+			luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+				t.Helper()
+
+				orig, bun := hostRuns(t, interp, host, project, bundle)
+				require.Equal(t, "codec impl: host\n", orig.Stdout, "the original\n%s", orig)
+				luatest.AssertSame(t, orig, bun)
+			})
+		})
+	}
+}
+
+// TestBundle_KeepsBuiltinPreload: LuaJIT and Tarantool provide table.new in
+// package.preload. A project that carries a pure-Lua shim for the other
+// interpreters gets the built-in one there natively, and so it does from the
+// bundle.
+func TestBundle_KeepsBuiltinPreload(t *testing.T) {
+	t.Parallel()
+
+	luatest.Differential(t, cliCase(luatest.Project{
+		"main.lua": "local new_tab = require(\"table.new\")\n" +
+			"print(\"table.new is \" .. debug.getinfo(new_tab, \"S\").what)\n",
+		"table/new.lua": "return function(narr, nrec) return {} end\n",
+	}))
+}
+
+// TestBundle_FallbackKeepsRegisteredLoaders: with --fallback the bundle
+// registers its modules in package.postload, and keeps a loader somebody
+// registered there first, as it keeps one in package.preload.
+func TestBundle_FallbackKeepsRegisteredLoaders(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	bundle := bundleProject(t, luatest.Project{
+		"main.lua":  "print(\"codec impl: \" .. require(\"codec\").impl)\n",
+		"codec.lua": "return { impl = \"bundled pure-Lua fallback\" }\n",
+	}, "--entry", "main.lua", "--fallback")
+
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		dir := luatest.WriteProject(t, luatest.Project{
+			"host.lua": "package.postload = { codec = function() return { impl = \"registered first\" } end }\n" +
+				"dofile(\"bundle.lua\")\n",
+			"bundle.lua": string(bundle),
+		})
+		r := luatest.Run(t, interp, dir, runOptions(), "host.lua")
+		assert.Equal(t, 0, r.ExitCode, "%s", r)
+		assert.Equal(t, "codec impl: registered first\n", r.Stdout, "%s", r)
+	})
+}
