@@ -985,24 +985,3 @@ func TestBundle_PackagePrefixSharesTheInstance(t *testing.T) {
 		assert.Equal(t, "runs=1\tsame=true\tx\n", r.Stdout, "%s", r)
 	})
 }
-
-// TestBundle_PackagePrefixKeepsRealModules: a name --package-prefix
-// generates may be the name of a real module of the project; the real
-// module keeps it, whichever of the two comes first in the bundle.
-func TestBundle_PackagePrefixKeepsRealModules(t *testing.T) {
-	t.Parallel()
-
-	for name, prefix := range map[string]string{"the real module first": "p", "the generated name first": "z"} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			// Modules are emitted sorted by name: "p.x" sorts before "x", "x"
-			// before "z.x".
-			luatest.Differential(t, cliCase(luatest.Project{
-				"main.lua":        fmt.Sprintf("print((require(\"x\")), (require(\"%s.x\")))\n", prefix),
-				"x.lua":           "return \"X\"\n",
-				prefix + "/x.lua": "return \"PREFIXED X\"\n",
-			}, "--package-prefix", prefix))
-		})
-	}
-}

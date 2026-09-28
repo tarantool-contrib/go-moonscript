@@ -113,8 +113,10 @@ func (e *UnresolvedError) Error() string {
 func (e *UnresolvedError) Unwrap() error { return e.Err }
 
 // ErrNameConflict is the cause Build wraps when one module name is registered
-// for two different files. The bundle carries one loader per name, so one
-// file would silently replace the other for every caller.
+// for two different files, or when the name a package prefix generates is
+// the name of a module of the project or of a module some runtime has built
+// in. The bundle carries one loader per name, so one module would silently
+// replace the other for every caller.
 var ErrNameConflict = errors.New("module name conflict")
 
 // Module is a single Lua source file discovered while building the graph,
@@ -197,9 +199,23 @@ func moduleNameFromPath(root, filePath string) string {
 	return rel
 }
 
-func applyPackagePrefix(g *Graph, packagePrefix string) {
+// applyPackagePrefix gives every name of a module that lacks the package
+// prefix an alias with the prefix in front of it. It fails with an error
+// wrapping ErrNameConflict when the name it would generate is taken: by a
+// module of the project that has that name, or by a module some runtime has
+// built in. The bundle registers one module under a name, so the one would
+// take the place of the other.
+func applyPackagePrefix(g *Graph, packagePrefix string) error {
 	if packagePrefix == "" {
-		return
+		return nil
+	}
+
+	owners := make(map[string]*Module)
+
+	for _, mod := range g.Modules {
+		for _, name := range mod.Names {
+			owners[name] = mod
+		}
 	}
 
 	for _, mod := range g.Modules {
@@ -211,9 +227,41 @@ func applyPackagePrefix(g *Graph, packagePrefix string) {
 				continue
 			}
 
+			err := checkGenerated(packagePrefix, name, prefixed, mod, owners[prefixed])
+			if err != nil {
+				return err
+			}
+
 			mod.Aliases = append(mod.Aliases, Alias{Name: prefixed, Target: name})
 		}
 	}
+
+	return nil
+}
+
+// checkGenerated returns an error wrapping ErrNameConflict when prefixed, the
+// name the package prefix generates from name, a name of mod, is taken: by
+// owner, the module of the project that has that name, when not nil, or by a
+// module some runtime has built in.
+func checkGenerated(packagePrefix, name, prefixed string, mod, owner *Module) error {
+	turns := fmt.Sprintf("package prefix %q turns %q (%s) into %q", packagePrefix, name, mod.FilePath, prefixed)
+
+	if owner != nil {
+		return fmt.Errorf("%w: %s, the name of %s; choose another prefix", ErrNameConflict, turns, owner.FilePath)
+	}
+
+	providers := builtinRuntimes(prefixed)
+	if providers == 0 {
+		return nil
+	}
+
+	verb := "have"
+	if len(providers.names()) == 1 {
+		verb = "has"
+	}
+
+	return fmt.Errorf("%w: %s, the name of a module %s %s built in; choose another prefix",
+		ErrNameConflict, turns, providers, verb)
 }
 
 // requireTarget describes a single require()/--include entry that needs to be
@@ -613,7 +661,10 @@ func Build(cfg *config.Config, parser parse.Parser, resolver Resolver) (*Graph, 
 		return nil, err
 	}
 
-	applyPackagePrefix(g, cfg.PackagePrefix)
+	err = applyPackagePrefix(g, cfg.PackagePrefix)
+	if err != nil {
+		return nil, err
+	}
 
 	return g, nil
 }
