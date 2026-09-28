@@ -59,6 +59,10 @@ func headerCases() []headerCase {
 			source: "#!/usr/bin/env lua\r\nerror(\"boom\")\r\n", line: 2, flags: nil,
 		},
 		{name: "blank lines", file: "m.lua", source: "\n  \n\terror(\"boom\")\n", line: 3, flags: nil},
+		// Lua reads "\n\r" as one line break: the line break a --debug bundle
+		// puts after the opening bracket of the string that holds this file
+		// must not take its first one along.
+		{name: "blank line ended by CR", file: "m.lua", source: "\rerror(\"boom\")\r", line: 2, flags: nil},
 		{
 			name: "first line starting with # but not #!", file: "m.lua",
 			source: "# not a shebang\nerror(\"boom\")\n", line: 2, flags: nil,

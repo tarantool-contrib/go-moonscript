@@ -214,21 +214,36 @@ func quoteLua(input string) string {
 }
 
 // luaLongBracket wraps source in a Lua long-bracket string literal
-// (`[==[ … ]==]`), choosing a level of `=` that does not collide with any
-// closing sequence in source. A newline is inserted right after the opening
-// bracket; Lua discards that first newline, so the embedded source keeps its
-// original line numbering — which is the whole point in debug mode. The
-// source is embedded verbatim (no escaping, no reindentation), so multi-line
-// string literals inside modules survive intact.
+// (`[==[ … ]==]`) that holds it verbatim: no escaping, no reindentation, so
+// multi-line string literals inside modules survive intact, and every line
+// keeps its number, which is the whole point in debug mode. (Lua reads each
+// line break inside the string as "\n", which moves no line either.)
+//
+//   - The level of `=` is the lowest whose closing bracket appears nowhere in
+//     source, not even at its end: a source ending in "]", or in "]=" at
+//     level 1, would form one together with the closing bracket after it.
+//     Looking in source and one more "]" finds both.
+//   - A line break follows the opening bracket, and Lua discards it, as it
+//     discards the first line break of every long string. It is "\n", or
+//     "\r\n" before a source that starts with "\r": Lua reads "\n\r" as one
+//     line break, which would discard the first line break of the source
+//     too.
 func luaLongBracket(source string) string {
+	text := source + "]"
+
 	level := 0
-	for strings.Contains(source, "]"+strings.Repeat("=", level)+"]") {
+	for strings.Contains(text, "]"+strings.Repeat("=", level)+"]") {
 		level++
 	}
 
-	eq := strings.Repeat("=", level)
+	equals := strings.Repeat("=", level)
 
-	return "[" + eq + "[\n" + source + "]" + eq + "]"
+	lineBreak := "\n"
+	if strings.HasPrefix(source, "\r") {
+		lineBreak = "\r\n"
+	}
+
+	return "[" + equals + "[" + lineBreak + source + "]" + equals + "]"
 }
 
 // chunkName renders the load() chunk name for a module path. The leading '@'

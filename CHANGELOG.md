@@ -134,6 +134,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   errors named the wrong lines: an error on line 3 after two blank lines was
   reported on line 1. A byte order mark, or a first line starting with `#`
   but not `#!`, failed the build, although the interpreter runs such a file.
+- A `--debug` bundle failed to load when the code of a module or of the
+  entry ended in `]` with no line break after it, such as `return t[1]`, or
+  in `]=`, `]==`, … where the string that holds the code needed that level:
+  the end of the code and the bracket after it read as the end of the
+  string. `--remove-comments` and `--minify` could leave such an ending too.
+  In a `--debug` bundle a file whose first line break is a lone `\r` also
+  lost a line, so its errors were reported one line too early.
 - Release archives now include a `darwin_arm64` build for Apple Silicon
   Macs. GoReleaser's build matrix excluded that target under a comment
   claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.
