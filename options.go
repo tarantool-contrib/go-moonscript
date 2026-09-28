@@ -6,9 +6,12 @@ import (
 	"github.com/tarantool/go-luamerge/internal/config"
 )
 
-// Options configures a bundling run. The zero value is not valid — at minimum
-// Entry must be set; prefer starting from DefaultOptions. A relative path in
-// Entry, Root or Search is taken from the working directory.
+// Options configures a bundling run. Only Entry must be set: the zero value of
+// every other field is its default, so Options{Entry: "main.lua"} bundles with
+// the defaults of the CLI. DefaultOptions, like LoadOptions, spells two of
+// them out: Path as "?.lua;?/init.lua", which an empty Path stands for, and
+// Output as "-", which Bundle ignores. A relative path in Entry, Root or
+// Search is taken from the working directory.
 type Options struct {
 	// Entry is the Lua file the program starts from. Its code runs as the
 	// bundle's main chunk. Bundle returns ErrNoEntry when it is empty.
@@ -41,10 +44,11 @@ type Options struct {
 	// appended after the interpreter's own, so a module the interpreter finds
 	// on disk wins over the embedded one.
 	Fallback bool
-	// ArgFix emits the arg line, which acts on PUC Lua 5.1 only
+	// NoArgFix leaves out the arg line, which acts on PUC Lua 5.1 only
 	// (LUA_COMPAT_VARARG): there it fills the implicit local arg of every
-	// module with the global arg.
-	ArgFix bool
+	// module with the global arg. It is the CLI's --no-arg-fix, the inverse
+	// of arg_fix in the configuration.
+	NoArgFix bool
 	// Transform selects the source transforms applied to every module and
 	// to the entry.
 	Transform TransformOptions
@@ -87,8 +91,9 @@ type TransformOptions struct {
 	Minify bool
 }
 
-// DefaultOptions returns Options populated with the same defaults the CLI uses
-// (stdout output, `?.lua;?/init.lua` path, arg-fix on, all transforms off).
+// DefaultOptions returns the defaults the CLI uses: output to stdout, the
+// ?.lua;?/init.lua path, the arg line on and every transform off. Bundle
+// treats them exactly as it treats the zero value of Options.
 func DefaultOptions() Options {
 	return optionsFromConfig(config.Default())
 }
@@ -99,9 +104,9 @@ func DefaultOptions() Options {
 // environment are returned. A file named explicitly must exist; a missing one
 // is an error matching fs.ErrNotExist. A setting fills the field of the same
 // name, which the file spells in snake case: skip_packages is SkipPackages,
-// transform.minify is Transform.Minify. The options are returned as given,
-// with the package_name convenience left to Bundle, so any field may still be
-// changed.
+// transform.minify is Transform.Minify; arg_fix is the inverse of NoArgFix.
+// The options are returned as given, with the package_name convenience left
+// to Bundle, so any field may still be changed.
 func LoadOptions(path string) (Options, error) {
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
@@ -123,7 +128,7 @@ func optionsFromConfig(cfg config.Config) Options {
 		Strict:   cfg.Strict,
 		Debug:    cfg.Debug,
 		Fallback: cfg.Fallback,
-		ArgFix:   cfg.ArgFix,
+		NoArgFix: !cfg.ArgFix,
 		Transform: TransformOptions{
 			RemoveComments:   cfg.Transform.RemoveComments,
 			RemoveEmptyLines: cfg.Transform.RemoveEmptyLines,
@@ -152,7 +157,7 @@ func configFromOptions(opts Options) config.Config {
 		Strict:   opts.Strict,
 		Debug:    opts.Debug,
 		Fallback: opts.Fallback,
-		ArgFix:   opts.ArgFix,
+		ArgFix:   !opts.NoArgFix,
 		Transform: config.TransformConfig{
 			RemoveComments:   opts.Transform.RemoveComments,
 			RemoveEmptyLines: opts.Transform.RemoveEmptyLines,

@@ -10,9 +10,10 @@ import (
 )
 
 // Example bundles a tiny two-file Lua project into a single self-contained
-// script. Each module is registered into Lua's package.preload table, and the
-// bundle ends with the entry's own code, which runs as the bundle's main
-// chunk.
+// script. Only Entry must be set: left zero, every other field of Options
+// bundles like its default. Each module is registered into Lua's
+// package.preload table, and the bundle ends with the entry's own code, which
+// runs as the bundle's main chunk.
 func Example() {
 	dir, err := os.MkdirTemp("", "luamerge-example-*")
 	if err != nil {
@@ -33,7 +34,8 @@ func Example() {
 	write("greet.lua", "local M = {}\nfunction M.hello() return \"hi\" end\nreturn M\n")
 	write("main.lua", "local greet = require(\"greet\")\nprint(greet.hello())\n")
 
-	opts := luamerge.DefaultOptions()
+	var opts luamerge.Options
+
 	opts.Entry = filepath.Join(dir, "main.lua")
 
 	var buf bytes.Buffer

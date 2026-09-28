@@ -83,9 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UnresolvedError` were aliases of types of internal packages, so `go doc`
   showed none of their fields, and the methods of the internal configuration
   (`ApplyPackageName`, `ResolveRoot`, `ShouldSkip`) could be called on
-  `Options`. The fields, the `Warn*` constants and their names stay the same,
-  and so do `errors.As` and `errors.Is(err, ErrModuleNotFound)`. `Options`
-  has no YAML struct tags: `LoadOptions` reads the configuration file.
+  `Options`. The `Warn*` constants, their names and every field but
+  `Options.ArgFix` (see Fixed) stay the same, and so do `errors.As` and
+  `errors.Is(err, ErrModuleNotFound)`. `Options` has no YAML struct tags:
+  `LoadOptions` reads the configuration file.
 
 ### Removed
 
@@ -331,5 +332,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `local require = require`, or a lazy require
   (`local require = require("lazy")`), is still taken for the global
   `require`, and the modules loaded through it are embedded.
+- `Options` with nothing but `Entry` set bundles like `DefaultOptions()`
+  with that entry, as the documentation says only `Entry` must be set. The
+  zero value left out the arg line, since `Options.ArgFix` was false in it:
+  the field is now `Options.NoArgFix`, like `--no-arg-fix`, so that its zero
+  value is the default. The `arg_fix` setting and `LUAMERGE_ARG_FIX` keep
+  their meaning.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

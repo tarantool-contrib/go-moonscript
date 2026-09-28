@@ -17,7 +17,7 @@ import (
 // field of the internal configuration that holds the same setting, where the
 // two differ.
 func testConfigNames() map[string]string {
-	return map[string]string{}
+	return map[string]string{"NoArgFix": "ArgFix"}
 }
 
 // testLeaves returns the fields of value, a struct, that are not structs

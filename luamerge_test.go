@@ -36,7 +36,7 @@ func TestDefaultOptions(t *testing.T) {
 	t.Parallel()
 
 	opts := luamerge.DefaultOptions()
-	assert.True(t, opts.ArgFix, "arg fix on by default")
+	assert.False(t, opts.NoArgFix, "the arg line is on by default")
 	assert.Equal(t, "?.lua;?/init.lua", opts.Path)
 	assert.False(t, opts.Debug)
 }
@@ -60,6 +60,41 @@ func TestBundle(t *testing.T) {
 	assert.Contains(t, out, `package.preload["module"]`)
 	assert.NotContains(t, out, `package.preload["main"]`, "the entry runs as the main chunk, not as a module")
 	assert.True(t, strings.HasSuffix(out, "\nprint(m.greet())\n"), "the bundle ends with the entry's code\n%s", out)
+}
+
+// TestBundle_ZeroValueOptions checks that Options with nothing but Entry set
+// bundle exactly like DefaultOptions with that entry, the defaults of the CLI:
+// only Entry must be set. The zero value used to leave out the arg line,
+// which is on by default.
+func TestBundle_ZeroValueOptions(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: a module found through each template of the default path.
+	dir := writeProject(t)
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "pkg"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pkg", "init.lua"), []byte("return \"pkg\"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"),
+		[]byte("local m = require(\"module\")\nprint(m.greet(), require(\"pkg\"))\n"), 0o600))
+
+	entry := filepath.Join(dir, "main.lua")
+	defaults := luamerge.DefaultOptions()
+	defaults.Entry = entry
+
+	var zero luamerge.Options
+
+	zero.Entry = entry
+
+	// Act.
+	var want, got bytes.Buffer
+
+	_, errWant := luamerge.Bundle(defaults, &want)
+	_, errGot := luamerge.Bundle(zero, &got)
+
+	// Assert.
+	require.NoError(t, errWant)
+	require.NoError(t, errGot)
+	assert.Contains(t, want.String(), `package.preload["pkg"]`, "the fixture reaches pkg/init.lua")
+	assert.Equal(t, want.String(), got.String())
 }
 
 // TestBundle_Files checks that Result.Files lists every embedded source file

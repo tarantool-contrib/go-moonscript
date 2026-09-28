@@ -72,6 +72,39 @@ func TestLoadOptions_PackageNameOverride(t *testing.T) {
 	assert.NotContains(t, buf.String(), "other.")
 }
 
+// TestLoadOptions_ArgFix checks that arg_fix in the file reaches
+// Options.NoArgFix, its inverse: the arg line is on unless arg_fix is false.
+func TestLoadOptions_ArgFix(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		file     string
+		noArgFix bool
+	}{
+		{name: "default", file: "# no settings\n", noArgFix: false},
+		{name: "on", file: "arg_fix: true\n", noArgFix: false},
+		{name: "off", file: "arg_fix: false\n", noArgFix: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange.
+			path := filepath.Join(t.TempDir(), "luamerge.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(tt.file), 0o600))
+
+			// Act.
+			opts, err := luamerge.LoadOptions(path)
+
+			// Assert.
+			require.NoError(t, err)
+			assert.Equal(t, tt.noArgFix, opts.NoArgFix)
+		})
+	}
+}
+
 // TestLoadOptions_NamedFile checks that the file named is read.
 func TestLoadOptions_NamedFile(t *testing.T) {
 	t.Parallel()

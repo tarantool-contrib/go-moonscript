@@ -351,8 +351,9 @@ import (
 )
 
 func build() error {
-	opts := luamerge.DefaultOptions() // sensible defaults (arg-fix on, etc.)
-	opts.Entry = "src/main.lua"
+	// Only Entry must be set: left zero, every other field bundles like the
+	// CLI's default.
+	opts := luamerge.Options{Entry: "src/main.lua"}
 	opts.Debug = true // any option is a plain struct field
 
 	var buf bytes.Buffer
@@ -375,9 +376,9 @@ func build() error {
 
 Public API — every type is declared in package `luamerge` itself, so `go doc github.com/tarantool/go-luamerge Options` lists each setting with its documentation:
 
-- `luamerge.Options` — all bundling settings (entry, root, path, `Transform` (a `TransformOptions`), `Debug`, `Fallback`, `Shebang`, `ArgFix`, prefixes, skip/include, …). `Bundle` writes to the `io.Writer` you give it and ignores `Options.Output`.
-- `luamerge.DefaultOptions() Options` — defaults matching the CLI.
-- `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars. `""` means `luamerge.yaml` in the working directory, which may be absent; a file named explicitly must exist (a missing one is an error matching `fs.ErrNotExist`). A setting fills the field of the same name (`skip_packages` is `SkipPackages`). The options come back as given, with the `package_name` convenience left to `Bundle`, so any field can still be changed.
+- `luamerge.Options` — all bundling settings (entry, root, path, `Transform` (a `TransformOptions`), `Debug`, `Fallback`, `Shebang`, `NoArgFix`, prefixes, skip/include, …). Only `Entry` must be set: `luamerge.Options{Entry: "src/main.lua"}` bundles like `luamerge --entry src/main.lua` with no configuration. `Bundle` writes to the `io.Writer` you give it and ignores `Options.Output`.
+- `luamerge.DefaultOptions() Options` — defaults matching the CLI, with `Path` (`?.lua;?/init.lua`) and `Output` (`-`) spelled out; `Bundle` treats them exactly as the zero value.
+- `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars. `""` means `luamerge.yaml` in the working directory, which may be absent; a file named explicitly must exist (a missing one is an error matching `fs.ErrNotExist`). A setting fills the field of the same name (`skip_packages` is `SkipPackages`), and `arg_fix` is the inverse of `NoArgFix`. The options come back as given, with the `package_name` convenience left to `Bundle`, so any field can still be changed.
 - `luamerge.Bundle(opts Options, w io.Writer) (*Result, error)` — runs the full pipeline; resolves the root and the `package_name` convenience itself.
 - `luamerge.Result{ Warnings []Warning; Files []string }` — non-fatal issues, and the absolute path of every source file embedded in the bundle (the entry first). Each `Warning` is machine-readable: `Kind`, a `WarningKind` (`WarnDynamicRequire`, `WarnSkipped`, `WarnUnresolved`, `WarnCModule`, `WarnNonLua`, `WarnIndirectRequire`, `WarnShadowsBuiltin`, `WarnTokenScan`) whose `String()` is its name (`dynamic-require`, `skipped`, `unresolved`, `c-module`, `non-lua`, `indirect-require`, `shadows-builtin`, `token-scan`), `Module` (the require name), plus `File`/`Line`/`Message` for display.
 - `luamerge.ErrNoEntry`, `luamerge.ErrModuleNotFound` and `*luamerge.UnresolvedError` — the errors to classify, below.

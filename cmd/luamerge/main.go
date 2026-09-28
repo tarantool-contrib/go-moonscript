@@ -186,9 +186,10 @@ func run() int {
 			*ov.dst = ov.flag.value
 		}
 	}
-	// --no-arg-fix is the CLI inverse of the positive arg_fix config option.
+	// --no-arg-fix sets Options.NoArgFix, the inverse of arg_fix in the
+	// configuration.
 	if noArgFix.set {
-		opts.ArgFix = !noArgFix.value
+		opts.NoArgFix = noArgFix.value
 	}
 
 	// A list flag replaces the configured list, as every flag overrides its

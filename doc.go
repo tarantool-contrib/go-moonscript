@@ -17,8 +17,7 @@
 // [Bundle].
 //
 //	var buf bytes.Buffer
-//	opts := luamerge.DefaultOptions()
-//	opts.Entry = "src/main.lua"
+//	opts := luamerge.Options{Entry: "src/main.lua"} // The other fields keep their defaults.
 //	res, err := luamerge.Bundle(opts, &buf)
 //	if err != nil {
 //		// handle error
@@ -26,6 +25,11 @@
 //	for _, w := range res.Warnings {
 //		// report w
 //	}
+//
+// Only Options.Entry must be set: with the zero value of every other field,
+// Bundle does what the CLI does by default. [LoadOptions] reads the settings
+// from a luamerge.yaml file and LUAMERGE_* environment variables, as the CLI
+// does.
 //
 // See the [github.com/tarantool/go-luamerge/cmd/luamerge] command for the CLI
 // built on top of this package.
