@@ -317,6 +317,20 @@ func processIncludePackages(
 	g *Graph, resolver Resolver, cfg *config.Config, queue []*Module,
 ) ([]*Module, error) {
 	for _, incName := range cfg.IncludePackages {
+		if isStandardLibrary(incName) {
+			g.Warnings = append(g.Warnings, Warning{
+				Kind:   WarnSkipped,
+				Module: incName,
+				File:   "",
+				Line:   0,
+				Message: fmt.Sprintf(
+					"include package %q skipped: require never loads a standard library module from a file", incName,
+				),
+			})
+
+			continue
+		}
+
 		if cfg.ShouldSkip(incName) {
 			g.Warnings = append(g.Warnings, Warning{
 				Kind:    WarnSkipped,
@@ -378,6 +392,12 @@ func processModuleRequires(
 				Message: "dynamic require, cannot resolve",
 			})
 
+			continue
+		}
+
+		// require returns a standard library module from package.loaded
+		// without searching, so there is nothing to embed or report.
+		if isStandardLibrary(req.Name) {
 			continue
 		}
 

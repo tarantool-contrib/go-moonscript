@@ -2,6 +2,7 @@ package luamerge_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,6 +70,55 @@ func TestBundle_IndirectRequireWarning(t *testing.T) {
 	assert.Contains(t, w.Message, `aliased as local "r"`, "the warning names the alias")
 	assert.NotContains(t, out, `package.preload["module"]`,
 		"a module loaded only through the alias cannot be embedded")
+}
+
+// testResolvedDir is a fresh temporary directory with its symbolic links
+// resolved, as Bundle resolves them in the paths it reports (on macOS the
+// temporary directory is under /var, a link to /private/var).
+func testResolvedDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	return dir
+}
+
+// testStandardLibrary are the modules every Lua interpreter has in
+// package.loaded before the program starts.
+func testStandardLibrary() []string {
+	return []string{"_G", "coroutine", "debug", "io", "math", "os", "package", "string", "table"}
+}
+
+// TestBundle_StandardLibraryModules: require returns a standard library
+// module from package.loaded without searching, so a require of one is
+// neither resolved nor embedded nor reported, even in strict mode, and even
+// when the project has a file of that name, which natively never loads.
+func TestBundle_StandardLibraryModules(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range testStandardLibrary() {
+		for variant, withFile := range map[string]bool{"no file": false, "project file": true} {
+			t.Run(name+"/"+variant, func(t *testing.T) {
+				t.Parallel()
+
+				dir := testResolvedDir(t)
+				main := filepath.Join(dir, "main.lua")
+				require.NoError(t, os.WriteFile(main,
+					fmt.Appendf(nil, "local m = require(%q)\nprint(type(m))\n", name), 0o600))
+
+				if withFile {
+					require.NoError(t, os.WriteFile(filepath.Join(dir, name+".lua"),
+						[]byte("error(\"never loaded natively\")\n"), 0o600))
+				}
+
+				res, out := testStrictBundle(t, dir)
+				assert.Empty(t, res.Warnings)
+				assert.Equal(t, []string{main}, res.Files, "nothing but the entry is embedded")
+				assert.NotContains(t, out, fmt.Sprintf("[%q]", name), "no loader is registered for it")
+			})
+		}
+	}
 }
 
 // TestBundle_GlobalTableAndXpcallRequire: `_G.require("x")`,

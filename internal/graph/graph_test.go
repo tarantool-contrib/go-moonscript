@@ -502,6 +502,32 @@ func TestGraphIncludePackages(t *testing.T) {
 	assert.True(t, foundB, "module b.lua not found in graph")
 }
 
+// TestBuild_IncludeStandardLibraryModule: require never loads a standard
+// library module from a file, so --include of one embeds nothing, even when
+// the project has a file of that name, and says why.
+func TestBuild_IncludeStandardLibraryModule(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"), []byte("print(\"main\")\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "debug.lua"), []byte("return {}\n"), 0o600))
+
+	cfg := entryConfig(dir, "main.lua")
+	cfg.IncludePackages = []string{"debug"}
+
+	g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
+	require.NoError(t, err)
+
+	assert.Equal(t, []*graph.Module{g.Entry}, g.Modules, "only the entry")
+	assert.Equal(t, []graph.Warning{{
+		Kind:    graph.WarnSkipped,
+		Module:  "debug",
+		File:    "",
+		Line:    0,
+		Message: `include package "debug" skipped: require never loads a standard library module from a file`,
+	}}, g.Warnings)
+}
+
 func TestGraphIncludeSkipConflict(t *testing.T) {
 	t.Parallel()
 	tmpDir := t.TempDir()

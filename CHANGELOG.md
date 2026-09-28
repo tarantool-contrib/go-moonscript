@@ -255,5 +255,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Positional arguments were ignored, so `--minify false` minified (a boolean
   flag takes its value only after `=`: `--minify=false`), and
   `luamerge main.lua` complained that `--entry` was missing.
+- A `require` of a standard library module, such as Penlight's
+  `require("debug")`, failed `--strict` as an unresolved require, and a
+  project file of that name (`debug.lua`) was embedded, although `require`
+  returns the module from `package.loaded` without searching and never loads
+  such a file. The standard library (`_G`, `coroutine`, `debug`, `io`,
+  `math`, `os`, `package`, `string`, `table`) is now never resolved, embedded
+  or reported; `--include` of one of these names is skipped with a warning.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

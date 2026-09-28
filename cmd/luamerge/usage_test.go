@@ -164,7 +164,8 @@ func TestCLI_WarningPosition(t *testing.T) {
 	require.NoError(t, err)
 
 	// Act.
-	_, stderr, code := runCLIIn(t, dir, "--entry", "main.lua", "--skip", "cjson", "--include", "nothere")
+	_, stderr, code := runCLIIn(t, dir, "--entry", "main.lua", "--skip", "cjson", "--include", "nothere",
+		"--include", "debug")
 
 	// Assert.
 	require.Equal(t, 0, code, stderr)
@@ -196,6 +197,7 @@ func TestCLI_WarningPosition(t *testing.T) {
 		"warning: " + mainLua + ":3: skipped package \"cjson\"",
 		"warning: " + mainLua + ":4: unresolved require \"missing\": ",
 		"warning: include package \"nothere\" not found: ",
+		"warning: include package \"debug\" skipped: ",
 	} {
 		found := slices.ContainsFunc(warnings, func(warning string) bool { return strings.HasPrefix(warning, want) })
 		assert.True(t, found, "no warning starts with %q:\n%s", want, stderr)

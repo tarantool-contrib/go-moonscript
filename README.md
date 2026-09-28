@@ -405,6 +405,8 @@ A `require()` name is resolved the way Lua's own `require` finds a Lua module, w
 
 The file that contains the `require()` plays no part, as in Lua: `require("util")` is `root/util.lua` in every module, including one in `sub/` next to a `sub/util.lua`. One module name registered for two different files is an error.
 
+The standard library — `_G`, `coroutine`, `debug`, `io`, `math`, `os`, `package`, `string` and `table` — is never looked up. Every interpreter has it in `package.loaded` before the program starts, so `require("debug")` returns it without searching and never loads a file of that name; the bundler neither embeds nor reports it, even with `--strict`. `--include` of one of these names is skipped with a warning.
+
 ### Prefix stripping
 
 Some projects name their modules with a package prefix that the directory layout does not mirror. A name that the lookup above finds nowhere is tried again without such a prefix. Only then, so a prefix is never stripped from a name that Lua itself would load a file for:
