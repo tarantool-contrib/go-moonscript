@@ -24,6 +24,11 @@ func DiscoverForTest(
 	return DiscoveryForTest{Interps: found.interps, Skip: found.skip, Problems: found.problems}
 }
 
+// ProbeForTest is probe, which discovery runs on every interpreter it finds.
+func ProbeForTest(interp Interpreter) (string, error) {
+	return probe(interp)
+}
+
 // ProjectFileForTest is projectFile.
 func ProjectFileForTest(dir, rel string) (string, error) {
 	return projectFile(dir, rel)

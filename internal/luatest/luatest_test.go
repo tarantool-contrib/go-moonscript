@@ -366,27 +366,42 @@ func TestRun_PassesArguments(t *testing.T) {
 	})
 }
 
+// testGetenv is what os.getenv(key) prints in Lua for the variable key of the
+// test process.
+func testGetenv(key string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		return "nil"
+	}
+
+	return value
+}
+
 // TestRun_ScrubsEnvironment checks that nothing from the test process reaches
-// the interpreter but PATH, HOME, LUA_PATH and what the options add.
+// the interpreter but PATH, HOME, LUA_PATH and what the options add, and that
+// PATH and HOME do.
 func TestRun_ScrubsEnvironment(t *testing.T) {
 	// t.Setenv forbids t.Parallel().
 	t.Setenv("LUAMERGE_LEAK", "leaked")
 	t.Setenv("LUA_INIT", "print('LUA_INIT ran')")
 
+	kept := "\t" + testGetenv("PATH") + "\t" + testGetenv("HOME") + "\n"
+
 	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
 		t.Helper()
 
 		dir := luatest.WriteProject(t, luatest.Project{
-			"env.lua": "print(os.getenv('LUAMERGE_LEAK'), os.getenv('LUA_PATH'), os.getenv('EXTRA'))\n",
+			"env.lua": "print(os.getenv('LUAMERGE_LEAK'), os.getenv('LUA_PATH'), os.getenv('EXTRA'), " +
+				"os.getenv('PATH'), os.getenv('HOME'))\n",
 		})
 
 		r := luatest.Run(t, interp, dir, luatest.RunOptions{LuaPath: "", Env: []string{"EXTRA=x"}, Timeout: 0},
 			"env.lua")
 		require.Equal(t, 0, r.ExitCode, "%s", r)
-		assert.Equal(t, "nil\t"+luatest.DefaultLuaPath+"\tx\n", r.Stdout)
+		assert.Equal(t, "nil\t"+luatest.DefaultLuaPath+"\tx"+kept, r.Stdout)
 
 		r = luatest.Run(t, interp, dir, luatest.RunOptions{LuaPath: "./?.lua", Env: nil, Timeout: 0}, "env.lua")
-		assert.Equal(t, "nil\t./?.lua\tnil\n", r.Stdout, "%s", r)
+		assert.Equal(t, "nil\t./?.lua\tnil"+kept, r.Stdout, "%s", r)
 	})
 }
 
@@ -562,6 +577,16 @@ func TestDiscover(t *testing.T) {
 		assert.Empty(t, found.Skip)
 		assert.Equal(t, []string{"lua5.1", "lua5.4", "luajit"}, names(found))
 		assert.Equal(t, "version of lua5.4", found.Interps[1].Version)
+	})
+	t.Run("looks up every candidate, the versioned names first", func(t *testing.T) {
+		t.Parallel()
+
+		everywhere := func(name string) (string, error) { return "/opt/bin/" + name, nil }
+
+		found := luatest.DiscoverForTest("", false, everywhere, resolve, probe)
+		assert.Empty(t, found.Problems)
+		assert.Equal(t, []string{"lua5.1", "lua5.2", "lua5.3", "lua5.4", "lua5.5", "luajit", "tarantool", "lua"},
+			names(found))
 	})
 	t.Run("nothing on PATH skips", func(t *testing.T) {
 		t.Parallel()
