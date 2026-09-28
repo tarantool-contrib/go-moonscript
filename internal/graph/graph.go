@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/tarantool/go-luamerge/internal/config"
+	"github.com/tarantool/go-luamerge/internal/lex"
 	"github.com/tarantool/go-luamerge/internal/parse"
 	"github.com/tarantool/go-luamerge/internal/resolve"
-	"github.com/tarantool/go-luamerge/internal/transform"
 )
 
 // WarningKind classifies a non-fatal issue found while building the graph.
@@ -109,8 +109,10 @@ type Module struct {
 	Names []string
 	// Aliases are the names --package-prefix generated from Names. Nothing in
 	// the project requires the module by them.
-	Aliases  []Alias
-	Source   []byte              // raw file contents.
+	Aliases []Alias
+	// Source is the file's contents as the interpreter compiles them, without
+	// the header it skips (see skipHeader): every line keeps its number.
+	Source   []byte
 	Requires []parse.RequireInfo // parsed require edges.
 }
 
@@ -216,6 +218,19 @@ type Resolver interface {
 	Resolve(name string) (*resolve.Result, error)
 }
 
+// skipHeader returns source without the header that the interpreter skips
+// when it loads a file (luaL_loadfile, see lex.Header): a UTF-8 byte order
+// mark, and a first line that starts with "#", such as "#!/usr/bin/env lua".
+// The line break that ends that line stays: the interpreter compiles the
+// line as an empty one. Nothing else goes, blank lines included, so every
+// line keeps its number, in the parser's positions, in warnings and errors,
+// and in a --debug traceback. Every file, the entry included, reaches the
+// bundle without its header: the bundle is not the file, and a "#!" line in
+// the middle of it would not parse.
+func skipHeader(source []byte) []byte {
+	return source[lex.Header(source):]
+}
+
 // resolveTarget resolves a single require()/--include target against the
 // graph: it records a warning (or returns an *UnresolvedError in strict mode)
 // when the target can't be used, dedupes against an already-known module, and
@@ -280,7 +295,7 @@ func resolveTarget(
 		return nil, false, fmt.Errorf("read module %s: %w", result.FilePath, err)
 	}
 
-	source = transform.StripShebang(source)
+	source = skipHeader(source)
 
 	newMod := &Module{
 		ID:       len(g.Modules),
@@ -436,7 +451,7 @@ func Build(cfg *config.Config, parser parse.Parser, resolver Resolver) (*Graph, 
 		return nil, fmt.Errorf("read entry file: %w", err)
 	}
 
-	entrySource = transform.StripShebang(entrySource)
+	entrySource = skipHeader(entrySource)
 
 	g := &Graph{
 		Modules:   nil,

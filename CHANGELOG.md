@@ -116,6 +116,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `a - -b`, `1 ..2`), and a line break where the source had one, since
   Lua 5.1 and LuaJIT read a `(` at the start of a line differently from
   Lua 5.2+.
+- Every file is read the way the interpreter reads a file it loads: a byte
+  order mark is dropped, and a first line starting with `#` is left empty,
+  its line break kept, so every line keeps its number. The bundler used to
+  delete a shebang line together with its line break, and every blank line
+  before the first token, so `--debug` tracebacks, warnings and strict-mode
+  errors named the wrong lines: an error on line 3 after two blank lines was
+  reported on line 1. A byte order mark, or a first line starting with `#`
+  but not `#!`, failed the build, although the interpreter runs such a file.
 - Release archives now include a `darwin_arm64` build for Apple Silicon
   Macs. GoReleaser's build matrix excluded that target under a comment
   claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.

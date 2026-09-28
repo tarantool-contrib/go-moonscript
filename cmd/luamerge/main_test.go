@@ -147,6 +147,20 @@ func TestCLI_Strict(t *testing.T) {
 	assert.Contains(t, stderr, "unresolved")
 }
 
+// TestCLI_WarningLines: a warning names the line of the require. A require on
+// line 3 after two blank lines used to be reported at line 1, twice.
+func TestCLI_WarningLines(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"),
+		[]byte("\n\nlocal m = require(os.getenv(\"X\"))\n"), 0o600))
+
+	_, stderr, code := runCLIIn(t, dir, "--entry", "main.lua", "--output", "-")
+	require.Equal(t, 0, code, stderr)
+	assert.Regexp(t, `^warning: \S*main\.lua:3: dynamic require at line 3, cannot resolve\n$`, stderr)
+}
+
 func TestCLI_RemoveComments(t *testing.T) {
 	t.Parallel()
 

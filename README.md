@@ -109,6 +109,8 @@ A module reachable under several names is registered under each of them with the
 
 `--prefix` code runs first, in a `do ... end` block of its own, so its locals are visible to nothing else. With `--suffix` the entry becomes a function: the bundle calls it with its own `...`, keeps every result, runs the suffix in a block of its own and returns the results.
 
+Every file, the entry included, is read the way the interpreter reads a file it loads: a UTF-8 byte order mark is dropped, and a first line that starts with `#`, such as `#!/usr/bin/env lua`, is left empty. Nothing else changes, blank lines at the top included, so every line keeps its number: a warning names the line of its `require`, and a `--debug` traceback the line of the error. The bundle's own first line is set with `--shebang`. Lua 5.1 does not skip a byte order mark, so there such a file fails to load natively, but runs in a bundle.
+
 ## CLI flags
 
 | Flag | Description | Default |
@@ -128,7 +130,7 @@ A module reachable under several names is registered under each of them with the
 | `--no-arg-fix` | Omit the `arg` line, which only acts on PUC Lua 5.1 (`LUA_COMPAT_VARARG`): there it restores the global `arg` inside module code | – |
 | `--remove-comments` | Remove comments, keeping line numbers (see [Source transforms](#source-transforms)) | `false` |
 | `--remove-empty-lines` | Remove lines that hold only white space, outside strings and comments | `false` |
-| `--minify` | Remove comments, a shebang and the white space between tokens (see [Source transforms](#source-transforms)) | `false` |
+| `--minify` | Remove comments and the white space between tokens (see [Source transforms](#source-transforms)) | `false` |
 | `--strip-shebang` | Remove shebang lines from input module sources | `false` |
 | `--prefix` | Lua code run before the modules are registered, in a block of its own | – |
 | `--suffix` | Lua code run after the entry, in a block of its own | – |
@@ -147,7 +149,7 @@ The transforms read each module with a lexer that knows the lexical grammar of L
 
 - `--remove-comments` removes every comment. A removed comment keeps the line breaks it contained, so every line keeps its number and `--debug` tracebacks stay exact; where the tokens on both sides would otherwise run together (`local--[[c]]b`), a space stays between them.
 - `--remove-empty-lines` removes the lines that hold nothing but white space between tokens; a blank line inside a long string or a long comment is part of it and stays. The lines after a removed one move up, so `--debug` line numbers no longer match the source.
-- `--minify` removes the comments and the white space between tokens. A single space stays where two tokens would otherwise run together (`local x`, `a - -b`, `1 ..2`), and a single line break where the source had one or more: Lua 5.1 and LuaJIT read a `(` at the start of a line differently from Lua 5.2+, so no line break is taken out or put in. A first line starting with `#` and a byte order mark are dropped. Line numbers are not kept.
+- `--minify` removes the comments and the white space between tokens. A single space stays where two tokens would otherwise run together (`local x`, `a - -b`, `1 ..2`), and a single line break where the source had one or more: Lua 5.1 and LuaJIT read a `(` at the start of a line differently from Lua 5.2+, so no line break is taken out or put in. Line numbers are not kept.
 
 ## Configuration
 
@@ -236,7 +238,7 @@ lua: bundle.lua:142: attempt to call a nil value
 lua: src/lib/parser.lua:17: attempt to call a nil value
 ```
 
-In debug mode each module, and the entry, is embedded as a string and run through `load(src, "@path")` in the environment the bundle runs in, so the VM keeps the original chunk name and line numbers. A module is compiled only when it is first required. Keep it **off for releases**: it adds a runtime dependency on `load`/`loadstring`, defeats `luac` precompilation, and its line numbers are meaningless alongside `--remove-empty-lines` and `--minify`, which move lines (`--remove-comments` keeps them).
+In debug mode each module, and the entry, is embedded as a string and run through `load(src, "@path")` in the environment the bundle runs in, so the VM keeps the original chunk name and line numbers. Every line keeps its number, after a shebang line or blank lines at the top of a file too, and so it does with `--remove-comments`. `--remove-empty-lines` and `--minify` move lines: with either of them the numbers no longer match the source. A module is compiled only when it is first required. Keep it **off for releases**: it adds a runtime dependency on `load`/`loadstring` and defeats `luac` precompilation.
 
 ### Ship a bundle but override a module locally
 
@@ -255,7 +257,7 @@ In fallback mode loaders live in `package.postload` behind a searcher appended *
 luamerge --entry src/main.lua --minify --output dist/bundle.lua
 ```
 
-`--minify` subsumes comment, empty-line, and shebang removal, and keeps every token as it is (see [Source transforms](#source-transforms)).
+`--minify` subsumes comment and empty-line removal, and keeps every token as it is (see [Source transforms](#source-transforms)).
 
 ### Inject startup / teardown code
 

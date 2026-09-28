@@ -154,6 +154,56 @@ func TestBundleUnresolvedWarningKind(t *testing.T) {
 	assert.Equal(t, "nope", res.Warnings[0].Module)
 }
 
+// TestBundle_WarningLines: warnings and errors name the line of the require
+// in the file, whatever the file starts with. A require on line 3 after two
+// blank lines used to be reported at line 1.
+func TestBundle_WarningLines(t *testing.T) {
+	t.Parallel()
+
+	for name, header := range map[string]string{
+		"blank lines":     "\n\n",
+		"shebang":         "#!/usr/bin/env lua\n\n",
+		"byte order mark": "\xEF\xBB\xBF\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange: a dynamic require on line 3, a missing module on line 4.
+			dir := t.TempDir()
+			entry := filepath.Join(dir, "main.lua")
+			require.NoError(t, os.WriteFile(entry,
+				[]byte(header+"local m = require(os.getenv(\"X\"))\nrequire(\"nope\")\n"), 0o600))
+
+			opts := luamerge.DefaultOptions()
+			opts.Entry = entry
+
+			// Act.
+			res, err := luamerge.Bundle(opts, &bytes.Buffer{})
+
+			opts.Strict = true
+			_, strictErr := luamerge.Bundle(opts, &bytes.Buffer{})
+
+			// Assert.
+			require.NoError(t, err)
+			require.Len(t, res.Warnings, 2)
+			assert.Equal(t, luamerge.Warning{
+				Kind:    luamerge.WarnDynamicRequire,
+				Module:  "",
+				File:    entry,
+				Line:    3,
+				Message: "dynamic require at line 3, cannot resolve",
+			}, res.Warnings[0])
+			assert.Equal(t, luamerge.WarnUnresolved, res.Warnings[1].Kind)
+			assert.Equal(t, 4, res.Warnings[1].Line, "the line of the unresolved require")
+			assert.Contains(t, res.Warnings[1].Message, "at line 4:")
+
+			var ue *luamerge.UnresolvedError
+			require.ErrorAs(t, strictErr, &ue)
+			assert.Equal(t, 4, ue.Line, "the line of the unresolved require in strict mode")
+		})
+	}
+}
+
 func TestBundleStrictError(t *testing.T) {
 	t.Parallel()
 
