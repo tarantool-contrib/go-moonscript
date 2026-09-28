@@ -64,6 +64,7 @@ func bundler(opts emit.Options, tweak func(cfg *config.Config)) luatest.Bundler 
 
 		var buf bytes.Buffer
 
+		opts.Root = cfg.Root
 		require.NoError(tb, emit.Emit(&buf, g, nil, opts), "emit")
 
 		return buf.Bytes()
@@ -71,9 +72,11 @@ func bundler(opts emit.Options, tweak func(cfg *config.Config)) luatest.Bundler 
 }
 
 // emitOptions are the emit options of these tests: everything off except
-// what debug and fallback say.
+// what debug and fallback say. bundler sets the root.
 func emitOptions(debug, fallback bool) emit.Options {
-	return emit.Options{Prefix: "", Suffix: "", Debug: debug, Fallback: fallback, Shebang: "", NoArgFix: false}
+	return emit.Options{
+		Root: "", Prefix: "", Suffix: "", Debug: debug, Fallback: fallback, Shebang: "", NoArgFix: false,
+	}
 }
 
 // differential is a luatest.Case with the given project and bundler and

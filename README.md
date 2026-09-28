@@ -262,10 +262,10 @@ A runtime error now points at the real source. Compare:
 lua: bundle.lua:142: attempt to call a nil value
 
 # with --debug
-lua: src/lib/parser.lua:17: attempt to call a nil value
+lua: ./lib/parser.lua:17: attempt to call a nil value
 ```
 
-In debug mode each module, and the entry, is embedded as a string and run through `load(src, "@path")` in the environment the bundle runs in, so the VM keeps the original chunk name and line numbers. Every line keeps its number, after a shebang line or blank lines at the top of a file too, and so it does with `--remove-comments`. `--remove-empty-lines` and `--minify` move lines: with either of them the numbers no longer match the source. A module is compiled only when it is first required. Keep it **off for releases**: it adds a runtime dependency on `load`/`loadstring` and defeats `luac` precompilation.
+In debug mode each module, and the entry, is embedded as a string and run through `load(src, "@path")` in the environment the bundle runs in, so the VM keeps the original line numbers, and `path` names the file the way the interpreter names it when the program runs from the root (`src` here): the entry as its command line does (`main.lua`), a module as `require` does when it finds the file through the interpreter's own `./?.lua` and `./?/init.lua` templates (`./lib/parser.lua`, `./pkg/init.lua`), and a file outside the root, such as one in a `--search` directory, by its path from the root (`../vendor/json.lua`). An error thus reports the `file:line` the original program reports, and the bundle holds no directory of the machine that built it, so every checkout of a project builds the same bundle. (Tarantool itself names a module it finds in the script's directory or in the working directory by its absolute path; a bundle cannot know where it will run.) Every line keeps its number, after a shebang line or blank lines at the top of a file too, and so it does with `--remove-comments`. `--remove-empty-lines` and `--minify` move lines: with either of them the numbers no longer match the source. A module is compiled only when it is first required. Keep it **off for releases**: it adds a runtime dependency on `load`/`loadstring` and defeats `luac` precompilation.
 
 ### Ship a bundle but override a module locally
 
@@ -479,7 +479,7 @@ end
 return (table.unpack or unpack)(__luamerge_results, 1, __luamerge_n)
 ```
 
-Debug (`--debug`) — bodies are embedded as strings and loaded with their file's path (absolute) as the chunk name, in the bundle's environment:
+Debug (`--debug`) — bodies are embedded as strings and loaded in the bundle's environment, each as a chunk named after its file's path relative to the root (here `--entry src/main.lua`, so the root is `src`; see [Development build with accurate tracebacks](#development-build-with-accurate-tracebacks)):
 
 ```lua
 local __luamerge_load
@@ -495,12 +495,12 @@ end
 do
 local __luamerge_loader = function(...) return __luamerge_load([[
 -- module source, verbatim
-]], "@/path/to/project/src/mymod.lua")(...) end
+]], "@./mymod.lua")(...) end
 if package.preload["mymod"] == nil then package.preload["mymod"] = __luamerge_loader end
 end
 return __luamerge_load([[
 -- entry source, verbatim
-]], "@/path/to/project/src/main.lua")(...)
+]], "@main.lua")(...)
 ```
 
 Fallback (`--fallback`) — a searcher is appended and loaders go into `package.postload`:

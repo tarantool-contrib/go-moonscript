@@ -2,6 +2,7 @@ package emit
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"text/template"
 
@@ -52,8 +53,10 @@ import (
 //     own name in `...`.
 //
 // In debug mode the bundle embeds each body as a string and the loader
-// loads it as a chunk of its own, named after its file, with
-// __luamerge_load, so errors report the original file and line. The chunk
+// loads it as a chunk of its own with __luamerge_load, named after its
+// file's path relative to the root as the interpreter names the file when
+// the program runs from there (see entryChunkName and moduleChunkName), so
+// errors report the file and line the original program reports. The chunk
 // gets the environment the bundle itself runs in (load's env argument on
 // Lua 5.2 and later, setfenv on Lua 5.1, LuaJIT and Tarantool): the one the
 // modules of a default-mode bundle inherit as closures of the bundle's
@@ -123,7 +126,7 @@ function(...)
 {{if .ArgFix}}if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 {{end}}{{indent .Source 0}}end
 {{- end}}{{define "load" -}}
-__luamerge_load({{bracket .Source}}, {{q (chunkname .Path)}})
+__luamerge_load({{bracket .Source}}, {{q .Chunk}})
 {{- end}}{{if .Shebang}}{{.Shebang}}
 {{end}}-- Amalgamated by luamerge
 -- Entry: {{.EntryName}}
@@ -270,19 +273,54 @@ func luaLongBracket(source string) string {
 	return "[" + equals + "[" + lineBreak + source + "]" + equals + "]"
 }
 
-// chunkName renders the load() chunk name for a module path. The leading '@'
-// tells Lua to treat the rest as a file name in error messages and tracebacks.
-func chunkName(path string) string {
-	return "@" + path
+// entryChunkName is the chunk name the code of the entry at path is loaded
+// under in debug mode: the path from root, which is how the command line
+// names the script when the program runs from root, as in `lua main.lua`:
+// "@main.lua", "@src/main.lua", "@../app/main.lua" (see fromRoot). The
+// leading "@" tells Lua to report the rest as a file name in error messages
+// and tracebacks.
+func entryChunkName(root, path string) string {
+	rel, _ := fromRoot(root, path)
+
+	return "@" + rel
+}
+
+// moduleChunkName is the chunk name the code of the module at path is loaded
+// under in debug mode: the name require gives the file when the program runs
+// from root and finds it through package.path, where the interpreters' own
+// templates are "./?.lua" and "./?/init.lua": "@./m.lua", "@./lib/utils.lua",
+// "@./pkg/init.lua". A file outside root, found in a search directory or
+// through an absolute template, is named by its path from root, as a
+// "../vendor/?.lua" template names it: "@../vendor/json.lua" (see fromRoot).
+func moduleChunkName(root, path string) string {
+	rel, inside := fromRoot(root, path)
+	if inside {
+		return "@./" + rel
+	}
+
+	return "@" + rel
+}
+
+// fromRoot is path relative to root with forward slashes, whatever the
+// system's separator, and whether it lies inside root: a bundle names no
+// directory of the machine that built it, so every checkout of a project
+// builds the same bundle. A path that has no relative form, on another
+// volume than root, is returned as it is: nothing else leads to the file.
+func fromRoot(root, path string) (string, bool) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path, false
+	}
+
+	return filepath.ToSlash(rel), filepath.IsLocal(rel)
 }
 
 //nolint:gochecknoglobals // parsed once at init, read-only for the rest of the run
 var outputTemplate = template.Must(
 	template.New("output").Funcs(template.FuncMap{
-		"indent":    indent,
-		"q":         quoteLua,
-		"bracket":   luaLongBracket,
-		"chunkname": chunkName,
+		"indent":  indent,
+		"q":       quoteLua,
+		"bracket": luaLongBracket,
 	}).Parse(templateText),
 )
 
@@ -307,8 +345,9 @@ type templateData struct {
 type codeData struct {
 	// Source is the code, transforms applied.
 	Source string
-	// Path is the file it comes from, the chunk name in debug mode.
-	Path string
+	// Chunk is the name the code is loaded under in debug mode (see
+	// entryChunkName and moduleChunkName).
+	Chunk string
 	// ArgFix adds the arg line in front of the code when it runs as a
 	// function.
 	ArgFix bool

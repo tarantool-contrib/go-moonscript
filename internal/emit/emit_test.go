@@ -35,9 +35,11 @@ func newGraph(entry *graph.Module, modules ...*graph.Module) *graph.Graph {
 	return &graph.Graph{Modules: all, ByPath: byPath, Entry: entry, EntryName: "main", Warnings: nil}
 }
 
-// defaults are the emit options with everything off.
+// defaults are the emit options with everything off, for a project in /test.
 func defaults() emit.Options {
-	return emit.Options{Prefix: "", Suffix: "", Debug: false, Fallback: false, Shebang: "", NoArgFix: false}
+	return emit.Options{
+		Root: "/test", Prefix: "", Suffix: "", Debug: false, Fallback: false, Shebang: "", NoArgFix: false,
+	}
 }
 
 // emitBundle emits g with opts.
@@ -292,9 +294,26 @@ func TestEmit_Debug(t *testing.T) {
 
 	bundle := emitBundle(t, g, opts)
 
-	assert.Contains(t, bundle, "\"@/test/m.lua\"", "a module is loaded under its own chunk name")
-	assert.Contains(t, bundle, "\"@/test/main.lua\"", "so is the entry")
+	assert.Contains(t, bundle, "\"@./m.lua\"", "a module is loaded under its own chunk name")
+	assert.Contains(t, bundle, "\"@main.lua\"", "so is the entry")
+	assert.NotContains(t, bundle, "/test", "no chunk name holds the root")
 	assertRuns(t, bundle, "module m\tx\n", "x")
+}
+
+// TestEmit_RefusesARelativeRoot: every chunk name of a debug bundle is a
+// path from the root, which a relative root has none of.
+func TestEmit_RefusesARelativeRoot(t *testing.T) {
+	t.Parallel()
+
+	g := newGraph(newModule("/test/main.lua", "print(1)\n"))
+
+	for _, root := range []string{"", "test"} {
+		opts := defaults()
+		opts.Root = root
+
+		var buf bytes.Buffer
+		assert.Error(t, emit.Emit(&buf, g, nil, opts), "root %q", root)
+	}
 }
 
 func TestEmit_Shebang(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -21,16 +22,26 @@ var errNoEntry = errors.New("the graph has no entry")
 // name to register it under.
 var errNoName = errors.New("the module has no name")
 
+// errRootNotAbsolute is returned by Emit when Options.Root is not an
+// absolute path.
+var errRootNotAbsolute = errors.New("the root is not an absolute path")
+
 // Options controls how the bundle is rendered.
 type Options struct {
+	// Root is the directory the program is meant to run from, the project
+	// root, as an absolute path; Emit requires it. In debug mode every chunk
+	// is named after its file's path relative to it.
+	Root string
 	// Prefix is Lua code run before the modules are registered, in a block of
 	// its own.
 	Prefix string
 	// Suffix is Lua code run after the entry, in a block of its own.
 	Suffix string
-	// Debug emits each module via load(source, "@path") so runtime errors
-	// report the original file name and line numbers instead of offsets into
-	// the bundle. The source is embedded verbatim (no reindentation).
+	// Debug emits each module, and the entry, via load(source, "@path"), path
+	// relative to Root as the interpreter names the file when the program
+	// runs from there, so runtime errors report the file name and line
+	// numbers the original program reports instead of offsets into the
+	// bundle. The source is embedded verbatim (no reindentation).
 	Debug bool
 	// Fallback registers modules in package.postload behind an appended
 	// searcher instead of package.preload, so an on-disk copy on package.path
@@ -65,6 +76,11 @@ type Options struct {
 func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts Options) error {
 	if g.Entry == nil {
 		return errNoEntry
+	}
+
+	// A relative root would leave every chunk name its absolute path.
+	if !filepath.IsAbs(opts.Root) {
+		return fmt.Errorf("%w: %q", errRootNotAbsolute, opts.Root)
 	}
 
 	prefix, suffix := opts.Prefix, opts.Suffix
@@ -117,10 +133,11 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 			names, builtinNames = splitBuiltinNames(mod)
 		}
 
+		chunk := moduleChunkName(opts.Root, mod.FilePath)
 		data := moduleData{
 			Names:        names,
 			BuiltinNames: builtinNames,
-			Code:         codeData{Source: source, Path: mod.FilePath, ArgFix: !opts.NoArgFix},
+			Code:         codeData{Source: source, Chunk: chunk, ArgFix: !opts.NoArgFix},
 		}
 		moduleDataList = append(moduleDataList, data)
 		aliases = append(aliases, mod.Aliases...)
@@ -131,9 +148,11 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 		regTable = "postload"
 	}
 
+	entryChunk := entryChunkName(opts.Root, g.Entry.FilePath)
+
 	data := templateData{
 		EntryName: g.EntryName,
-		Entry:     codeData{Source: entrySource, Path: g.Entry.FilePath, ArgFix: !opts.NoArgFix},
+		Entry:     codeData{Source: entrySource, Chunk: entryChunk, ArgFix: !opts.NoArgFix},
 		Modules:   moduleDataList,
 		Aliases:   aliases,
 		Prefix:    prefix,

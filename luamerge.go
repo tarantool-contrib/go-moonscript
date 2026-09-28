@@ -97,6 +97,7 @@ func Bundle(opts Options, w io.Writer) (*Result, error) {
 	transforms := transform.BuildPipeline(cfg.Transform)
 
 	emitOpts := emit.Options{
+		Root:     cfg.Root,
 		Prefix:   cfg.Prefix,
 		Suffix:   cfg.Suffix,
 		Shebang:  cfg.Shebang,

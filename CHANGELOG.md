@@ -162,6 +162,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   string. `--remove-comments` and `--minify` could leave such an ending too.
   In a `--debug` bundle a file whose first line break is a lone `\r` also
   lost a line, so its errors were reported one line too early.
+- A `--debug` bundle names each file the way the interpreter names it when
+  the program runs from the root: the entry as its command line does
+  (`main.lua`), a module as `require` does through `./?.lua`
+  (`./lib/utils.lua`), and a file outside the root by its path from the
+  root (`../vendor/json.lua`), so an error reports the `file:line` the
+  original program reports. The files were named by their absolute paths on
+  the machine that built the bundle, so every checkout of a project built a
+  different bundle, and each disclosed where it was built.
 - Release archives now include a `darwin_arm64` build for Apple Silicon
   Macs. GoReleaser's build matrix excluded that target under a comment
   claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.
