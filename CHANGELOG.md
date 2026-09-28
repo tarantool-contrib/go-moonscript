@@ -170,6 +170,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   original program reports. The files were named by their absolute paths on
   the machine that built the bundle, so every checkout of a project built a
   different bundle, and each disclosed where it was built.
+- A control character followed by a digit, in a module name or, with
+  `--debug`, in a file name, reaches the bundle as it is. The bundle wrote
+  the character as a decimal escape without leading zeros, which took the
+  digit for its own: byte 1 followed by `2` became `\12`, a form feed, so a
+  `require` of that name found no module.
 - Release archives now include a `darwin_arm64` build for Apple Silicon
   Macs. GoReleaser's build matrix excluded that target under a comment
   claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.

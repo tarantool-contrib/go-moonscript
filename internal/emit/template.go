@@ -209,7 +209,9 @@ func indent(source string, spaces int) string {
 // quoteLua renders s as a Lua double-quoted string literal, escaping any
 // character that would otherwise break the literal (quotes, backslashes,
 // newlines, control bytes). Module names come from file paths and are normally
-// trivial, but this keeps the emitter robust against unusual names.
+// trivial, but this keeps the emitter robust against unusual names. A control
+// byte is a decimal escape of all three digits: Lua reads up to three, so a
+// shorter one would take a digit that follows it for its own.
 func quoteLua(input string) string {
 	var builder strings.Builder
 
@@ -228,7 +230,7 @@ func quoteLua(input string) string {
 			builder.WriteString(`\r`)
 		default:
 			if char < 0x20 || char == 0x7f {
-				fmt.Fprintf(&builder, `\%d`, char)
+				fmt.Fprintf(&builder, `\%03d`, char)
 			} else {
 				builder.WriteByte(char)
 			}
