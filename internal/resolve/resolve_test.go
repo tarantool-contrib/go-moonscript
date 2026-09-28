@@ -384,3 +384,39 @@ func TestResolve_EmptyTemplateEntryUsesDefault(t *testing.T) {
 		filepath.Join(root, "other", "m.lua"),
 	}, strings.Split(list, "\n  "))
 }
+
+// TestResolve_RootPrefixStripRequiresHyphen checks that the automatic
+// root-name strip documented under "Prefix stripping" applies only when the
+// root directory's name contains a hyphen: a plain root name such as "myapp"
+// must leave a name the native lookup cannot find unresolved, exactly as it
+// is natively, while a hyphenated root such as "my-app" (whose require
+// spelling reads the hyphen as an underscore) still auto-strips.
+func TestResolve_RootPrefixStripRequiresHyphen(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	testWriteFiles(t, tmpDir, "myapp/util.lua", "my-app/util.lua")
+
+	t.Run("non-hyphenated root name is never auto-stripped", func(t *testing.T) {
+		t.Parallel()
+
+		root := filepath.Join(tmpDir, "myapp")
+		resolver := resolve.New(root, nil, "?.lua;?/init.lua")
+
+		result, err := resolver.Resolve("myapp.util")
+
+		require.ErrorIs(t, err, resolve.ErrModuleNotFound, "Resolve(\"myapp.util\") = %v", result)
+	})
+
+	t.Run("hyphenated root name still auto-strips", func(t *testing.T) {
+		t.Parallel()
+
+		root := filepath.Join(tmpDir, "my-app")
+		resolver := resolve.New(root, nil, "?.lua;?/init.lua")
+
+		result, err := resolver.Resolve("my_app.util")
+
+		require.NoError(t, err)
+		assert.Equal(t, filepath.Join(root, "util.lua"), result.FilePath)
+	})
+}

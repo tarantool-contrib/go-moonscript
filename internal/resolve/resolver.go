@@ -186,18 +186,23 @@ func (r *Resolver) files(loc, name string) []string {
 // extensionNames are the names tried at loc once the native lookup of name
 // has failed at every location. They are the documented extensions over
 // package.searchpath, in order: name without the explicit strip prefix or,
-// when that does not apply, without the root directory's name (a hyphen in it
-// read as an underscore); then, at a search directory, name and the stripped
-// name without the directory's own name.
+// when that does not apply and the root directory's name contains a hyphen,
+// without that name (the hyphen read as an underscore) — a root name without
+// a hyphen is never auto-stripped, only --strip-prefix or --package-name
+// does that for it; then, at a search directory, name and the stripped name
+// without the directory's own name.
 func (r *Resolver) extensionNames(name, loc string) []string {
 	var names []string
 
 	if r.StripPrefix != "" && strings.HasPrefix(name, r.StripPrefix+".") {
 		names = append(names, strings.TrimPrefix(name, r.StripPrefix+"."))
 	} else if r.Root != "" {
-		base := strings.ReplaceAll(filepath.Base(r.Root), "-", "_")
-		if stripped, ok := strings.CutPrefix(name, base+"."); ok {
-			names = append(names, stripped)
+		rootBase := filepath.Base(r.Root)
+		if strings.Contains(rootBase, "-") {
+			base := strings.ReplaceAll(rootBase, "-", "_")
+			if stripped, ok := strings.CutPrefix(name, base+"."); ok {
+				names = append(names, stripped)
+			}
 		}
 	}
 

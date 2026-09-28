@@ -377,7 +377,7 @@ The file that contains the `require()` plays no part, as in Lua: `require("util"
 Some projects name their modules with a package prefix that the directory layout does not mirror. A name that the lookup above finds nowhere is tried again without such a prefix. Only then, so a prefix is never stripped from a name that Lua itself would load a file for:
 
 - **`--strip-prefix tuple_diff`** — strips `tuple_diff.`, so `require("tuple_diff.lib.foo")` finds `lib/foo.lua`.
-- **Root name** — when `--strip-prefix` does not apply, the root directory's name is stripped the same way, a hyphen in it read as an underscore (root `tuple-diff` strips `tuple_diff.`).
+- **Root name** — when `--strip-prefix` does not apply and the root directory's name contains a hyphen, that name is stripped the same way, the hyphen read as an underscore (root `tuple-diff` strips `tuple_diff.`). A root name without a hyphen, such as `myapp`, is never auto-stripped — `require("myapp.util")` stays unresolved unless `--strip-prefix` or `--package-name` says otherwise, exactly as it is natively.
 - **Search-directory name** — in a search directory named `lib`, a leading `lib.` is stripped too, so `require("lib.config")` also finds `config.lua` there.
 - **`--package-name mypkg`** — strip *and* re-add the prefix, so a library bundles from a flat layout yet stays `require("mypkg.*")`-compatible.
 
