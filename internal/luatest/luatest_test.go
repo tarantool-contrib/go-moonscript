@@ -193,6 +193,35 @@ func TestNormalizeStderr(t *testing.T) {
 			want: "module 'nothere' not found:",
 		},
 		{
+			// Tarantool 2.11 and 3.0 put the error's type in front of the
+			// message instead of a trailer after it.
+			name:   "Tarantool 2.11 and 3.0",
+			interp: "tarantool",
+			orig: "LuajitError: ./index.lua:2: attempt to index local 't' (a nil value)\n" +
+				"fatal error, exiting the event loop\n",
+			bundle: "LuajitError: bundle.lua:11: attempt to index local 't' (a nil value)\n" +
+				"fatal error, exiting the event loop\n",
+			want: "attempt to index local 't' (a nil value)",
+		},
+		{
+			name:   "module not found, Tarantool 2.11 and 3.0",
+			interp: "tarantool",
+			orig: "LuajitError: missing.lua:1: module 'nothere' not found:\n" +
+				"\tno field package.preload['nothere']\n\tno file '/w/override/nothere.lua'\n" +
+				"fatal error, exiting the event loop\n",
+			bundle: "LuajitError: bundle.lua:9: module 'nothere' not found:\n" +
+				"\tno field package.preload['nothere']\n\tno file '/tmp/override/nothere.lua'\n" +
+				"fatal error, exiting the event loop\n",
+			want: "module 'nothere' not found:",
+		},
+		{
+			name:   "table error object, Tarantool 2.11 and 3.0",
+			interp: "tarantool",
+			orig:   "LuajitError: table: 0x470a46528928\nfatal error, exiting the event loop\n",
+			bundle: "LuajitError: table: 0x39467b1ef1b0\nfatal error, exiting the event loop\n",
+			want:   "table: 0x?",
+		},
+		{
 			name:   "stacked positions",
 			interp: "lua5.4",
 			orig:   "lua5.4: rethrow.lua:3: rethrow.lua:1: deep\nstack traceback:\n",

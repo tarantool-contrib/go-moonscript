@@ -126,6 +126,10 @@ var addressRe = regexp.MustCompile(`0x[0-9a-fA-F]+`)
 // tarantoolFatal is the line Tarantool prints after an uncaught error.
 const tarantoolFatal = "fatal error, exiting the event loop"
 
+// tarantoolErrorType is what Tarantool 2.11 and 3.0 put in front of an
+// uncaught Lua error, where later releases append a trailer.
+const tarantoolErrorType = "LuajitError: "
+
 // NormalizeStderr reduces the stderr of a run of the interpreter named interp
 // to what must agree between an original program and its bundle. Positions
 // legitimately differ (`./flaky.lua:1: init failed` natively, `bundle.lua:10:
@@ -134,7 +138,8 @@ const tarantoolFatal = "fatal error, exiting the event loop"
 //
 //   - the traceback after "stack traceback:" (PUC Lua, LuaJIT);
 //   - the "<interp>: " prefix of an uncaught error (PUC Lua, LuaJIT);
-//   - Tarantool's JSON trailer and its "fatal error, exiting the event loop";
+//   - Tarantool's JSON trailer, the "LuajitError: " prefix Tarantool 2.11 and
+//     3.0 print instead, and its "fatal error, exiting the event loop";
 //   - the searcher lines of "module 'x' not found:" ("\tno file ...",
 //     "\tno field ..."): they enumerate the search path, which depends on the
 //     working directory (Tarantool lists absolute paths up to /) and, with
@@ -160,6 +165,7 @@ func NormalizeStderr(interp, stderr string) string {
 			line = strings.TrimPrefix(line, interp+": ")
 		}
 
+		line = strings.TrimPrefix(line, tarantoolErrorType)
 		line = tarantoolTrailerRe.ReplaceAllString(line, "")
 		line = StripPositions(line)
 		line = addressRe.ReplaceAllString(line, "0x?")
