@@ -19,31 +19,49 @@ func preloaded(name string) string {
 	return `package.preload["` + name + `"]`
 }
 
+// Projects for the list settings, each with the modules a and b.
+var (
+	// searchProject has a.lua only in lib/ and b.lua only in vendor/.
+	searchProject = luatest.Project{ //nolint:gochecknoglobals // read-only test fixture
+		"main.lua":     "require(\"a\")\nrequire(\"b\")\n",
+		"lib/a.lua":    "return 1\n",
+		"vendor/b.lua": "return 2\n",
+	}
+	// skipProject has both modules next to the entry, which requires them.
+	skipProject = luatest.Project{ //nolint:gochecknoglobals // read-only test fixture
+		"main.lua": "require(\"a\")\nrequire(\"b\")\n",
+		"a.lua":    "return 1\n",
+		"b.lua":    "return 2\n",
+	}
+	// includeProject has both modules next to the entry, which requires
+	// neither.
+	includeProject = luatest.Project{ //nolint:gochecknoglobals // read-only test fixture
+		"main.lua": "print(\"main\")\n",
+		"a.lua":    "return 1\n",
+		"b.lua":    "return 2\n",
+	}
+)
+
+// assertEmbedded checks that bundle embeds the modules embedded and none of
+// the modules left.
+func assertEmbedded(t *testing.T, bundle string, embedded, left []string) {
+	t.Helper()
+
+	for _, name := range embedded {
+		assert.Contains(t, bundle, preloaded(name), "%s must be embedded", name)
+	}
+
+	for _, name := range left {
+		assert.NotContains(t, bundle, preloaded(name), "%s must be left to runtime", name)
+	}
+}
+
 // TestCLI_ListFlagsReplaceConfig checks the list flags --search, --skip and
 // --include on their own and together with the matching list in
 // luamerge.yaml: a list given on the command line replaces the file's list, it
 // is not added to it.
 func TestCLI_ListFlagsReplaceConfig(t *testing.T) {
 	t.Parallel()
-
-	// search: a.lua is found only in lib/, b.lua only in vendor/.
-	searchProject := luatest.Project{
-		"main.lua":     "require(\"a\")\nrequire(\"b\")\n",
-		"lib/a.lua":    "return 1\n",
-		"vendor/b.lua": "return 2\n",
-	}
-	// skip: both modules are found next to the entry.
-	skipProject := luatest.Project{
-		"main.lua": "require(\"a\")\nrequire(\"b\")\n",
-		"a.lua":    "return 1\n",
-		"b.lua":    "return 2\n",
-	}
-	// include: nothing requires a or b.
-	includeProject := luatest.Project{
-		"main.lua": "print(\"main\")\n",
-		"a.lua":    "return 1\n",
-		"b.lua":    "return 2\n",
-	}
 
 	tests := []struct {
 		name     string
@@ -86,14 +104,66 @@ func TestCLI_ListFlagsReplaceConfig(t *testing.T) {
 
 			// Assert.
 			require.Equal(t, 0, code, stderr)
+			assertEmbedded(t, stdout, tt.embedded, tt.left)
+		})
+	}
+}
 
-			for _, name := range tt.embedded {
-				assert.Contains(t, stdout, preloaded(name), "%s must be embedded", name)
+// TestCLI_ListValues checks that a list is given the same way on the command
+// line and in the environment: as comma-separated items, which a flag may
+// also spread over repetitions. An empty value is the empty list, which
+// replaces the list of luamerge.yaml like any other. The environment used to
+// refuse every list, and a flag took "a,b" for one item.
+func TestCLI_ListValues(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		project  luatest.Project
+		yaml     string   // luamerge.yaml; "" writes none.
+		env      []string // KEY=VALUE pairs.
+		args     []string // Added to --entry main.lua.
+		embedded []string
+		left     []string // Modules the bundle must not embed.
+	}{
+		{"search flag", searchProject, "", nil, []string{"--search", "lib,vendor"}, []string{"a", "b"}, nil},
+		{"skip flag", skipProject, "", nil, []string{"--skip", "a, b"}, nil, []string{"a", "b"}},
+		{"include flag", includeProject, "", nil, []string{"--include", "a,b"}, []string{"a", "b"}, nil},
+		{"flag items and repetitions", includeProject, "", nil, []string{"--include", "a,", "--include", "b"},
+			[]string{"a", "b"}, nil},
+		{"empty skip flag", skipProject, "skip_packages: [a]\n", nil, []string{"--skip", ""},
+			[]string{"a", "b"}, nil},
+		{"search variable", searchProject, "", []string{"LUAMERGE_SEARCH=lib,vendor"}, nil,
+			[]string{"a", "b"}, nil},
+		{"skip variable", skipProject, "", []string{"LUAMERGE_SKIP_PACKAGES=a,b"}, nil, nil, []string{"a", "b"}},
+		{"include variable", includeProject, "", []string{"LUAMERGE_INCLUDE_PACKAGES=a,b"}, nil,
+			[]string{"a", "b"}, nil},
+		{"variable replaces config", skipProject, "skip_packages: [a]\n", []string{"LUAMERGE_SKIP_PACKAGES=b"},
+			nil, []string{"a"}, []string{"b"}},
+		{"empty skip variable", skipProject, "skip_packages: [a]\n", []string{"LUAMERGE_SKIP_PACKAGES="}, nil,
+			[]string{"a", "b"}, nil},
+		{"flag replaces variable", skipProject, "", []string{"LUAMERGE_SKIP_PACKAGES=a"}, []string{"--skip", "b"},
+			[]string{"a"}, []string{"b"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange.
+			project := maps.Clone(tt.project)
+			if tt.yaml != "" {
+				project["luamerge.yaml"] = tt.yaml
 			}
 
-			for _, name := range tt.left {
-				assert.NotContains(t, stdout, preloaded(name), "%s must be left to runtime", name)
-			}
+			dir := luatest.WriteProject(t, project)
+
+			// Act.
+			result := luatest.RunCLI(t, dir, tt.env, append([]string{"--entry", "main.lua"}, tt.args...)...)
+
+			// Assert.
+			require.Equal(t, 0, result.ExitCode, result.Stderr)
+			assertEmbedded(t, result.Stdout, tt.embedded, tt.left)
 		})
 	}
 }

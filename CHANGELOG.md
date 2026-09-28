@@ -66,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   natively; a hyphenated root such as `my-app` still auto-strips `my_app.`,
   as before. Use `--strip-prefix` or `--package-name` for a prefix that
   isn't hyphenated.
+- A value of `--search`, `--skip` or `--include` is a comma-separated list, as
+  in the environment: `--skip cjson,socket` skips both, and `--skip ''` clears
+  the list from the config file. The comma used to be part of one item.
 
 ### Removed
 
@@ -219,5 +222,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaced the config file with the bundle.
 - An empty config file, such as `--config /dev/null`, holds no settings, like
   a file with only comments. It used to fail to parse (`no data to process`).
+- The list settings can be given in the environment as comma-separated
+  values: `LUAMERGE_SEARCH=lib,vendor`, `LUAMERGE_SKIP_PACKAGES=cjson,socket`,
+  `LUAMERGE_INCLUDE_PACKAGES=...`; an empty value is the empty list. They
+  failed schema validation as a string where a list belongs.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

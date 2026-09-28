@@ -120,9 +120,9 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 | `--output` | Output file, `-` for stdout | `-` |
 | `--root` | Base directory for module resolution | directory of entry file |
 | `--path` | Lua path templates, semicolon-separated | `?.lua;?/init.lua` |
-| `--search` | Additional search directory (repeatable) | – |
-| `--skip` | Exclude a package (exact name, or `name.*` for prefix; repeatable) | – |
-| `--include` | Force-include a module not reached from the entry (exact name, repeatable) | – |
+| `--search` | Additional search directories (comma-separated or repeated) | – |
+| `--skip` | Exclude packages (exact name, or `name.*` for prefix; comma-separated or repeated) | – |
+| `--include` | Force-include modules not reached from the entry (exact names; comma-separated or repeated) | – |
 | `--strict` | Treat unresolved static requires as errors | `false` |
 | `--debug` | Load modules via `load(src, "@file")` so tracebacks keep the original `file:line` | `false` |
 | `--fallback` | Register modules in `package.postload` behind a searcher so on-disk modules win | `false` |
@@ -140,7 +140,7 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 
 Boolean flags accept a bare form (`--debug`) or an explicit value (`--debug=false`).
 
-The list flags `--search`, `--skip` and `--include` are repeatable. Like every other flag they override the configuration, so a list given on the command line *replaces* the list from `luamerge.yaml` or the environment instead of adding to it: with `skip_packages: [cjson]` in `luamerge.yaml`, `--skip socket` skips only `socket`, and `--skip cjson --skip socket` skips both.
+The list flags `--search`, `--skip` and `--include` take comma-separated items and may be repeated: `--skip cjson,socket` is `--skip cjson --skip socket`. Spaces around an item and empty items are dropped. Like every other flag they override the configuration, so a list given on the command line *replaces* the list from `luamerge.yaml` or the environment instead of adding to it: with `skip_packages: [cjson]` in `luamerge.yaml`, `--skip socket` skips only `socket`, `--skip cjson,socket` skips both, and `--skip ''` skips nothing.
 
 The output is written only once the build has succeeded: a failed build leaves an existing bundle untouched and creates no directories, and with `--output -` it prints nothing. A regular file must be writable; it is replaced atomically (the bundle is written to a temporary file in the same directory, which is then renamed over it) and keeps its permission bits, so a failed or interrupted write never leaves a truncated bundle. The replaced file is a new file: a hard link to the old bundle keeps the old contents. A symlink is written through to its target, and a device such as `/dev/null` is written to. An `--output` that is the same file as the entry, a bundled module or the config file is refused.
 
@@ -200,13 +200,28 @@ transform:
 
 ### Environment variables
 
-Any option can be set with the `LUAMERGE_` prefix and the option's name upper-cased (handy in CI):
+Every setting of `luamerge.yaml` can also be given in the environment (handy in CI). The variable is `LUAMERGE_` followed by the setting's **YAML key** upper-cased, a nested key joined with `_`; it is not named after the flag:
 
 ```bash
 LUAMERGE_ENTRY=src/main.lua LUAMERGE_OUTPUT=dist/bundle.lua LUAMERGE_STRICT=true luamerge
 ```
 
-Multi-word and nested options map as you'd expect — `LUAMERGE_STRIP_PREFIX` → `strip_prefix`, `LUAMERGE_ARG_FIX` → `arg_fix`, and `LUAMERGE_TRANSFORM_REMOVE_COMMENTS` → `transform.remove_comments`. (List-valued options like `skip_packages` are best set in YAML.)
+Where the flag's name differs from the key:
+
+| Flag | YAML key | Environment variable |
+|------|----------|----------------------|
+| `--skip` | `skip_packages` | `LUAMERGE_SKIP_PACKAGES` |
+| `--include` | `include_packages` | `LUAMERGE_INCLUDE_PACKAGES` |
+| `--no-arg-fix` | `arg_fix` (the inverse) | `LUAMERGE_ARG_FIX=false` |
+| `--remove-comments` | `transform.remove_comments` | `LUAMERGE_TRANSFORM_REMOVE_COMMENTS` |
+| `--remove-empty-lines` | `transform.remove_empty_lines` | `LUAMERGE_TRANSFORM_REMOVE_EMPTY_LINES` |
+| `--minify` | `transform.minify` | `LUAMERGE_TRANSFORM_MINIFY` |
+| `--strip-shebang` | `transform.strip_shebang` | `LUAMERGE_TRANSFORM_STRIP_SHEBANG` |
+| `--config`, `--version` | – | – |
+
+Every other variable is named after its flag as well as its key: `LUAMERGE_ENTRY`, `LUAMERGE_OUTPUT`, `LUAMERGE_ROOT`, `LUAMERGE_PATH`, `LUAMERGE_SEARCH`, `LUAMERGE_STRICT`, `LUAMERGE_DEBUG`, `LUAMERGE_FALLBACK`, `LUAMERGE_SHEBANG`, `LUAMERGE_PREFIX`, `LUAMERGE_SUFFIX`, `LUAMERGE_PACKAGE_PREFIX`, `LUAMERGE_PACKAGE_NAME`, `LUAMERGE_STRIP_PREFIX`. A `LUAMERGE_*` variable that names no setting, such as `LUAMERGE_MINIFY` or `LUAMERGE_SKIP`, is an error rather than being ignored.
+
+A boolean takes `true` or `false` (or `1`, `0`). A list is comma-separated, as on the command line: `LUAMERGE_SEARCH=lib,vendor`, `LUAMERGE_SKIP_PACKAGES='cjson,xlog.*'`. Spaces around an item and empty items are dropped, so an empty value is the empty list and clears a list set in `luamerge.yaml`. A list in `luamerge.yaml` is a YAML list and is never split: a directory whose name contains a comma can only be listed there.
 
 ## Examples
 

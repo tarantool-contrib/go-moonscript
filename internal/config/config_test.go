@@ -125,6 +125,50 @@ func TestLoadConfig_NoSettingsWithEnvironment(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_EnvironmentLists checks that a list-valued setting is taken
+// from the environment as a comma-separated value, replacing the list of the
+// config file. go-config passed the value on as one string, which the schema
+// refused.
+func TestLoadConfig_EnvironmentLists(t *testing.T) {
+	// t.Setenv forbids t.Parallel().
+	path := filepath.Join(t.TempDir(), "luamerge.yaml")
+	require.NoError(t, os.WriteFile(path,
+		[]byte("search: [src]\nskip_packages: [yaml]\ninclude_packages: [plugin]\n"), 0o600))
+
+	t.Setenv("LUAMERGE_SEARCH", "lib,vendor")
+	t.Setenv("LUAMERGE_SKIP_PACKAGES", "cjson, socket ,xlog.*")
+	t.Setenv("LUAMERGE_INCLUDE_PACKAGES", "")
+
+	cfg, err := config.LoadConfig(path)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"lib", "vendor"}, cfg.Search)
+	assert.Equal(t, []string{"cjson", "socket", "xlog.*"}, cfg.SkipPackages)
+	assert.Equal(t, []string{}, cfg.IncludePackages, "an empty value is the empty list")
+}
+
+// TestSplitList checks how a comma-separated list value is split.
+func TestSplitList(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		value string
+		want  []string
+	}{
+		{"", []string{}},
+		{"lib", []string{"lib"}},
+		{"lib,vendor", []string{"lib", "vendor"}},
+		{" lib , vendor ", []string{"lib", "vendor"}},
+		{"lib,,vendor,", []string{"lib", "vendor"}},
+		{",", []string{}},
+		{"xlog.*", []string{"xlog.*"}},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, config.SplitList(tt.value), "SplitList(%q)", tt.value)
+	}
+}
+
 // TestFilePath checks the name of the file LoadConfig reads for a path.
 func TestFilePath(t *testing.T) {
 	t.Parallel()

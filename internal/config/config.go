@@ -21,9 +21,9 @@ import (
 )
 
 // schemaJSON is the JSON Schema (draft 2020-12) the merged configuration is
-// validated against at load time. Boolean and list fields also accept a string
-// form because environment-variable overrides arrive as strings before the
-// typed decode.
+// validated against at load time. Environment variables arrive as strings:
+// go-config coerces a boolean's value before validation, and envLists splits
+// a list's.
 //
 //go:embed schema.json
 var schemaJSON []byte
@@ -111,6 +111,23 @@ func FilePath(path string) string {
 	return cmp.Or(path, DefaultPath)
 }
 
+// SplitList splits the value of a list-valued setting, given on the command
+// line or in the environment, into its comma-separated items. Spaces around
+// an item are dropped, and so are empty items: "" is the empty list, and
+// "lib, vendor," is lib and vendor.
+func SplitList(value string) []string {
+	items := []string{}
+
+	for item := range strings.SplitSeq(value, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			items = append(items, item)
+		}
+	}
+
+	return items
+}
+
 // envKeyToPath maps a LUAMERGE_-prefixed environment variable name (with the
 // prefix already stripped by the env collector) to a go-config key path. The
 // only nested config section is `transform`, so LUAMERGE_TRANSFORM_X becomes
@@ -124,6 +141,57 @@ func envKeyToPath(name string) goconfig.KeyPath {
 	}
 
 	return goconfig.NewKeyPath(name)
+}
+
+// isList reports whether the setting at path holds a list.
+func isList(path goconfig.KeyPath) bool {
+	if len(path) != 1 {
+		return false
+	}
+
+	switch path[0] {
+	case "search", "skip_packages", "include_packages":
+		return true
+	default:
+		return false
+	}
+}
+
+// envLists returns the list-valued settings given in the environment, keyed
+// by setting, each value split with SplitList. go-config's environment
+// collector passes every value on as one string, which the schema refuses for
+// a list.
+func envLists() map[string]any {
+	lists := make(map[string]any)
+
+	for _, variable := range os.Environ() {
+		name, value, ok := strings.Cut(variable, "=")
+		if !ok {
+			continue
+		}
+
+		key, ok := strings.CutPrefix(name, envPrefix)
+		if !ok {
+			continue
+		}
+
+		path := envKeyToPath(key)
+		if !isList(path) {
+			continue
+		}
+
+		items := SplitList(value)
+
+		// A list reaches go-config as []any, like the defaults' lists.
+		list := make([]any, len(items))
+		for i, item := range items {
+			list[i] = item
+		}
+
+		lists[path[0]] = list
+	}
+
+	return lists
 }
 
 // LoadConfig loads the configuration: the built-in defaults, overlaid with the
@@ -157,7 +225,11 @@ func LoadConfig(path string) (Config, error) {
 		builder = builder.AddCollector(file)
 	}
 
+	// The lists come after the environment collector, so that a list replaces
+	// the string that collector makes of the same variable.
 	builder = builder.AddCollector(collectors.NewEnv().WithPrefix(envPrefix).WithTransform(envKeyToPath))
+	builder = builder.AddCollector(
+		collectors.NewMap(envLists()).WithName("env lists").WithSourceType(goconfig.EnvSource))
 
 	merged, buildErrs := builder.Build(ctx)
 	if len(buildErrs) > 0 {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/pflag"
 	"github.com/tarantool/go-luamerge"
@@ -60,9 +61,11 @@ func run() int {
 	pflag.StringVar(&output, "output", "", "Output file, '-' for stdout (empty = use config or default)")
 	pflag.StringVar(&root, "root", "", "Base directory for module resolution")
 	pflag.StringVar(&path, "path", "", "Lua path templates, semicolon-separated")
-	pflag.Var(&search, "search", "Additional search directory (repeatable; replaces a configured list)")
-	pflag.Var(&skip, "skip", "Skip package (pattern, repeatable; replaces a configured list)")
-	pflag.Var(&include, "include", "Include package (exact name, repeatable; replaces a configured list)")
+	pflag.Var(&search, "search",
+		"Additional search directories (comma-separated or repeated; replaces a configured list)")
+	pflag.Var(&skip, "skip", "Skip packages (patterns, comma-separated or repeated; replaces a configured list)")
+	pflag.Var(&include, "include",
+		"Include packages (exact names, comma-separated or repeated; replaces a configured list)")
 	pflag.Var(&strict, "strict", "Treat unresolved requires as errors")
 	pflag.Var(&debug, "debug", "Load modules via load(src, '@file') so tracebacks keep original file:line")
 	pflag.Var(&fallback, "fallback",
@@ -167,17 +170,21 @@ func run() int {
 		cfg.ArgFix = !noArgFix.value
 	}
 
-	// When given on the CLI, list flags replace the config-file values.
-	if len(search) > 0 {
-		cfg.Search = search
+	// A list flag replaces the configured list, as every flag overrides its
+	// setting; given with no items, it clears the list.
+	listOverrides := []struct {
+		name string
+		val  multiString
+		dst  *[]string
+	}{
+		{"search", search, &cfg.Search},
+		{"skip", skip, &cfg.SkipPackages},
+		{"include", include, &cfg.IncludePackages},
 	}
-
-	if len(skip) > 0 {
-		cfg.SkipPackages = skip
-	}
-
-	if len(include) > 0 {
-		cfg.IncludePackages = include
+	for _, ov := range listOverrides {
+		if flags.Changed(ov.name) {
+			*ov.dst = ov.val
+		}
 	}
 
 	// Entry is required.
@@ -211,19 +218,22 @@ func run() int {
 	return 0
 }
 
+// multiString is a list flag. A value holds comma-separated items, split as
+// in the environment (see config.SplitList), and a repeated flag adds its
+// items to the list.
 type multiString []string
 
 func (m *multiString) String() string {
-	return fmt.Sprintf("%v", []string(*m))
+	return strings.Join(*m, ",")
 }
 
 func (m *multiString) Set(value string) error {
-	*m = append(*m, value)
+	*m = append(*m, config.SplitList(value)...)
 	return nil
 }
 
 func (m *multiString) Type() string {
-	return "string"
+	return "strings"
 }
 
 type optionalBool struct {

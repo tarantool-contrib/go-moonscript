@@ -1,5 +1,8 @@
 # luamerge configuration file
-# CLI flags override these values
+# LUAMERGE_* environment variables override these values, and CLI flags
+# override both. A list given on the command line or in the environment is
+# comma-separated (--skip cjson,socket, LUAMERGE_SKIP_PACKAGES=cjson,socket)
+# and replaces the list here; lists in this file are YAML lists.
 
 # Entry Lua file (required)
 entry: src/main.lua
