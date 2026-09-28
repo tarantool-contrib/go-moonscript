@@ -28,9 +28,8 @@ import (
 //go:embed schema.json
 var schemaJSON []byte
 
-// errEntryNotSet is returned by ResolveRoot when Root is empty and there is
-// no Entry to derive it from.
-var errEntryNotSet = errors.New("cannot determine root: entry not set")
+// errEntryNotSet is returned by ResolveRoot when there is no Entry.
+var errEntryNotSet = errors.New("entry not set")
 
 // TransformConfig holds the boolean toggles for the Lua source transforms
 // applied while merging.
@@ -292,24 +291,54 @@ func (c *Config) ApplyPackageName() {
 	}
 }
 
-// ResolveRoot derives Root from Entry when Root is not already set.
+// ResolveRoot settles the two paths module names are computed from. It makes
+// Entry and Root absolute and resolves the symbolic links in them, deriving
+// Root from Entry's directory when it is not set; both must exist. A module's
+// name is its path relative to Root, so the two have to be spelled alike: a
+// relative root, or one reached through a symbolic link, used to rename the
+// entry. Relative paths are taken from the working directory.
 func (c *Config) ResolveRoot() error {
-	if c.Root != "" {
-		return nil
-	}
-
 	if c.Entry == "" {
 		return errEntryNotSet
 	}
 
-	absEntry, err := filepath.Abs(c.Entry)
+	entry, err := realPath(c.Entry)
 	if err != nil {
-		return fmt.Errorf("resolve entry path: %w", err)
+		return fmt.Errorf("entry: %w", err)
 	}
 
-	c.Root = filepath.Dir(absEntry)
+	c.Entry = entry
+
+	if c.Root == "" {
+		c.Root = filepath.Dir(entry)
+
+		return nil
+	}
+
+	root, err := realPath(c.Root)
+	if err != nil {
+		return fmt.Errorf("root: %w", err)
+	}
+
+	c.Root = root
 
 	return nil
+}
+
+// realPath returns path made absolute, with every symbolic link in it
+// resolved. The file must exist.
+func realPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("absolute path: %w", err)
+	}
+
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve symbolic links: %w", err)
+	}
+
+	return resolved, nil
 }
 
 // ShouldSkip reports whether name matches a pattern in SkipPackages, honoring

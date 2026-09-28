@@ -2,7 +2,9 @@ package main
 
 import (
 	"maps"
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -166,6 +168,101 @@ func TestCLI_ListValues(t *testing.T) {
 			assertEmbedded(t, result.Stdout, tt.embedded, tt.left)
 		})
 	}
+}
+
+// TestCLI_RootSpelling checks that the entry's name does not depend on how
+// the root and the entry are spelled. The name is the entry's path relative
+// to the root: a relative --root named the entry main instead of app.main,
+// and a root reached through a symbolic link gave .......src.app.main.
+func TestCLI_RootSpelling(t *testing.T) {
+	t.Parallel()
+
+	dir := luatest.WriteProject(t, luatest.Project{
+		"src/app/main.lua": "print(require(\"app.util\"))\n",
+		"src/app/util.lua": "return \"util\"\n",
+	})
+	require.NoError(t, os.Symlink(".", filepath.Join(dir, "link")))
+
+	tests := []struct {
+		name string
+		yaml string // luamerge.yaml; "" writes none.
+		args []string
+	}{
+		{"relative root", "", []string{"--entry", "src/app/main.lua", "--root", "src"}},
+		{"absolute root", "", []string{"--entry", "src/app/main.lua", "--root", filepath.Join(dir, "src")}},
+		{"root through a link", "",
+			[]string{"--entry", "src/app/main.lua", "--root", filepath.Join(dir, "link", "src")}},
+		{"entry through a link", "", []string{"--entry", "link/src/app/main.lua", "--root", "src"}},
+		{"relative root in luamerge.yaml", "root: src\n", []string{"--entry", "src/app/main.lua"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange: the config file goes into a directory of its own, so
+			// that parallel cases do not see each other's.
+			configPath := filepath.Join(t.TempDir(), "luamerge.yaml")
+			require.NoError(t, os.WriteFile(configPath, []byte(tt.yaml), 0o600))
+
+			// Act.
+			args := slices.Concat([]string{"--config", configPath, "--package-prefix", "pk"}, tt.args)
+			stdout, stderr, code := runCLIIn(t, dir, args...)
+
+			// Assert: the entry is not registered, so its name shows in the
+			// bundle's header only.
+			require.Equal(t, 0, code, stderr)
+			assert.Empty(t, stderr)
+			assert.Contains(t, stdout, entryHeader("app.main"))
+			assertEmbedded(t, stdout, []string{"app.util", "pk.app.util"}, nil)
+		})
+	}
+}
+
+// entryHeader is the bundle's header line that names the entry.
+func entryHeader(name string) string {
+	return "-- Entry: " + name + "\n"
+}
+
+// TestCLI_EntryOutsideRoot checks that an entry kept outside the root is
+// named after its file, whatever the root's spelling: its path relative to
+// the root would start with "..".
+func TestCLI_EntryOutsideRoot(t *testing.T) {
+	t.Parallel()
+
+	dir := luatest.WriteProject(t, luatest.Project{
+		"scripts/run.lua": "print(require(\"util\"))\n",
+		"src/util.lua":    "return \"util\"\n",
+	})
+
+	for _, root := range []string{"src", filepath.Join(dir, "src")} {
+		t.Run(root, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, code := runCLIIn(t, dir, "--entry", "scripts/run.lua", "--root", root)
+
+			require.Equal(t, 0, code, stderr)
+			assert.Contains(t, stdout, entryHeader("run"))
+			assertEmbedded(t, stdout, []string{"util"}, nil)
+			// The name from the path relative to the root: ...scripts.run.
+			assert.NotContains(t, stdout, "scripts.run", "the entry is named by a path out of the root")
+		})
+	}
+}
+
+// TestCLI_MissingRoot checks that a --root that does not exist is an error,
+// not a build that finds no module.
+func TestCLI_MissingRoot(t *testing.T) {
+	t.Parallel()
+
+	dir := luatest.WriteProject(t, luatest.Project{"main.lua": "print(\"hi\")\n"})
+
+	stdout, stderr, code := runCLIIn(t, dir, "--entry", "main.lua", "--root", "scr")
+
+	assert.Equal(t, 1, code, "exit code")
+	assert.Contains(t, stderr, "scr")
+	assert.Contains(t, stderr, "no such file or directory")
+	assert.Empty(t, stdout)
 }
 
 // commentProject is a project whose entry starts with a comment, so whether

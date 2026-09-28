@@ -400,12 +400,106 @@ package_prefix: "mypkg"
 	assert.Equal(t, "mypkg", cfg.PackagePrefix, "PackagePrefix = %q, want %q", cfg.PackagePrefix, "mypkg")
 }
 
+// canonicalTempDir returns a new temporary directory spelled without symbolic
+// links: on macOS t.TempDir() is under /var, a link to /private/var.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	return dir
+}
+
+// TestResolveRoot_Spellings checks that however the entry and the root are
+// spelled, relative, absolute, through a symbolic link, ResolveRoot turns
+// them into the same absolute paths without links. Module names are paths
+// relative to the root, so a root spelled "src" named the entry "main"
+// instead of "app.main", and one reached through a link gave dotted "..".
+//
+//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+func TestResolveRoot_Spellings(t *testing.T) {
+	dir := canonicalTempDir(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src", "app"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "app", "main.lua"), nil, 0o600))
+	require.NoError(t, os.Symlink(".", filepath.Join(dir, "link")))
+	t.Chdir(dir)
+
+	wantRoot := filepath.Join(dir, "src")
+	wantEntry := filepath.Join(dir, "src", "app", "main.lua")
+
+	tests := []struct {
+		name  string
+		entry string
+		root  string
+		want  string // The root expected.
+	}{
+		{"relative root", "src/app/main.lua", "src", wantRoot},
+		{"relative root with a slash", "src/app/main.lua", "src/", wantRoot},
+		{"unclean spelling", "./src/../src/app/main.lua", "./src/.", wantRoot},
+		{"absolute root", "src/app/main.lua", wantRoot, wantRoot},
+		{"root through a link", "src/app/main.lua", filepath.Join(dir, "link", "src"), wantRoot},
+		{"entry through a link", filepath.Join("link", "src", "app", "main.lua"), "src", wantRoot},
+		{"root derived from the entry", "src/app/main.lua", "", filepath.Join(dir, "src", "app")},
+		{"root derived through a link", filepath.Join("link", "src", "app", "main.lua"), "",
+			filepath.Join(dir, "src", "app")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Entry = tt.entry
+			cfg.Root = tt.root
+
+			require.NoError(t, cfg.ResolveRoot())
+
+			assert.Equal(t, tt.want, cfg.Root, "root")
+			assert.Equal(t, wantEntry, cfg.Entry, "entry")
+		})
+	}
+}
+
+// TestResolveRoot_Missing checks that an entry or a root that does not exist
+// is an error, rather than a build under a root nothing can be found in.
+func TestResolveRoot_Missing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	entry := filepath.Join(dir, "main.lua")
+	require.NoError(t, os.WriteFile(entry, nil, 0o600))
+
+	tests := []struct {
+		name  string
+		entry string
+		root  string
+	}{
+		{"entry", filepath.Join(dir, "missing.lua"), ""},
+		{"root", entry, filepath.Join(dir, "src")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := config.Default()
+			cfg.Entry = tt.entry
+			cfg.Root = tt.root
+
+			err := cfg.ResolveRoot()
+
+			require.ErrorIs(t, err, fs.ErrNotExist)
+			assert.Contains(t, err.Error(), tt.name)
+		})
+	}
+}
+
 func TestResolveRoot(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
+	tmpDir := canonicalTempDir(t)
 	entryPath := filepath.Join(tmpDir, "src", "main.lua")
 	require.NoError(t, os.MkdirAll(filepath.Dir(entryPath), 0750))
+	require.NoError(t, os.WriteFile(entryPath, nil, 0o600))
 
 	cfg := config.Config{
 		Entry:    entryPath,

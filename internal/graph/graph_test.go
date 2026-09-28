@@ -21,7 +21,10 @@ const (
 
 func TestGraphLinearDependency(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
+	// Build resolves the symbolic links in the entry's path (on macOS the
+	// temporary directory is under /var, a link to /private/var).
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 
 	// Create Lua files: main.lua -> a.lua -> b.lua.
 	mainContent := requireAScript
@@ -92,7 +95,10 @@ func TestGraphLinearDependency(t *testing.T) {
 
 func TestGraphCircularDependency(t *testing.T) {
 	t.Parallel()
-	tmpDir := t.TempDir()
+	// Build resolves the symbolic links in the entry's path, and the resolver
+	// is given the root as spelled here: both must name a.lua alike.
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 
 	// Create Lua files: a.lua -> b.lua -> a.lua (circular).
 	aContent := requireBScript
@@ -276,7 +282,10 @@ func TestGraphPackagePrefix(t *testing.T) {
 func TestBuild_PackagePrefixAliases(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	// Build resolves the symbolic links in the entry's path; the resolver is
+	// given the root as spelled here.
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "p"), 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"),
 		[]byte("require(\"x\")\nrequire(\"p.z\")\n"), 0o600))
@@ -354,7 +363,11 @@ func TestBuild_EntryIsNamedOnlyByItsRequires(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dir := t.TempDir()
+			// Build resolves the symbolic links in the entry's path; the
+			// resolver is given the root as spelled here, so a require of the
+			// entry must see the same spelling.
+			dir, err := filepath.EvalSymlinks(t.TempDir())
+			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "app.lua"), []byte(requireAScript), 0o600))
 			require.NoError(t, os.WriteFile(filepath.Join(dir, "a.lua"), []byte(tt.aSource), 0o600))
 
@@ -561,11 +574,15 @@ func TestWarningKind_String(t *testing.T) {
 }
 
 // testBuild writes files into a fresh project directory and builds its graph
-// from main.lua in strict mode. It returns the graph and the directory.
+// from main.lua in strict mode. It returns the graph and the directory, whose
+// symbolic links are resolved as Build resolves the entry's (on macOS the
+// temporary directory is under /var, a link to /private/var).
 func testBuild(t *testing.T, files map[string]string) (*graph.Graph, string) {
 	t.Helper()
 
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
 	for name, content := range files {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
 	}

@@ -14,11 +14,15 @@ import (
 	"github.com/tarantool/go-luamerge/internal/luatest"
 )
 
-// writeProject creates a minimal main + module project and returns its dir.
+// writeProject creates a minimal main + module project and returns its dir,
+// with its symbolic links resolved as Bundle resolves them in the paths it
+// reports (on macOS the temporary directory is under /var, a link to
+// /private/var).
 func writeProject(t *testing.T) string {
 	t.Helper()
 
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"),
 		[]byte("local m = require(\"module\")\nprint(m.greet())\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "module.lua"),
@@ -59,11 +63,14 @@ func TestBundle(t *testing.T) {
 
 // TestBundle_Files checks that Result.Files lists every embedded source file
 // as an absolute path, the entry first, and nothing that was left to runtime.
+// The paths have the root's symbolic links resolved (on macOS the temporary
+// directory is under /var, a link to /private/var).
 //
 //nolint:paralleltest // t.Chdir changes the working directory of the whole process.
 func TestBundle_Files(t *testing.T) {
 	// Arrange.
-	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	require.NoError(t, os.Mkdir(filepath.Join(dir, "lib"), 0o750))
 
 	for name, src := range map[string]string{
@@ -169,7 +176,11 @@ func TestBundle_WarningLines(t *testing.T) {
 			t.Parallel()
 
 			// Arrange: a dynamic require on line 3, a missing module on line 4.
-			dir := t.TempDir()
+			// The directory's symbolic links are resolved, as Bundle resolves
+			// them in the paths it reports.
+			dir, err := filepath.EvalSymlinks(t.TempDir())
+			require.NoError(t, err)
+
 			entry := filepath.Join(dir, "main.lua")
 			require.NoError(t, os.WriteFile(entry,
 				[]byte(header+"local m = require(os.getenv(\"X\"))\nrequire(\"nope\")\n"), 0o600))

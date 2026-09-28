@@ -226,5 +226,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values: `LUAMERGE_SEARCH=lib,vendor`, `LUAMERGE_SKIP_PACKAGES=cjson,socket`,
   `LUAMERGE_INCLUDE_PACKAGES=...`; an empty value is the empty list. They
   failed schema validation as a string where a list belongs.
+- Module names no longer depend on how the root is spelled: the entry and the
+  root are made absolute and their symbolic links resolved before any name is
+  computed. A relative root (`--root src`, or `root: src` in `luamerge.yaml`)
+  named the entry `main` instead of `app.main`, and a root reached through a
+  symbolic link, even `/var` on macOS, gave a name full of dots; with
+  `--package-prefix` that name is the bundle's public `require` name. An entry
+  outside the root is named after its file.
+- A `--root` that does not exist is an error. The build used to go on and
+  find no module under it.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

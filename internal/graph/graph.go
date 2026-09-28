@@ -150,8 +150,9 @@ func moduleNameFromPath(root, filePath string) string {
 	}
 
 	rel, err := filepath.Rel(root, filePath)
-	if err != nil {
-		// If relative path cannot be computed, use filename.
+	if err != nil || !filepath.IsLocal(rel) {
+		// Outside the root (an entry kept apart from the modules), a path
+		// from the root would climb out of it with "..": use the filename.
 		base := filepath.Base(filePath)
 		base = strings.TrimSuffix(base, ".lua")
 		base = strings.TrimSuffix(base, ".init")
