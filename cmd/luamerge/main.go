@@ -3,10 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
+	"slices"
 	"strconv"
 
 	"github.com/spf13/pflag"
@@ -23,10 +23,6 @@ var (
 	commit  = "unknown"
 	date    = "unknown"
 )
-
-// outputDirPerm is the permission mode used when creating the output
-// directory for --output.
-const outputDirPerm = 0o750
 
 func main() {
 	os.Exit(run())
@@ -184,32 +180,19 @@ func run() int {
 		return 1
 	}
 
-	// Select the output writer (the library Bundle ignores cfg.Output).
-	var out io.Writer = os.Stdout
+	// Render the whole bundle into memory before touching the output (the
+	// library Bundle ignores cfg.Output), so that nothing is written unless the
+	// build succeeds.
+	var bundle bytes.Buffer
 
-	if cfg.Output != "-" {
-		dir := filepath.Dir(cfg.Output)
-
-		mkdirErr := os.MkdirAll(dir, outputDirPerm)
-		if mkdirErr != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: create output directory: %v\n", mkdirErr)
-			return 1
-		}
-
-		// cfg.Output is a user-specified CLI/config value, which is the intended
-		// way to select where this CLI writes its bundle.
-		outputFile, createErr := os.Create(cfg.Output)
-		if createErr != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "error: create output file: %v\n", createErr)
-			return 1
-		}
-
-		defer func() { _ = outputFile.Close() }()
-
-		out = outputFile
+	res, err := luamerge.Bundle(cfg, &bundle)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
 	}
 
-	res, err := luamerge.Bundle(cfg, out)
+	// The config file is as much an input as the sources are.
+	err = putOutput(cfg.Output, bundle.Bytes(), slices.Concat(res.Files, []string{configPath}))
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1

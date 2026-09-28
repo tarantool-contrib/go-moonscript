@@ -38,4 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependencies. The update also makes the module build with Go 1.27, where the
   previous `go-json-experiment/json` failed to compile.
 
+### Fixed
+
+- The CLI never overwrites its inputs: an `--output` that is the same file as
+  the entry, a bundled module or the config file is refused. It used to be
+  truncated before it was read, and the build then bundled the empty file and
+  exited with success.
+- A failed build keeps the previous output: the bundle is written only once
+  the build has succeeded, so a failed build no longer leaves an empty file
+  that `make` takes for up to date, creates no directories and prints nothing
+  with `--output -`.
+
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

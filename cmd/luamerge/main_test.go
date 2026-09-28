@@ -21,7 +21,16 @@ func TestMain(m *testing.M) { luatest.Main(m) }
 func runCLI(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
 
-	result := luatest.RunCLI(t, t.TempDir(), nil, args...)
+	return runCLIIn(t, t.TempDir(), args...)
+}
+
+// runCLIIn is runCLI run from dir, for tests that pass paths relative to a
+// project the way a user types them, or that rely on luamerge.yaml being found
+// in the working directory.
+func runCLIIn(t *testing.T, dir string, args ...string) (string, string, int) {
+	t.Helper()
+
+	result := luatest.RunCLI(t, dir, nil, args...)
 
 	return result.Stdout, result.Stderr, result.ExitCode
 }
