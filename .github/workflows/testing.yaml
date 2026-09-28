@@ -5,6 +5,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # The tests that execute bundles run them on every Lua interpreter on PATH
+  # and skip when there is none. Listing the interpreters the jobs install
+  # makes a missing one fail those tests instead (see internal/luatest). Each
+  # name is also the Ubuntu package that provides it.
+  LUATEST_INTERPRETERS: lua5.1,lua5.2,lua5.3,lua5.4,luajit
+
 # Run on push and on PRs from forks, but skip PRs from the same repository —
 # otherwise internal branches would run CI twice.
 jobs:
@@ -27,8 +34,15 @@ jobs:
         with:
           go-version: ${{ matrix.golang }}
 
-      - name: install Lua (for integration tests)
-        run: sudo apt-get update && sudo apt-get install -y lua5.3
+      - name: install Lua interpreters
+        run: |
+          interpreters="${LUATEST_INTERPRETERS//,/ }"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $interpreters
+          for lua in $interpreters; do
+            printf '%s: ' "$lua"
+            "$lua" -e 'print((jit and jit.version) or _VERSION)'
+          done
 
       - name: run tests
         run: make test
@@ -50,8 +64,15 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: install Lua (for integration tests)
-        run: sudo apt-get update && sudo apt-get install -y lua5.3
+      - name: install Lua interpreters
+        run: |
+          interpreters="${LUATEST_INTERPRETERS//,/ }"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $interpreters
+          for lua in $interpreters; do
+            printf '%s: ' "$lua"
+            "$lua" -e 'print((jit and jit.version) or _VERSION)'
+          done
 
       - name: run tests, collect coverage and send to Coveralls
         env:

@@ -432,9 +432,9 @@ end
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for build commands, code style, testing,
-and the pull-request process. Run the test suite with `make test`; the
-integration tests additionally execute generated bundles under a `lua`
-interpreter when one is on `PATH`.
+and the pull-request process. Run the test suite with `make test`; the tests
+that execute generated bundles run them on every Lua interpreter on `PATH`
+(see [Lua interpreters](CONTRIBUTING.md#lua-interpreters)).
 
 ## License
 

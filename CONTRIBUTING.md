@@ -11,9 +11,8 @@ $ cd go-luamerge
 $ go mod tidy
 ```
 
-Some integration tests execute generated bundles under a `lua` interpreter.
-They are skipped automatically when no `lua` is on `PATH`, so a Lua interpreter
-is optional but recommended for full coverage.
+The tests that execute generated bundles need a Lua interpreter and are
+skipped without one; see [Lua interpreters](#lua-interpreters).
 
 ## Branch naming conventions
 
@@ -45,6 +44,37 @@ make testrace
 
 # Run tests for a specific package (e.g., internal/parse):
 go test ./internal/parse
+```
+
+### Lua interpreters
+
+The tests that execute generated bundles (`internal/integration`, the Lua
+test of the root package and the harness in `internal/luatest`) run each
+bundle on every Lua interpreter found on `PATH`: `lua5.1`, `lua5.2`,
+`lua5.3`, `lua5.4`, `lua5.5`, `luajit`, `tarantool` and `lua`, once per
+distinct binary. The original program runs from its project directory and
+the bundle from an empty directory, so a module missing from the bundle
+cannot be loaded from disk.
+
+With no interpreter on `PATH` these tests are skipped. To make a missing
+interpreter a failure instead, list the interpreters that must be present
+in `LUATEST_INTERPRETERS`; CI sets it to the interpreters it installs:
+
+```bash
+LUATEST_INTERPRETERS=lua5.1,lua5.4,luajit make test
+```
+
+The variable does not start with `LUAMERGE_`: that prefix belongs to the
+configuration, which rejects unknown `LUAMERGE_` variables.
+
+To run the tests on the interpreters CI uses without installing them, use a
+container:
+
+```bash
+docker run --rm -v "$PWD:/src:ro" golang:1.26-alpine sh -c '
+  apk add --no-cache git lua5.1 lua5.2 lua5.3 lua5.4 luajit &&
+  cp -r /src /work && cd /work &&
+  LUATEST_INTERPRETERS=lua5.1,lua5.2,lua5.3,lua5.4,luajit go test ./...'
 ```
 
 ### Test naming conventions
