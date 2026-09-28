@@ -76,21 +76,24 @@ end`,
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := parser.Parse([]byte(tt.source), "test.lua")
+			found, err := parser.Parse([]byte(tt.source), "test.lua")
 			require.NoError(t, err, "Parse() error")
-			assert.Equal(t, tt.expected, got)
+			require.Nil(t, found.Fallback, "the parser reads the source")
+			assert.Equal(t, tt.expected, found.Requires)
 		})
 	}
 }
 
-// testParse parses source and returns what it found; the source must parse.
+// testParse parses source and returns what it found; the parser, not the
+// token scanner, must read the source.
 func testParse(t *testing.T, source string) []parse.RequireInfo {
 	t.Helper()
 
-	got, err := parse.New().Parse([]byte(source), "test.lua")
+	found, err := parse.New().Parse([]byte(source), "test.lua")
 	require.NoError(t, err, "Parse(%q)", source)
+	require.Nil(t, found.Fallback, "the parser reads %q", source)
 
-	return got
+	return found.Requires
 }
 
 // testStatic is the RequireInfo of a require call with the literal name on

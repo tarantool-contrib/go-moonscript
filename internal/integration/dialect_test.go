@@ -284,3 +284,41 @@ func TestCLI_DialectSyntax(t *testing.T) {
 		})
 	}
 }
+
+// TestCLI_TokenScanFallback: a module the parser cannot read, here one with a
+// syntax error, does not fail the build. The token scanner finds its
+// requires, which are embedded, and the CLI warns with the line the parser
+// failed on. With --debug a module compiles when it is first required, as
+// natively, so the program that tries the module through pcall runs on in
+// the bundle too.
+func TestCLI_TokenScanFallback(t *testing.T) {
+	t.Parallel()
+
+	project := luatest.Project{
+		"main.lua":   "print((pcall(require, \"broken\")))\nprint((require(\"fine\")))\n",
+		"broken.lua": "local x = = 1\nreturn require(\"dep\")\n",
+		"dep.lua":    "return \"dep\"\n",
+		"fine.lua":   "return \"fine\"\n",
+	}
+	scanned := testCLIBundler(
+		[]string{`broken\.lua:1: the parser cannot read the file: syntax error near "="; ` +
+			`its requires were found by the token scanner`},
+		"--entry", "main.lua", "--strict", "--debug")
+
+	spec := differential(project, "", func(tb testing.TB, dir string) []byte {
+		tb.Helper()
+
+		bundle := scanned(tb, dir)
+		assert.Contains(tb, string(bundle), `package.preload["dep"]`, "the require the token scanner found")
+
+		return bundle
+	})
+	spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+		t.Helper()
+
+		luatest.AssertSame(t, orig, bundle)
+		assert.Equal(t, "false\nfine\n", orig.Stdout, "stdout of the original\n%s", orig)
+	}
+
+	luatest.Differential(t, spec)
+}

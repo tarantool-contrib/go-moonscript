@@ -20,3 +20,14 @@ func FindRequiresForTest(chunk []ast.Stmt) ([]RequireInfo, error) {
 func NormalizeForTest(src []byte) ([]byte, error) {
 	return normalize(src)
 }
+
+// ScanRequiresForTest runs the token scanner on src, which Parse runs only on
+// a source the parser cannot read.
+func ScanRequiresForTest(src []byte) ([]RequireInfo, error) {
+	tokens, err := significantTokens(src)
+	if err != nil {
+		return nil, err
+	}
+
+	return scanRequires(src, tokens), nil
+}

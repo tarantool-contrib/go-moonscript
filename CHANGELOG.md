@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project required by the name of a module that some runtimes have built in,
   such as a pure-Lua `bit.lua` or `utf8.lua`, naming the runtimes that load
   their own module instead of the project's.
+- `WarnTokenScan` (`token-scan`): a warning for a module the parser cannot
+  read, usually for a syntax error, whose requires were found by scanning its
+  tokens instead. It names the line the parser failed on. Such a module used
+  to fail the whole build; now only a file that cannot even be split into
+  tokens does, such as one with a string without its end.
 
 ### Changed
 

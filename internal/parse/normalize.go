@@ -18,6 +18,13 @@ const attribLen = 3
 const keywords = " and break do else elseif end false for function goto if in local nil not or repeat" +
 	" return then true until while "
 
+// Keywords the normalizer and the token scanner look for in more than one
+// place.
+const (
+	keywordEnd      = "end"
+	keywordFunction = "function"
+)
+
 // numeralRe matches the numeral at the start of the text of a Number token as
 // the dialect that reads it takes it: a decimal or hexadecimal integer or
 // float with its exponent (hexadecimal floats are Lua 5.2 and LuaJIT), or a
@@ -93,8 +100,21 @@ type edit struct {
 //     goto where it names a variable (Lua 5.1, LuaJIT) another name.
 //
 // src is read the way the interpreter reads a file it loads (see
-// lex.NewFile). The error is a lexical error, of source no dialect reads.
+// significantTokens). The error is a lexical error, of source no dialect
+// reads.
 func normalize(src []byte) ([]byte, error) {
+	tokens, err := significantTokens(src)
+	if err != nil {
+		return nil, err
+	}
+
+	return normalizeTokens(src, tokens), nil
+}
+
+// significantTokens returns the tokens of src without its comments, read the
+// way the interpreter reads a file it loads (see lex.NewFile). The error is a
+// lexical error, of source no dialect reads.
+func significantTokens(src []byte) ([]lex.Token, error) {
 	all, err := lex.NewFile(src).Tokens()
 	if err != nil {
 		return nil, err //nolint:wrapcheck // a *lex.Error, which says what went wrong and where.
@@ -108,6 +128,12 @@ func normalize(src []byte) ([]byte, error) {
 		}
 	}
 
+	return tokens, nil
+}
+
+// normalizeTokens returns the copy of src (see normalize) whose tokens,
+// without comments, are tokens.
+func normalizeTokens(src []byte, tokens []lex.Token) []byte {
 	n := &normalizer{
 		src:    src,
 		tokens: tokens,
@@ -124,7 +150,7 @@ func normalize(src []byte) ([]byte, error) {
 		n.emit(i, tok)
 	}
 
-	return n.out, nil
+	return n.out
 }
 
 // plan records the edits that the token at i and the tokens after it need
@@ -132,7 +158,7 @@ func normalize(src []byte) ([]byte, error) {
 func (n *normalizer) plan(i int) {
 	switch n.name(i) {
 	case "local":
-		if n.name(i+1) != "function" {
+		if n.name(i+1) != keywordFunction {
 			n.dropAttrib(i + 1)
 			n.nameList(n.attribEnd(i + 1))
 		}
@@ -159,7 +185,7 @@ func (n *normalizer) endsBlock(i int) bool {
 	}
 
 	switch n.name(i) {
-	case "end", "else", "elseif", "until":
+	case keywordEnd, "else", "elseif", "until":
 		return true
 	default:
 		return i == len(n.tokens)
@@ -176,7 +202,7 @@ func (n *normalizer) planGlobal(i int) {
 		return
 	}
 
-	if n.name(i+1) == "function" {
+	if n.name(i+1) == keywordFunction {
 		// global function f() end defines the global f.
 		n.edits[i].drop = true
 
@@ -296,7 +322,7 @@ func (n *normalizer) startsStatement(i int) bool {
 		return true
 	case lex.Name:
 		switch prev {
-		case "do", "then", "else", "repeat", "end", "break", "nil", "true", "false":
+		case "do", "then", "else", "repeat", keywordEnd, "break", "nil", "true", "false":
 			return true
 		default:
 			// Any other keyword leads on to what follows it; a name ends

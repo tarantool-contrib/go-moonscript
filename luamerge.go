@@ -49,6 +49,11 @@ const (
 	// has its own module of that name require loads that one, as natively;
 	// the message names those runtimes.
 	WarnShadowsBuiltin = graph.WarnShadowsBuiltin
+	// WarnTokenScan is a module the parser cannot read, usually for a syntax
+	// error. It is embedded, and its requires were found by scanning its
+	// tokens: the calls of require are found, but a local named require is
+	// taken for the global one. Line is where the parser failed.
+	WarnTokenScan = graph.WarnTokenScan
 )
 
 // Options configures a bundling run. The zero value is not valid — at minimum

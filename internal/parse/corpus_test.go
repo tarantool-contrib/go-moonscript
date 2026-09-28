@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -95,9 +96,10 @@ func TestNormalize_Lua51SourceReadsTheSame(t *testing.T) {
 		wantRequires, err := parse.FindRequiresForTest(want)
 		require.NoError(t, err, "walk %s", file)
 
-		gotRequires, err := parse.New().Parse(src, file)
+		found, err := parse.New().Parse(src, file)
 		require.NoError(t, err, "parse %s", file)
-		assert.Equal(t, wantRequires, gotRequires, "requires of %s", file)
+		assert.Nil(t, found.Fallback, "the parser reads %s", file)
+		assert.Equal(t, wantRequires, found.Requires, "requires of %s", file)
 
 		compared++
 	}
@@ -105,4 +107,41 @@ func TestNormalize_Lua51SourceReadsTheSame(t *testing.T) {
 	t.Logf("compared %d files, %d that gopher-lua cannot read left out", compared, unread)
 	assert.Greater(t, compared, 50, "the corpus is there")
 	assert.Less(t, unread, compared/10, "gopher-lua reads nearly all of the corpus")
+}
+
+// TestScanRequires_FindsTheParsersCalls: over the corpus, the token scanner,
+// which reads a file the parser cannot, finds every call of require the
+// parser finds, with the same module name on the same line.
+func TestScanRequires_FindsTheParsersCalls(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+
+	for _, file := range testCorpus(t) {
+		src, err := os.ReadFile(file) // #nosec G304 -- a corpus file.
+		require.NoError(t, err)
+
+		found, err := parse.New().Parse(src, file)
+		require.NoError(t, err, "parse %s", file)
+		require.Nil(t, found.Fallback, "the parser reads %s", file)
+
+		scanned, err := parse.ScanRequiresForTest(src)
+		require.NoError(t, err, "scan %s", file)
+
+		for _, call := range found.Requires {
+			if call.Indirect != "" {
+				continue
+			}
+
+			calls++
+
+			i := slices.Index(scanned, call)
+			if assert.GreaterOrEqual(t, i, 0, "%s: the token scanner finds %+v", file, call) {
+				scanned = slices.Delete(scanned, i, i+1)
+			}
+		}
+	}
+
+	t.Logf("the token scanner found the %d calls of require the parser finds", calls)
+	assert.Positive(t, calls, "the corpus has calls of require")
 }

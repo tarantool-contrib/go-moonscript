@@ -18,9 +18,34 @@ type RequireInfo struct {
 	Indirect string
 }
 
+// Result is what Parse finds in a Lua source file.
+type Result struct {
+	// Requires are the uses of require in the file.
+	Requires []RequireInfo
+	// Fallback, when not nil, says that the parser could not read the file
+	// and why, and that the token scanner found Requires instead.
+	Fallback *Fallback
+}
+
+// Fallback is why the parser could not read a file whose uses of require the
+// token scanner found instead. The token scanner recognizes the calls of
+// require the parser does and reports every other use of the name require as
+// indirect, but it knows no scopes: a local named require is the global
+// require to it.
+type Fallback struct {
+	// Line is the line the parser failed on, or the last line of the file
+	// when the file ended before the parser expected it to.
+	Line int
+	// Reason is the parser's error, such as `syntax error near "="`.
+	Reason string
+}
+
 // Parser finds the uses of require in Lua source code.
 type Parser interface {
-	Parse(source []byte, filename string) ([]RequireInfo, error)
+	// Parse finds the uses of require in source, the contents of the file
+	// filename. A file that no Lua dialect reads, such as one with an
+	// unfinished string, is an error.
+	Parse(source []byte, filename string) (Result, error)
 }
 
 // New returns a Parser backed by the gopher-lua parser.

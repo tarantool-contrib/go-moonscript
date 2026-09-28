@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/yuin/gopher-lua/ast"
 	"github.com/yuin/gopher-lua/parse"
@@ -29,18 +30,54 @@ var errUnsupportedNode = errors.New("the require walker does not handle")
 
 type gopherParser struct{}
 
-func (p *gopherParser) Parse(source []byte, filename string) ([]RequireInfo, error) {
-	normalized, err := normalize(source)
+// Parse reads source with the lexer, gives gopher-lua the copy of it written
+// in Lua 5.1 (see normalize) and walks the syntax tree for the uses of
+// require. When gopher-lua cannot read the copy, the token scanner finds them
+// instead (see scanRequires): a module must not fail the build because of
+// its syntax. Only a lexical error does, as no dialect reads such a file.
+func (p *gopherParser) Parse(source []byte, filename string) (Result, error) {
+	tokens, err := significantTokens(source)
 	if err != nil {
-		return nil, fmt.Errorf("parsing lua source %q: %w", filename, err)
+		return Result{}, fmt.Errorf("parsing lua source %q: %w", filename, err)
 	}
+
+	normalized := normalizeTokens(source, tokens)
 
 	chunk, err := parse.Parse(bytes.NewReader(normalized), filename)
 	if err != nil {
-		return nil, fmt.Errorf("parsing lua source %q: %w", filename, err)
+		return Result{Requires: scanRequires(source, tokens), Fallback: newFallback(err, normalized)}, nil
 	}
 
-	return findRequires(chunk)
+	requires, err := findRequires(chunk)
+	if err != nil {
+		return Result{}, err
+	}
+
+	return Result{Requires: requires, Fallback: nil}, nil
+}
+
+// newFallback describes err, the error gopher-lua reports for normalized,
+// the copy of a source, as the Fallback of the source. The copy has the lines
+// of the source, but not its columns or its tokens, so only the line and the
+// token gopher-lua read are kept. At the end of the copy gopher-lua names no
+// line: that is the line of the last token.
+func newFallback(err error, normalized []byte) *Fallback {
+	var syntaxErr *parse.Error
+	if !errors.As(err, &syntaxErr) {
+		// Not a syntax error: the parser failed some other way.
+		return &Fallback{Line: 0, Reason: err.Error()}
+	}
+
+	message := strings.TrimSpace(syntaxErr.Message)
+	if message != "" {
+		message = strings.ToLower(message[:1]) + message[1:]
+	}
+
+	if syntaxErr.Pos.Line == parse.EOF {
+		return &Fallback{Line: bytes.Count(normalized, []byte("\n")) + 1, Reason: message + " at the end of the file"}
+	}
+
+	return &Fallback{Line: syntaxErr.Pos.Line, Reason: fmt.Sprintf("%s near %q", message, syntaxErr.Token)}
 }
 
 // findRequires walks a parsed chunk and returns every use of require in it.

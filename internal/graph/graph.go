@@ -47,6 +47,11 @@ const (
 	// and from the bundle alike; elsewhere it loads the module of the
 	// project. The module is embedded, and Message names those runtimes.
 	WarnShadowsBuiltin
+	// WarnTokenScan is a module the parser cannot read, usually for a syntax
+	// error: its requires were found by the token scanner instead. It finds
+	// the calls of require the parser does, but takes a local named require
+	// for the global one.
+	WarnTokenScan
 )
 
 func (k WarningKind) String() string {
@@ -65,6 +70,8 @@ func (k WarningKind) String() string {
 		return "indirect-require"
 	case WarnShadowsBuiltin:
 		return "shadows-builtin"
+	case WarnTokenScan:
+		return "token-scan"
 	default:
 		return "unknown"
 	}
@@ -434,11 +441,23 @@ func processIncludePackages(
 func processModuleRequires(
 	g *Graph, resolver Resolver, cfg *config.Config, mod *Module, parser parse.Parser,
 ) ([]*Module, error) {
-	requires, err := parser.Parse(mod.Source, mod.FilePath)
+	found, err := parser.Parse(mod.Source, mod.FilePath)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", mod.FilePath, err)
 	}
 
+	if found.Fallback != nil {
+		g.Warnings = append(g.Warnings, Warning{
+			Kind:   WarnTokenScan,
+			Module: "",
+			File:   mod.FilePath,
+			Line:   found.Fallback.Line,
+			Message: "the parser cannot read the file: " + found.Fallback.Reason + "; its requires were found " +
+				"by the token scanner, which takes a local named require for the global one",
+		})
+	}
+
+	requires := found.Requires
 	mod.Requires = requires
 
 	var newMods []*Module
