@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -340,6 +341,85 @@ func TestCLI_ConfigPathsFromWorkingDirectory(t *testing.T) {
 	assert.Contains(t, bundle, "a from src")
 	assert.Contains(t, bundle, "b from lib")
 	assert.NotContains(t, bundle, "DECOY")
+}
+
+// defaultsProject exercises every default a bare run relies on: modules next
+// to the entry and below it, one found only through ?/init.lua, and a
+// comment that no transform may remove.
+func defaultsProject() luatest.Project {
+	return luatest.Project{
+		"app/main.lua":     "-- COMMENT_MARK\nlocal m = require(\"lib.m\")\nprint(m, (require(\"pkg\")))\n",
+		"app/lib/m.lua":    "return \"m\"\n",
+		"app/pkg/init.lua": "return \"pkg\"\n",
+	}
+}
+
+// TestCLI_Defaults runs the CLI the way a user starts with, `luamerge
+// --entry main.lua` in the project directory: no --output, no --root, no
+// config file and no environment. Every other CLI test passes --output and
+// --root, so a broken default (the bundle written to a file named "", the
+// root not derived from the entry) used to keep the whole suite green.
+func TestCLI_Defaults(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		workDir string // Relative to the project.
+		entry   string
+	}{
+		{"in the entry's directory", "app", "main.lua"},
+		// The root is the entry's directory, not the working directory.
+		{"above the entry's directory", ".", "app/main.lua"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange.
+			dir := luatest.WriteProject(t, defaultsProject())
+			workDir := filepath.Join(dir, tt.workDir)
+			before := dirNames(t, workDir)
+
+			// Act.
+			stdout, stderr, code := runCLIIn(t, workDir, "--entry", tt.entry)
+
+			// Assert.
+			require.Equal(t, 0, code, stderr)
+			assert.Empty(t, stderr)
+			assert.Equal(t, before, dirNames(t, workDir), "the bundle went to a file instead of stdout")
+
+			// Root: the entry's directory; path: ?.lua;?/init.lua.
+			assert.Contains(t, stdout, entryHeader("main"))
+			assertEmbedded(t, stdout, []string{"lib.m", "pkg"}, nil)
+			// arg_fix on, every transform, debug and fallback off, no shebang.
+			assert.Contains(t, stdout, `arg = rawget(_G, "arg")`)
+			assert.Contains(t, stdout, "COMMENT_MARK")
+			assert.NotContains(t, stdout, "local __luamerge_load\n", "the debug loader is emitted")
+			assert.NotContains(t, stdout, "package.postload")
+			assert.False(t, strings.HasPrefix(stdout, "#!"), "the bundle starts with a shebang")
+		})
+	}
+}
+
+// TestCLI_DefaultsRun checks that the bundle of a bare run behaves like the
+// project, on every interpreter.
+func TestCLI_DefaultsRun(t *testing.T) {
+	t.Parallel()
+
+	luatest.Differential(t, luatest.Case{
+		Project: nil,
+		Dir:     filepath.Join(luatest.WriteProject(t, defaultsProject()), "app"),
+		Entry:   "",
+		Bundle:  luatest.CLI("--entry", "main.lua"),
+		Args:    nil,
+		Options: luatest.RunOptions{LuaPath: "./?.lua;./?/init.lua;;", Env: nil, Timeout: 0},
+		Check: func(t *testing.T, orig, bundle luatest.Result) {
+			t.Helper()
+			luatest.AssertSame(t, orig, bundle)
+			assert.Equal(t, "m\tpkg\n", bundle.Stdout)
+		},
+	})
 }
 
 // commentProject is a project whose entry starts with a comment, so whether
