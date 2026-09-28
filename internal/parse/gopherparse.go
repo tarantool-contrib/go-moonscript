@@ -4,6 +4,7 @@ package parse
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -18,6 +19,11 @@ const requireName = "require"
 // xpcall(f, handler, ...) passes on to f.
 const xpcallArgsStart = 2
 
+// errUnsupportedNode is the cause of the error for a syntax node of a type the
+// require walker does not know: a require inside it would be missed, and a
+// bundle missing a module must not be produced silently.
+var errUnsupportedNode = errors.New("the require walker does not handle")
+
 type gopherParser struct{}
 
 func (p *gopherParser) Parse(source []byte, filename string) ([]RequireInfo, error) {
@@ -28,16 +34,29 @@ func (p *gopherParser) Parse(source []byte, filename string) ([]RequireInfo, err
 		return nil, fmt.Errorf("parsing lua source %q: %w", filename, err)
 	}
 
+	return findRequires(chunk)
+}
+
+// findRequires walks a parsed chunk and returns every use of require in it.
+// It fails on a node type the walker does not know.
+func findRequires(chunk []ast.Stmt) ([]RequireInfo, error) {
 	walker := &requireWalker{
 		requires: []RequireInfo{},
+		err:      nil,
 	}
 	walkStmts(walker, chunk)
+
+	if walker.err != nil {
+		return nil, walker.err
+	}
 
 	return walker.requires, nil
 }
 
 type requireWalker struct {
 	requires []RequireInfo
+	// err reports the first node the walker could not look into.
+	err error
 }
 
 func walkStmts(w *requireWalker, stmts []ast.Stmt) {
@@ -63,30 +82,27 @@ func walkStmt(w *requireWalker, stmt ast.Stmt) {
 		walkStmts(w, stmt.Stmts)
 		walkExpr(w, stmt.Condition)
 	case *ast.IfStmt:
+		// An elseif is an IfStmt nested in Else.
 		walkExpr(w, stmt.Condition)
 		walkStmts(w, stmt.Then)
-
-		if stmt.Else != nil {
-			walkStmts(w, stmt.Else)
-		}
+		walkStmts(w, stmt.Else)
 	case *ast.NumberForStmt:
 		walkExpr(w, stmt.Init)
 		walkExpr(w, stmt.Limit)
-
-		if stmt.Step != nil {
-			walkExpr(w, stmt.Step)
-		}
-
+		walkExpr(w, stmt.Step)
 		walkStmts(w, stmt.Stmts)
 	case *ast.GenericForStmt:
 		walkExprs(w, stmt.Exprs)
 		walkStmts(w, stmt.Stmts)
 	case *ast.FuncDefStmt:
+		// The name, `a.b:c`, is made of identifiers only.
 		walkStmts(w, stmt.Func.Stmts)
 	case *ast.ReturnStmt:
 		walkExprs(w, stmt.Exprs)
-	case *ast.BreakStmt:
+	case *ast.BreakStmt, *ast.LabelStmt, *ast.GotoStmt:
 		// No children.
+	default:
+		unsupported(w, stmt)
 	}
 }
 
@@ -154,6 +170,9 @@ func walkExpr(w *requireWalker, expr ast.Expr) {
 	}
 
 	switch expr := expr.(type) {
+	case nil:
+		// An absent optional child: a plain call's Receiver, a method call's
+		// Func, a numeric for's step, an array item's key.
 	case *ast.FuncCallExpr:
 		walkCall(w, expr)
 	case *ast.FunctionExpr:
@@ -163,10 +182,7 @@ func walkExpr(w *requireWalker, expr ast.Expr) {
 		walkExpr(w, expr.Key)
 	case *ast.TableExpr:
 		for _, field := range expr.Fields {
-			if field.Key != nil {
-				walkExpr(w, field.Key)
-			}
-
+			walkExpr(w, field.Key)
 			walkExpr(w, field.Value)
 		}
 	case *ast.ArithmeticOpExpr:
@@ -191,7 +207,15 @@ func walkExpr(w *requireWalker, expr ast.Expr) {
 		*ast.TrueExpr, *ast.FalseExpr, *ast.NilExpr, *ast.Comma3Expr:
 		// Leaf expressions, no children.
 	default:
-		// Unknown expression type, ignore.
+		unsupported(w, expr)
+	}
+}
+
+// unsupported records node, of a type the walker does not know, as the
+// walker's error, unless an earlier node already is one.
+func unsupported(w *requireWalker, node ast.PositionHolder) {
+	if w.err == nil {
+		w.err = fmt.Errorf("line %d: %w %T", node.Line(), errUnsupportedNode, node)
 	}
 }
 
