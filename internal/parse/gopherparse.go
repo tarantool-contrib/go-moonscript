@@ -93,6 +93,9 @@ func walkExpr(w *requireWalker, expr ast.Expr) {
 	switch expr := expr.(type) {
 	case *ast.FuncCallExpr:
 		checkRequireCall(w, expr)
+		// A method call `obj:m(...)` has a Receiver instead of a Func, and the
+		// receiver can hold a require: `require("x"):new()`.
+		walkExpr(w, expr.Receiver)
 		walkExpr(w, expr.Func)
 		walkExprs(w, expr.Args)
 	case *ast.FunctionExpr:

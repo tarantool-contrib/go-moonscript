@@ -53,5 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   complete, so a failed or interrupted write (a full disk, a file-size limit)
   no longer leaves a truncated bundle. The file keeps its permission bits, and
   a read-only file is still refused.
+- A `require` whose result is the receiver of a method call is found and its
+  module embedded: `require("x"):new()`, `(require "x"):upper()`,
+  `require("x").field:m()` and every require inside a method chain such as
+  `app:use(require "a"):listen()`. These modules were left out of the bundle
+  without a warning, even with `--strict`.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
