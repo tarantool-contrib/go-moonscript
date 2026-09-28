@@ -126,10 +126,9 @@ func TestCLI_ReadOnlyOutputRefused(t *testing.T) {
 
 // TestCLI_OutputDevNull checks the README's CI recipe, `--strict --output
 // /dev/null`: the build succeeds and the device is written to, never replaced
-// by a regular file. When the device is also an input, writing to it must not
-// be refused as overwriting one, since a device has no contents to destroy.
-// The entry is that input here: go-config refuses an empty config file, so
-// --config /dev/null fails before the output is looked at.
+// by a regular file. When the device is also an input, the entry or the
+// config file (which then holds no settings), writing to it must not be
+// refused as overwriting one, since a device has no contents to destroy.
 func TestCLI_OutputDevNull(t *testing.T) {
 	t.Parallel()
 
@@ -141,6 +140,7 @@ func TestCLI_OutputDevNull(t *testing.T) {
 	}{
 		{"output only", entryArgs(dir)},
 		{"device is also the entry", []string{"--entry", os.DevNull}},
+		{"device is also the config file", slices.Concat(entryArgs(dir), []string{"--config", os.DevNull})},
 	}
 
 	for _, tt := range tests {

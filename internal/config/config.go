@@ -147,20 +147,14 @@ func LoadConfig(path string) (Config, error) {
 
 	builder = builder.AddCollector(collectors.NewStruct(Default()).WithName("defaults"))
 
-	_, statErr := os.Stat(configPath)
+	// Only the default file is optional.
+	file, ok, err := fileCollector(ctx, configPath, path == "")
+	if err != nil {
+		return Config{}, err
+	}
 
-	switch {
-	case statErr == nil:
-		source, srcErr := collectors.NewSource(ctx, collectors.NewFile(configPath), collectors.NewYamlFormat())
-		if srcErr != nil {
-			return Config{}, fmt.Errorf("load config file %q: %w", configPath, srcErr)
-		}
-
-		builder = builder.AddCollector(source)
-	case path == "" && errors.Is(statErr, fs.ErrNotExist):
-		// Only the default file is optional.
-	default:
-		return Config{}, fmt.Errorf("config file: %w", statErr)
+	if ok {
+		builder = builder.AddCollector(file)
 	}
 
 	builder = builder.AddCollector(collectors.NewEnv().WithPrefix(envPrefix).WithTransform(envKeyToPath))
@@ -180,6 +174,33 @@ func LoadConfig(path string) (Config, error) {
 	cfg.ApplyPackageName()
 
 	return cfg, nil
+}
+
+// fileCollector returns the collector of the YAML file at configPath. ok is
+// false when the file holds no settings to collect: it is optional and does
+// not exist, or it is empty. go-config refuses to parse an empty file, while
+// one with only comments or blank lines reads as no settings; an empty file,
+// such as /dev/null, means the same.
+func fileCollector(ctx context.Context, configPath string, optional bool) (goconfig.Collector, bool, error) {
+	_, err := os.Stat(configPath)
+	if optional && errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+
+	if err != nil {
+		return nil, false, fmt.Errorf("config file: %w", err)
+	}
+
+	source, err := collectors.NewSource(ctx, collectors.NewFile(configPath), collectors.NewYamlFormat())
+	if errors.Is(err, collectors.ErrNoData) {
+		return nil, false, nil
+	}
+
+	if err != nil {
+		return nil, false, fmt.Errorf("load config file %q: %w", configPath, err)
+	}
+
+	return source, true, nil
 }
 
 // ApplyPackageName implements the package_name convenience: when PackageName is

@@ -160,7 +160,7 @@ Defaults, the YAML file, and the environment are assembled and merged by the Tar
 
 ### YAML
 
-The file is `luamerge.yaml` in the working directory, or the one named with `--config`. The default file is optional; a file named with `--config` must exist, so a typo in its name is an error rather than a build without its settings.
+The file is `luamerge.yaml` in the working directory, or the one named with `--config`. The default file is optional; a file named with `--config` must exist, so a typo in its name is an error rather than a build without its settings. An empty file, or one with only comments, holds no settings: `--config /dev/null` builds from the defaults, the environment and the flags alone, whatever `luamerge.yaml` says.
 
 ```yaml
 entry: src/main.lua

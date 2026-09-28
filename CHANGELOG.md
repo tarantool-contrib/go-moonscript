@@ -217,5 +217,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--config ''` is the default `luamerge.yaml` everywhere. The file was read
   but not protected as an input, so `--config '' --output luamerge.yaml`
   replaced the config file with the bundle.
+- An empty config file, such as `--config /dev/null`, holds no settings, like
+  a file with only comments. It used to fail to parse (`no data to process`).
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

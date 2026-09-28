@@ -65,6 +65,66 @@ func TestLoadConfig_DefaultFile(t *testing.T) {
 	assert.True(t, cfg.Strict, "the default file was not read")
 }
 
+// TestLoadConfig_NoSettings checks that a config file holding no settings,
+// whether it is empty, blank or only comments, gives the defaults. go-config
+// refuses an empty file ("no data to process"), which made an empty
+// luamerge.yaml, or --config /dev/null, an error.
+func TestLoadConfig_NoSettings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{"empty", ""},
+		{"blank lines", "\n  \n\n"},
+		{"comments", "# no settings yet\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "luamerge.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(tt.content), 0o600))
+
+			cfg, err := config.LoadConfig(path)
+
+			require.NoError(t, err)
+			assert.Equal(t, config.Default(), cfg)
+		})
+	}
+
+	t.Run("null device", func(t *testing.T) {
+		t.Parallel()
+
+		cfg, err := config.LoadConfig(os.DevNull)
+
+		require.NoError(t, err)
+		assert.Equal(t, config.Default(), cfg)
+	})
+}
+
+// TestLoadConfig_NoSettingsWithEnvironment checks that the environment still
+// applies over a config file holding no settings.
+func TestLoadConfig_NoSettingsWithEnvironment(t *testing.T) {
+	// t.Setenv forbids t.Parallel().
+	t.Setenv("LUAMERGE_STRICT", "true")
+
+	for _, content := range []string{"", "# no settings yet\n"} {
+		path := filepath.Join(t.TempDir(), "luamerge.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+		cfg, err := config.LoadConfig(path)
+
+		require.NoError(t, err, "content %q", content)
+
+		want := config.Default()
+		want.Strict = true
+		assert.Equal(t, want, cfg, "content %q", content)
+	}
+}
+
 // TestFilePath checks the name of the file LoadConfig reads for a path.
 func TestFilePath(t *testing.T) {
 	t.Parallel()

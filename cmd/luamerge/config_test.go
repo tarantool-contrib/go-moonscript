@@ -141,6 +141,46 @@ func TestCLI_ConfigNamedFile(t *testing.T) {
 	}
 }
 
+// TestCLI_ConfigWithoutSettings checks that a config file holding no
+// settings, the default one or one named with --config, gives the default
+// build instead of a parse error.
+func TestCLI_ConfigWithoutSettings(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		files luatest.Project // Added to the project.
+		args  []string        // Added to --entry main.lua.
+	}{
+		{"empty luamerge.yaml", luatest.Project{"luamerge.yaml": ""}, nil},
+		{"empty named file", luatest.Project{"empty.yaml": ""}, []string{"--config", "empty.yaml"}},
+		{"comments only", luatest.Project{"luamerge.yaml": "# nothing yet\n"}, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange.
+			project := maps.Clone(tt.files)
+			project["main.lua"] = "-- COMMENT_MARK\nrequire(\"m\")\n"
+			project["m.lua"] = "return 1\n"
+			dir := luatest.WriteProject(t, project)
+
+			// Act.
+			stdout, stderr, code := runCLIIn(t, dir, append([]string{"--entry", "main.lua"}, tt.args...)...)
+
+			// Assert: the defaults, i.e. stdout, the arg line in the module's
+			// wrapper, no transforms.
+			require.Equal(t, 0, code, stderr)
+			assert.Empty(t, stderr)
+			assert.Contains(t, stdout, preloaded("m"))
+			assert.Contains(t, stdout, `arg = rawget(_G, "arg")`)
+			assert.Contains(t, stdout, "COMMENT_MARK")
+		})
+	}
+}
+
 // TestCLI_ConfigEmptyMeansDefault checks that an empty --config value is the
 // default file, luamerge.yaml, wherever the file is used: it is read, and it
 // is protected as an input. The protection used to look at a file named "",
