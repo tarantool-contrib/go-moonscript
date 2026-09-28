@@ -9,7 +9,11 @@ on:
 
 env:
   GO_VERSION: "1.26"
-  GOVULNCHECK_VERSION: latest
+  # actions/setup-go exports GOTOOLCHAIN=local, so this job runs exactly the Go
+  # version above and cannot switch toolchains. Pin to an exact govulncheck
+  # release rather than "latest": v1.7.0 was seen panicking in a scheduled run,
+  # and v1.8.0 requires go >= 1.26.0, which GO_VERSION above satisfies.
+  GOVULNCHECK_VERSION: v1.8.0
 
 jobs:
   govulncheck:
