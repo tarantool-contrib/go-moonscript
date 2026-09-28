@@ -304,5 +304,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tarantool (`1ULL`, `0x10LL`, `2i`, `0b101`), a statement after `break`,
   names beyond ASCII, and `goto` used as a name. Every module was parsed as
   Lua 5.1, so any of these failed the whole build with a syntax error.
+- A local named `require` that is a function of its own — a local function,
+  a local whose value is a function, a parameter or a loop variable — hides
+  the global `require` for the rest of its scope, as in Lua, so the calls
+  through it are no longer taken for requires. With
+  `local require = function(x) … end` in front of it, `require("greeting")`
+  made `--strict` fail with `unresolved require "greeting"` on a program
+  that runs, or made the bundler read and embed an unrelated `greeting.lua`
+  and fail on it. A local of any other value, such as
+  `local require = require`, or a lazy require
+  (`local require = require("lazy")`), is still taken for the global
+  `require`, and the modules loaded through it are embedded.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

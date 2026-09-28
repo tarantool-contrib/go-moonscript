@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/yuin/gopher-lua/ast"
@@ -48,8 +49,9 @@ func findRequires(chunk []ast.Stmt) ([]RequireInfo, error) {
 	walker := &requireWalker{
 		requires: []RequireInfo{},
 		err:      nil,
+		scopes:   nil,
 	}
-	walkStmts(walker, chunk)
+	walkBlock(walker, chunk)
 
 	if walker.err != nil {
 		return nil, walker.err
@@ -62,12 +64,78 @@ type requireWalker struct {
 	requires []RequireInfo
 	// err reports the first node the walker could not look into.
 	err error
+	// scopes are the blocks the walk is in, the innermost last.
+	scopes []scope
+}
+
+// scope is what a block declares about the name require. A local named
+// require that is a function of its own, a local function, a local whose
+// value is a function, a parameter or a loop variable, hides the global
+// require from its declaration to the end of its block. A local of any other
+// value is the global require, `local require = require`, or a wrapper of
+// it, such as a lazy require (`local require = require("lazy")`), which loads
+// the module of the name it gets: the calls through it are found as before.
+type scope struct {
+	// declared is set when the block declares a local named require.
+	declared bool
+	// global is set when that local is the global require or a wrapper of it.
+	global bool
+}
+
+// enter starts a block.
+func (w *requireWalker) enter() {
+	w.scopes = append(w.scopes, scope{declared: false, global: false})
+}
+
+// leave ends the block entered last.
+func (w *requireWalker) leave() {
+	w.scopes = w.scopes[:len(w.scopes)-1]
+}
+
+// declare declares the local name in the current block; global says whether
+// it is the global require or a wrapper of it.
+func (w *requireWalker) declare(name string, global bool) {
+	if name == requireName {
+		w.scopes[len(w.scopes)-1] = scope{declared: true, global: global}
+	}
+}
+
+// hidden reports whether a local named require that does not hold the global
+// require is in scope, so that the name require is not the global.
+func (w *requireWalker) hidden() bool {
+	for _, block := range slices.Backward(w.scopes) {
+		if block.declared {
+			return !block.global
+		}
+	}
+
+	return false
 }
 
 func walkStmts(w *requireWalker, stmts []ast.Stmt) {
 	for _, stmt := range stmts {
 		walkStmt(w, stmt)
 	}
+}
+
+// walkBlock walks stmts as a block of their own.
+func walkBlock(w *requireWalker, stmts []ast.Stmt) {
+	w.enter()
+	walkStmts(w, stmts)
+	w.leave()
+}
+
+// walkFunction walks the body of a function, where its parameters are
+// locals.
+func walkFunction(w *requireWalker, function *ast.FunctionExpr) {
+	w.enter()
+
+	for _, name := range function.ParList.Names {
+		w.declare(name, false)
+	}
+
+	walkStmts(w, function.Stmts)
+	w.leave()
 }
 
 func walkStmt(w *requireWalker, stmt ast.Stmt) {
@@ -79,29 +147,42 @@ func walkStmt(w *requireWalker, stmt ast.Stmt) {
 	case *ast.FuncCallStmt:
 		walkExpr(w, stmt.Expr)
 	case *ast.DoBlockStmt:
-		walkStmts(w, stmt.Stmts)
+		walkBlock(w, stmt.Stmts)
 	case *ast.WhileStmt:
 		walkExpr(w, stmt.Condition)
-		walkStmts(w, stmt.Stmts)
+		walkBlock(w, stmt.Stmts)
 	case *ast.RepeatStmt:
+		// The condition is in the scope of the body's locals.
+		w.enter()
 		walkStmts(w, stmt.Stmts)
 		walkExpr(w, stmt.Condition)
+		w.leave()
 	case *ast.IfStmt:
 		// An elseif is an IfStmt nested in Else.
 		walkExpr(w, stmt.Condition)
-		walkStmts(w, stmt.Then)
-		walkStmts(w, stmt.Else)
+		walkBlock(w, stmt.Then)
+		walkBlock(w, stmt.Else)
 	case *ast.NumberForStmt:
 		walkExpr(w, stmt.Init)
 		walkExpr(w, stmt.Limit)
 		walkExpr(w, stmt.Step)
+		w.enter()
+		w.declare(stmt.Name, false)
 		walkStmts(w, stmt.Stmts)
+		w.leave()
 	case *ast.GenericForStmt:
 		walkExprs(w, stmt.Exprs)
+		w.enter()
+
+		for _, name := range stmt.Names {
+			w.declare(name, false)
+		}
+
 		walkStmts(w, stmt.Stmts)
+		w.leave()
 	case *ast.FuncDefStmt:
 		// The name, `a.b:c`, is made of identifiers only.
-		walkStmts(w, stmt.Func.Stmts)
+		walkFunction(w, stmt.Func)
 	case *ast.ReturnStmt:
 		walkExprs(w, stmt.Exprs)
 	case *ast.BreakStmt, *ast.LabelStmt, *ast.GotoStmt:
@@ -113,15 +194,15 @@ func walkStmt(w *requireWalker, stmt ast.Stmt) {
 
 // walkAssign walks an assignment. Storing require where the walker finds its
 // calls by name (`require = require`, `_G.require = require`) is not a use of
-// it; storing it anywhere else is.
+// it; storing it anywhere else is, a local named require included.
 func walkAssign(w *requireWalker, stmt *ast.AssignStmt) {
 	for _, target := range stmt.Lhs {
 		walkTarget(w, target)
 	}
 
 	for i, value := range stmt.Rhs {
-		if i < len(stmt.Lhs) && isRequire(value) {
-			if !isRequire(stmt.Lhs[i]) {
+		if i < len(stmt.Lhs) && isRequire(w, value) {
+			if !isRequire(w, stmt.Lhs[i]) {
 				recordIndirect(w, value, "assigned to "+describeTarget(stmt.Lhs[i]))
 			}
 
@@ -134,10 +215,26 @@ func walkAssign(w *requireWalker, stmt *ast.AssignStmt) {
 
 // walkLocalAssign walks a local declaration. `local require = require` caches
 // the global, and calls through the local are still found by name, so only
-// binding require to another name is a use of it.
+// binding require to another name is a use of it. The names come into scope
+// after the declaration, but the name of a local function is in scope in its
+// own body.
 func walkLocalAssign(w *requireWalker, stmt *ast.LocalAssignStmt) {
+	// gopher-lua gives `local function f` the line of its end as its last
+	// line and `local f = function` no last line.
+	if stmt.LastLine() != 0 && len(stmt.Names) == 1 {
+		w.declare(stmt.Names[0], false)
+		walkExprs(w, stmt.Exprs)
+
+		return
+	}
+
+	global := make([]bool, len(stmt.Names))
+	for i := range stmt.Names {
+		global[i] = i >= len(stmt.Exprs) || !hidesRequire(w, stmt.Exprs[i])
+	}
+
 	for i, value := range stmt.Exprs {
-		if i < len(stmt.Names) && isRequire(value) {
+		if i < len(stmt.Names) && isRequire(w, value) {
 			if stmt.Names[i] != requireName {
 				recordIndirect(w, value, "aliased as local "+strconv.Quote(stmt.Names[i]))
 			}
@@ -146,6 +243,25 @@ func walkLocalAssign(w *requireWalker, stmt *ast.LocalAssignStmt) {
 		}
 
 		walkExpr(w, value)
+	}
+
+	for i, name := range stmt.Names {
+		w.declare(name, global[i])
+	}
+}
+
+// hidesRequire reports whether a local named require whose value is value
+// hides the global require: when value is a function of its own, or the name
+// require where a local that hides the global is in scope. Any other value is
+// the global require or a wrapper of it (see scope).
+func hidesRequire(w *requireWalker, value ast.Expr) bool {
+	switch value := value.(type) {
+	case *ast.FunctionExpr:
+		return true
+	case *ast.IdentExpr:
+		return value.Value == requireName && w.hidden()
+	default:
+		return false
 	}
 }
 
@@ -170,7 +286,7 @@ func walkExpr(w *requireWalker, expr ast.Expr) {
 	// A require reached here is neither called by the expression around it
 	// nor bound to a name: it is passed on, stored or returned. Nothing inside
 	// `require` or `_G.require` can be a use of require, so the walk goes on.
-	if isRequire(expr) {
+	if isRequire(w, expr) {
 		recordIndirect(w, expr, "used as a value")
 	}
 
@@ -181,7 +297,7 @@ func walkExpr(w *requireWalker, expr ast.Expr) {
 	case *ast.FuncCallExpr:
 		walkCall(w, expr)
 	case *ast.FunctionExpr:
-		walkStmts(w, expr.Stmts)
+		walkFunction(w, expr)
 	case *ast.AttrGetExpr:
 		walkExpr(w, expr.Object)
 		walkExpr(w, expr.Key)
@@ -252,7 +368,7 @@ func walkCall(w *requireWalker, call *ast.FuncCallExpr) {
 // expression that stands for require in the call, or nil when call does not
 // call require.
 func checkRequireCall(w *requireWalker, call *ast.FuncCallExpr) ast.Expr {
-	requireExpr, args, protected := requireCallArgs(call)
+	requireExpr, args, protected := requireCallArgs(w, call)
 	if requireExpr == nil {
 		return nil
 	}
@@ -273,13 +389,13 @@ func checkRequireCall(w *requireWalker, call *ast.FuncCallExpr) ast.Expr {
 // requireCallArgs returns the expression that stands for require in call, the
 // arguments require is called with and whether pcall or xpcall calls it in
 // protected mode; or nil, nil and false when call does not call require.
-func requireCallArgs(call *ast.FuncCallExpr) (ast.Expr, []ast.Expr, bool) {
+func requireCallArgs(w *requireWalker, call *ast.FuncCallExpr) (ast.Expr, []ast.Expr, bool) {
 	switch {
-	case isRequire(call.Func):
+	case isRequire(w, call.Func):
 		return call.Func, call.Args, false
-	case callsGlobal(call, "pcall") && len(call.Args) > 0 && isRequire(call.Args[0]):
+	case callsGlobal(call, "pcall") && len(call.Args) > 0 && isRequire(w, call.Args[0]):
 		return call.Args[0], call.Args[1:], true
-	case callsGlobal(call, "xpcall") && len(call.Args) > 0 && isRequire(call.Args[0]):
+	case callsGlobal(call, "xpcall") && len(call.Args) > 0 && isRequire(w, call.Args[0]):
 		// The call xpcall(f, handler, ...) calls f(...). PUC Lua 5.1's xpcall
 		// passes f no arguments, so there the call fails natively; embedding
 		// the module changes nothing about that.
@@ -295,12 +411,13 @@ func requireCallArgs(call *ast.FuncCallExpr) (ast.Expr, []ast.Expr, bool) {
 
 // requireRef returns how expr names the global require function: "require",
 // "_G.require" or "_ENV.require" (`_G["require"]` parses the same as
-// `_G.require`), and "" when it names something else. Like the rest of the
-// walker it goes by spelling: a local named require counts as the global.
-func requireRef(expr ast.Expr) string {
+// `_G.require`), and "" when it names something else. The name require is
+// the global require unless a local of that name hides it; _G and _ENV go by
+// spelling.
+func requireRef(w *requireWalker, expr ast.Expr) string {
 	switch expr := expr.(type) {
 	case *ast.IdentExpr:
-		if expr.Value == requireName {
+		if expr.Value == requireName && !w.hidden() {
 			return expr.Value
 		}
 	case *ast.AttrGetExpr:
@@ -318,8 +435,8 @@ func requireRef(expr ast.Expr) string {
 
 // isRequire reports whether expr names the global require function; see
 // requireRef.
-func isRequire(expr ast.Expr) bool {
-	return requireRef(expr) != ""
+func isRequire(w *requireWalker, expr ast.Expr) bool {
+	return requireRef(w, expr) != ""
 }
 
 // callsGlobal reports whether call calls the global function name directly.
@@ -337,7 +454,7 @@ func recordIndirect(w *requireWalker, ref ast.Expr, how string) {
 		Line:      ref.Line(),
 		Static:    false,
 		Protected: false,
-		Indirect:  requireRef(ref) + " " + how,
+		Indirect:  requireRef(w, ref) + " " + how,
 	})
 }
 
