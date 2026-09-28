@@ -33,7 +33,7 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 - **Dev overrides** (`--fallback`) — ship a bundle but let an on-disk module take precedence during development.
 - **Directly executable output** (`--shebang`) — prepend a shebang and run the bundle as a program.
 - **Source transforms** — strip comments or blank lines, or minify.
-- **Module-name remapping** — strip/add package prefixes so library modules resolve to a flat file layout.
+- **Module-name remapping** — strip/add package prefixes so library modules resolve to a flat file layout, and a library bundle registers its modules under its prefix only.
 - **Every Lua dialect** — modules may be written for Lua 5.1 to 5.5, LuaJIT or Tarantool, and the bundle works on each of them (the `_ENV`/`arg` handling is version-aware).
 
 ## Installation
@@ -106,11 +106,22 @@ Why each piece is there:
 - **Module source is emitted verbatim** (no reindentation) so multi-line `[[ ... ]]` string literals keep their exact contents.
 - **The entry's code last, at the top level** — it runs the way the interpreter runs a script: its `...` holds the command-line arguments, all of its return values are the bundle's, an "am I the main script?" check sees a script, and it is neither looked up through the searchers nor cached in `package.loaded`. A second bundle, or a second `dofile` of the same bundle, runs its entry again, and a library bundled into `mylib.lua` loads with `require("mylib")`.
 
-A module reachable under several names is registered under each of them with the same loader: natively each name is a module of its own, which runs once per name and sees its own name in `...`, and so it does in the bundle. A module that requires the entry by name gets the entry the same way, as a module of its own, next to the main chunk. The names `--package-prefix` generates are different: each loads the name it was generated from (`return require("utils")`), so both give the same module. A generated name that is taken already is an error that names the files, and the way out is another prefix: taken by a module of the project (with `--package-prefix p`, `x.lua` would get `p.x`, the name of `p/x.lua`), or by a module some runtime has built in (`--package-prefix table` would give `new.lua` the name of LuaJIT's `table.new`).
+A module reachable under several names is registered under each of them with the same loader: natively each name is a module of its own, which runs once per name and sees its own name in `...`, and so it does in the bundle. A module that requires the entry by name gets the entry the same way, as a module of its own, next to the main chunk. With `--package-prefix` the names are prefixed (see [Package prefix](#package-prefix)).
 
 `--prefix` code runs first, in a `do ... end` block of its own, so its locals are visible to nothing else. With `--suffix` the entry becomes a function: the bundle calls it with its own `...`, keeps every result, runs the suffix in a block of its own and returns the results.
 
 Every file, the entry included, is read the way the interpreter reads a file it loads: a UTF-8 byte order mark is dropped, and a first line that starts with `#`, such as `#!/usr/bin/env lua`, is left empty. Nothing else changes, blank lines at the top included, so every line keeps its number: a warning names the line of its `require`, and a `--debug` traceback the line of the error. The bundle's own first line is set with `--shebang`. Lua 5.1 does not skip a byte order mark, so there such a file fails to load natively, but runs in a bundle.
+
+### Package prefix
+
+With `--package-prefix` (or `--package-name`) the bundle is a library for other programs to require, and only names with the prefix leave it:
+
+- **Every module is registered under the prefixed form of each of its names, and under no other.** The prefixed form is the prefix, a dot and the name, or the name itself when it starts with the prefix and a dot already. A program that loads the library keeps its own `utils`, while the library's is `mypkg.utils`; with `--fallback` the embedded modules go to `package.postload` under the same names, and a `mypkg/utils.lua` on disk wins over the embedded one.
+- **The library's own code is renamed to match.** In the code the bundle embeds, the entry's and every module's, the string literal of every `require` whose module the bundle embeds gets the prefix put in front of its value, in place and in every form of the call: `require("utils")` becomes `require("mypkg.utils")`, `require [[utils]]` becomes `require [[mypkg.utils]]`, `pcall(require, "utils")` and `_G.require "utils"` alike. Nothing else changes, so every line keeps its number for `--debug`, and the source transforms run on the renamed code. Two requires of one module, one by the bare name and one by the prefixed name, are of one name then, and give one instance.
+- **What the bundle leaves to the runtime keeps its name**: a module of the standard library, one built into the runtime that the project has no file for, one skipped, not found or written in C, and a dynamic `require(name)`. So does a call of a local named `require`, which is no call of the global one, except in a file that only the token scanner reads (see [Finding requires](#finding-requires)), which takes it for one. A module the library loads by a computed name must be required by its prefixed name, as it is registered under no other, `--include`d or not.
+- **A name written as a path is a name like any other**: `./x` becomes `mypkg../x`, a module of its own as `./x` is natively, which `package.searchpath` finds under the prefix's directory (`mypkg//x.lua`) as it finds `./x` under the root. A name spelled with the prefix as a directory, `mypkg/x`, does not start with the prefix and a dot, and becomes `mypkg.mypkg/x`.
+- **A module required by the name of a runtime's built-in module**, such as a pure-Lua `bit.lua` required as `bit`, is registered under the prefixed name with a loader that gives the runtime's own `bit` where the runtime has one, in `package.loaded` or found by its first searcher, and the embedded module elsewhere, as the `require("bit")` it renamed does natively. Nothing is registered under `bit`.
+- **A prefixed name that is taken already is an error** that names the files, and the way out is another prefix: taken by a module of the project (with `--package-prefix p`, `x.lua` would get `p.x`, the name of `p/x.lua`), or by a module some runtime has built in (`--package-prefix table` would give `new.lua` the name of LuaJIT's `table.new`).
 
 ## CLI flags
 
@@ -134,7 +145,7 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 | `--minify` | Remove comments and the white space between tokens (see [Source transforms](#source-transforms)) | `false` |
 | `--prefix` | Lua code run before the modules are registered, in a block of its own | – |
 | `--suffix` | Lua code run after the entry, in a block of its own | – |
-| `--package-prefix` | Add a prefix to all module names in output (e.g. `mypkg` → `require("mypkg.module")`) | – |
+| `--package-prefix` | Register the modules under names with this prefix only, and rename the project's own requires to match (e.g. `mypkg` → `require("mypkg.module")`; see [Package prefix](#package-prefix)) | – |
 | `--strip-prefix` | Strip a prefix from module names during resolution (e.g. `tuple_diff` → file `lib/foo.lua`) | – |
 | `--package-name` | Convenience: `--strip-prefix` and `--package-prefix` take this value unless set themselves | – |
 | `--version` | Print version and exit: a release's own, or the module version and commit the Go toolchain recorded (`go install`, `go build`) | – |
@@ -305,7 +316,7 @@ Modules are named `mypkg.*` but files live directly under `src/` (no `mypkg/` di
 luamerge --entry src/init.lua --package-name mypkg --output mypkg.lua
 ```
 
-`--package-name mypkg` strips `mypkg.` while resolving (`require("mypkg.utils")` → `src/utils.lua`) and re-adds it to the output names, so the bundle is usable as `require("mypkg.utils")`.
+`--package-name mypkg` strips `mypkg.` while resolving (`require("mypkg.utils")` → `src/utils.lua`) and re-adds it to the output names, so the bundle is usable as `require("mypkg.utils")`. The library's own `require("utils")` is renamed to `require("mypkg.utils")` in the bundle, and no name without the prefix is registered, so a program that loads the library with `require("mypkg")` keeps its own `utils` (see [Package prefix](#package-prefix)).
 
 ### Exclude external dependencies
 
@@ -449,11 +460,26 @@ end
 -- entry source, verbatim
 ```
 
-With `--package-prefix mypkg`, each generated name is registered after every module and loads the name it was generated from:
+With `--package-prefix mypkg`, the modules are registered under the prefixed names only, and the requires of the embedded code name them so (the entry's `require("mymod")` here):
 
 ```lua
-if package.preload["mypkg.mymod"] == nil then
-  package.preload["mypkg.mymod"] = function(...) return require("mymod") end
+if package.preload["mypkg.mymod"] == nil then package.preload["mypkg.mymod"] = __luamerge_loader end
+if package.preload["mypkg.mymod.init"] == nil then package.preload["mypkg.mymod.init"] = __luamerge_loader end
+end
+local mymod = require("mypkg.mymod")
+```
+
+A module required by the name of a runtime's built-in module, a pure-Lua `bit.lua` required as `bit`, gets a loader that gives the runtime's own `bit` where there is one:
+
+```lua
+if package.preload["mypkg.bit"] == nil then
+  package.preload["mypkg.bit"] = function(...)
+    if package.loaded["bit"] == nil and
+      type((package.searchers or package.loaders)[1]("bit")) ~= "function" then
+      return __luamerge_loader(...)
+    end
+    return require("bit")
+  end
 end
 ```
 

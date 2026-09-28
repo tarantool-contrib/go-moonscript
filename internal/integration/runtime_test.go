@@ -962,26 +962,3 @@ func TestBundle_EachNameIsAnInstance(t *testing.T) {
 		}
 	}
 }
-
-// TestBundle_PackagePrefixSharesTheInstance: a name --package-prefix
-// generates is no module of its own: it loads the module under the name it
-// was generated from, so both give the same instance.
-func TestBundle_PackagePrefixSharesTheInstance(t *testing.T) {
-	t.Parallel()
-
-	luatest.Interpreters(t)
-
-	bundle := bundleProject(t, luatest.Project{
-		"main.lua": "local a = require(\"x\")\nlocal b = require(\"p.x\")\n" +
-			"print(\"runs=\" .. RUNS, \"same=\" .. tostring(a == b), a.name)\n",
-		"x.lua": "RUNS = (RUNS or 0) + 1\nreturn { name = (...) }\n",
-	}, "--entry", "main.lua", "--package-prefix", "p")
-
-	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
-		t.Helper()
-
-		r := luatest.RunBundle(t, interp, bundle, runOptions())
-		assert.Equal(t, 0, r.ExitCode, "%s", r)
-		assert.Equal(t, "runs=1\tsame=true\tx\n", r.Stdout, "%s", r)
-	})
-}

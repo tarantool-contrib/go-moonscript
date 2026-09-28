@@ -60,8 +60,12 @@ type Options struct {
 	// Shebang, when not empty, is written as the first line of the bundle,
 	// such as "#!/usr/bin/env lua".
 	Shebang string
-	// PackagePrefix makes every module available under its name with this
-	// prefix too: with "mypkg", require("mypkg.util") gives the module util.
+	// PackagePrefix, when not empty, makes every module available under its
+	// name with this prefix and a dot in front, unless the name starts with
+	// them already, and under no other: with "mypkg", require("mypkg.util")
+	// gives the module util, and require("util") finds nothing in the
+	// bundle. The requires of the project's own code that load a module the
+	// bundle embeds are renamed to match (see the README's "Package prefix").
 	PackagePrefix string
 	// PackageName is the default of StripPrefix and PackagePrefix: Bundle
 	// sets whichever of the two is empty to it.

@@ -70,7 +70,8 @@ arg_fix: true
 # package_name: "mypkg"
 
 # Package prefix for module names (optional) - advanced
-# Adds namespace to all modules, e.g., "mypkg" makes require("mypkg.module") work
+# Registers the modules under names with this prefix only, e.g., "mypkg" makes
+# require("mypkg.module") work, and renames the project's own requires to match
 # (does not strip prefixes during resolution)
 # package_prefix: "mypkg"
 

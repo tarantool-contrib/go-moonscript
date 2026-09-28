@@ -58,7 +58,8 @@ func TestCLI_RuntimeBuiltinWithoutAFile(t *testing.T) {
 // built-in module of the name a module of the project is required by,
 // require loads the built-in and never the file; elsewhere it loads the file.
 // The bundle must do the same on every interpreter, in every mode, and the
-// CLI warns about each such name.
+// CLI warns about each such name. Under --package-prefix the require is
+// renamed to the prefixed name, which must give the same modules.
 func TestCLI_ProjectModuleNamedLikeABuiltin(t *testing.T) {
 	t.Parallel()
 
@@ -109,7 +110,11 @@ func TestCLI_ProjectModuleNamedLikeABuiltin(t *testing.T) {
 		},
 	}
 
-	for mode, flags := range map[string][]string{"default": nil, "debug": {"--debug"}, "fallback": {"--fallback"}} {
+	for mode, flags := range map[string][]string{
+		"default": nil, "debug": {"--debug"}, "fallback": {"--fallback"},
+		"package prefix":           {"--package-prefix", "p"},
+		"package prefix, fallback": {"--package-prefix", "p", "--fallback"},
+	} {
 		for name, tt := range tests {
 			t.Run(mode+"/"+name, func(t *testing.T) {
 				t.Parallel()
@@ -139,7 +144,8 @@ func TestCLI_ProjectModuleNamedLikeABuiltin(t *testing.T) {
 // along package.path. Natively the program, run from its directory, finds its
 // own file first on those runtimes, and Lua 5.2 and 5.3 load their built-in.
 // The bundle must do the same from anywhere: the embedded module loses to the
-// runtime's built-in only, never to a file on disk.
+// runtime's built-in only, never to a file on disk, under --package-prefix
+// too.
 func TestCLI_BuiltinNamedModuleBeatsFilesOnDisk(t *testing.T) {
 	t.Parallel()
 
@@ -149,7 +155,10 @@ func TestCLI_BuiltinNamedModuleBeatsFilesOnDisk(t *testing.T) {
 		"bit32.lua": "return { impl = \"a system-installed bit32.lua\" }\n",
 	})
 
-	for mode, flags := range modes() {
+	withPrefix := modes()
+	withPrefix["package prefix"] = []string{"--package-prefix", "p"}
+
+	for mode, flags := range withPrefix {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 

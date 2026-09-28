@@ -64,10 +64,16 @@ import (
 // chunk. Natively require loads a module in the global environment, which
 // makes a difference only for a bundle loaded in an environment of its own.
 //
-// The names --package-prefix generates (aliases) are no source's require
-// names: each loads the name it was generated from, so both give the same
-// instance. They are registered after every module, so a module of the
-// project keeps its name when an alias would have the same one.
+// Under a package prefix the graph has given every module the prefixed forms
+// of its names only, and has put the prefix into the requires of the code
+// that load them, so a module is registered as any other. A name the prefix
+// made of the name of a module some runtime has built in (a Deferral, such
+// as p.bit of bit) stands for a require of that module, which natively loads
+// the runtime's own module where there is one: its loader returns
+// require(builtin) where the runtime has the module, in package.loaded or
+// found by the interpreter's first searcher, which is where the runtime's
+// own modules are, and runs the module otherwise. It asks nothing that looks
+// on disk, and nothing is registered under the built-in name.
 //
 // The loader leaves package.loaded to require, which runs it: a module that
 // raises while loading is not cached, and a require cycle fails as it does
@@ -170,6 +176,15 @@ end
 function(...) return {{template "load" .Code}}(...) end
 {{- else}}{{template "function" .Code}}{{end}}
 {{range .Names}}if package.{{$.RegTable}}[{{q .}}] == nil then package.{{$.RegTable}}[{{q .}}] = __luamerge_loader end
+{{end}}{{range .Deferrals}}if package.{{$.RegTable}}[{{q .Name}}] == nil then
+  package.{{$.RegTable}}[{{q .Name}}] = function(...)
+    if package.loaded[{{q .Builtin}}] == nil and
+      type((package.searchers or package.loaders)[1]({{q .Builtin}})) ~= "function" then
+      return __luamerge_loader(...)
+    end
+    return require({{q .Builtin}})
+  end
+end
 {{end}}{{with .BuiltinNames}}local __luamerge_searchers = package.searchers or package.loaders
 local __luamerge_first = __luamerge_searchers[1]
 __luamerge_searchers[1] = function(name, ...)
@@ -179,9 +194,6 @@ __luamerge_searchers[1] = function(name, ...)
   return __luamerge_loader
 end
 {{end}}end
-{{end}}{{range .Aliases}}if package.{{$.RegTable}}[{{q .Name}}] == nil then
-  package.{{$.RegTable}}[{{q .Name}}] = function(...) return require({{q .Target}}) end
-end
 {{end}}{{with .Entry}}{{if $.Suffix}}local __luamerge_main = {{if $.Debug -}}
 {{template "load" .}}{{else}}(function()
 {{template "env"}}return {{template "function" .}}
@@ -365,14 +377,11 @@ type templateData struct {
 	EntryName string
 	Entry     codeData
 	Modules   []moduleData
-	// Aliases are the names --package-prefix generated, registered after
-	// every module.
-	Aliases  []graph.Alias
-	Prefix   string
-	Suffix   string
-	Shebang  string
-	Debug    bool
-	Fallback bool
+	Prefix    string
+	Suffix    string
+	Shebang   string
+	Debug     bool
+	Fallback  bool
 	// RegTable is the package field loaders are registered in: "preload"
 	// normally, "postload" in fallback mode.
 	RegTable string
@@ -399,5 +408,8 @@ type moduleData struct {
 	// served by a wrapper around the interpreter's first searcher. In
 	// fallback mode they are among Names instead.
 	BuiltinNames []string
-	Code         codeData
+	// Deferrals are registered in RegTable, each with a loader that gives
+	// the runtime's module of its Builtin name where there is one.
+	Deferrals []graph.Deferral
+	Code      codeData
 }

@@ -88,7 +88,8 @@ func run() int {
 	pflag.StringVar(&shebang, "shebang", "",
 		"Shebang line written as the first line of the bundle (e.g. '#!/usr/bin/env lua')")
 	pflag.StringVar(&packagePrefix, "package-prefix", "",
-		"Prefix for all module names (e.g., 'mypkg' makes require('mypkg.module')")
+		"Register modules under names with this prefix only, renaming the project's requires to match "+
+			"(e.g., 'mypkg' makes require('mypkg.module') work)")
 	pflag.StringVar(&packageName, "package-name", "",
 		"Package name (strip-prefix and package-prefix take this value unless set themselves)")
 	pflag.StringVar(&stripPrefix, "strip-prefix", "",

@@ -264,58 +264,14 @@ func TestGraphPackagePrefix(t *testing.T) {
 	// Should have 2 modules.
 	require.Len(t, g.Modules, 2, "len(g.Modules)")
 
-	// a keeps the name main requires it by, and the prefixed name is an alias
-	// of it, not a name of its own. Nothing requires the entry, so it has no
-	// name to prefix.
+	// a has the prefixed name only, and main requires it by that name now.
+	// Nothing requires the entry, so it has no name to prefix.
 	aMod := g.ByPath[filepath.Join(tmpDir, "a.lua")]
 	require.NotNil(t, aMod)
-	assert.Equal(t, []string{"a"}, aMod.Names)
-	assert.Equal(t, []graph.Alias{{Name: "mypkg.a", Target: "a"}}, aMod.Aliases)
+	assert.Equal(t, []string{"mypkg.a"}, aMod.Names)
+	assert.Equal(t, `require("mypkg.a")`, string(g.Entry.Source))
 	assert.Empty(t, g.Entry.Names, "the entry's names")
-	assert.Empty(t, g.Entry.Aliases, "the entry's aliases")
 	assert.Equal(t, "main", g.EntryName)
-}
-
-// TestBuild_PackagePrefixAliases: --package-prefix generates an alias for
-// every name that lacks the prefix and keeps it apart from the names the
-// project requires the module by.
-func TestBuild_PackagePrefixAliases(t *testing.T) {
-	t.Parallel()
-
-	// Build resolves the symbolic links in the entry's path; the resolver is
-	// given the root as spelled here.
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "p"), 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"),
-		[]byte("require(\"x\")\nrequire(\"p.z\")\n"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "x.lua"), []byte("return 1\n"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "p", "z.lua"), []byte("return 2\n"), 0o600))
-
-	cfg := entryConfig(dir, "main.lua")
-	cfg.PackagePrefix = "p"
-	g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
-	require.NoError(t, err)
-
-	type names struct {
-		Names   []string
-		Aliases []graph.Alias
-	}
-
-	got := make(map[string]names)
-
-	for _, mod := range g.Modules {
-		rel, relErr := filepath.Rel(dir, mod.FilePath)
-		require.NoError(t, relErr)
-
-		got[filepath.ToSlash(rel)] = names{Names: mod.Names, Aliases: mod.Aliases}
-	}
-
-	assert.Equal(t, map[string]names{
-		"main.lua": {Names: nil, Aliases: nil},
-		"x.lua":    {Names: []string{"x"}, Aliases: []graph.Alias{{Name: "p.x", Target: "x"}}},
-		"p/z.lua":  {Names: []string{"p.z"}, Aliases: nil},
-	}, got)
 }
 
 // entryConfig is a strict configuration with the default path templates that

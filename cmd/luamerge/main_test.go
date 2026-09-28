@@ -221,6 +221,7 @@ func TestCLI_PackagePrefix(t *testing.T) {
 	out, _, code := runCLI(t, append(base(dir), "--package-prefix", "mypkg")...)
 	assert.Equal(t, 0, code)
 	assert.Contains(t, out, `package.preload["mypkg.module"]`, "--package-prefix should namespace module names")
+	assert.NotContains(t, out, `package.preload["module"]`, "the bare name must not leave the bundle")
 	assert.NotContains(t, out, `package.preload["mypkg.main"]`, "the entry is not a module")
 }
 

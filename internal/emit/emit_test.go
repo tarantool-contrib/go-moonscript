@@ -17,7 +17,7 @@ import (
 // names.
 func newModule(path, source string, names ...string) *graph.Module {
 	return &graph.Module{
-		ID: 0, FilePath: path, Names: names, BuiltinNames: nil, Aliases: nil, Source: []byte(source), Requires: nil,
+		ID: 0, FilePath: path, Names: names, BuiltinNames: nil, Deferrals: nil, Source: []byte(source), Requires: nil,
 	}
 }
 
@@ -147,22 +147,65 @@ func TestEmit_RegistersEveryName(t *testing.T) {
 	}
 }
 
-func TestEmit_AliasSharesTheInstance(t *testing.T) {
+// TestEmit_DefersPrefixedBuiltinNames: a name that a package prefix made of
+// the name of a module some runtime has built in, p.csv of csv, is registered
+// with a loader that gives the runtime's own module where the runtime has one
+// and the embedded module elsewhere, as the require of csv it stands for
+// does. The runtime's module is looked for in package.loaded and by the
+// interpreter's first searcher only, never on disk, and nothing is registered
+// under csv. The other names of the module are registered as usual.
+func TestEmit_DefersPrefixedBuiltinNames(t *testing.T) {
 	t.Parallel()
 
-	// A name --package-prefix generated loads the name it was generated from.
-	foo := newModule("/test/foo.lua", "COUNT = (COUNT or 0) + 1\nreturn { name = (...) }\n", "foo")
-	foo.Aliases = []graph.Alias{{Name: "pkg.foo", Target: "foo"}}
-	g := newGraph(
-		newModule("/test/main.lua", "local a, b = require(\"foo\"), require(\"pkg.foo\")\n"+
-			"print(a == b, COUNT, a.name)\n"),
-		foo,
-	)
+	csv := newModule("/test/csv.lua", "return { impl = \"embedded\" }\n", "p.csv", "p.compat.csv")
+	csv.Deferrals = []graph.Deferral{{Name: "p.csv", Builtin: "csv"}}
+	g := newGraph(newModule("/test/main.lua",
+		"print(require(\"p.csv\").impl or \"built-in\", require(\"p.compat.csv\").impl)\n"), csv)
 
-	bundle := emitBundle(t, g, defaults())
+	for name, tt := range map[string]struct {
+		debug, fallback bool
+		registry        string
+	}{
+		"default":  {debug: false, fallback: false, registry: "preload"},
+		"debug":    {debug: true, fallback: false, registry: "preload"},
+		"fallback": {debug: false, fallback: true, registry: "postload"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Contains(t, bundle, "package.preload[\"pkg.foo\"] = function(...) return require(\"foo\") end")
-	assertRuns(t, bundle, "true\t1\tfoo\n")
+			opts := defaults()
+			opts.Debug, opts.Fallback = tt.debug, tt.fallback
+
+			bundle := emitBundle(t, g, opts)
+
+			assert.Contains(t, bundle, "package."+tt.registry+"[\"p.csv\"] = function(...)\n")
+			assert.Contains(t, bundle, "package."+tt.registry+"[\"p.compat.csv\"] = __luamerge_loader end\n")
+			assert.NotContains(t, bundle, "package."+tt.registry+"[\"p.csv\"] = __luamerge_loader")
+			assert.NotContains(t, bundle, "package."+tt.registry+"[\"csv\"] = ", "nothing is registered as csv")
+			assert.NotContains(t, bundle, "__luamerge_searchers", "no searcher serves csv")
+
+			luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+				t.Helper()
+
+				// Whether the interpreter has a csv module of its own. The
+				// bundle runs next to a csv.lua, which it must not take for
+				// one.
+				opts := luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0}
+				dir := luatest.WriteProject(t, luatest.Project{
+					"probe.lua": "io.write(pcall(require, \"csv\") and \"built-in\" or \"embedded\")\n",
+				})
+				probe := luatest.Run(t, interp, dir, opts, "probe.lua")
+				require.Equal(t, 0, probe.ExitCode, "the probe\n%s", probe)
+
+				r := luatest.Run(t, interp, luatest.WriteProject(t, luatest.Project{
+					"bundle.lua": bundle,
+					"csv.lua":    "return { impl = \"a csv.lua on disk\" }\n",
+				}), opts, "bundle.lua")
+				assert.Equal(t, 0, r.ExitCode, "the bundle failed\n%s\n--- bundle:\n%s", r, bundle)
+				assert.Equal(t, probe.Stdout+"\tembedded\n", r.Stdout, "%s\n--- bundle:\n%s", r, bundle)
+			})
+		})
+	}
 }
 
 func TestEmit_Suffix(t *testing.T) {

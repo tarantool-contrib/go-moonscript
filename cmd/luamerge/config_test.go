@@ -211,11 +211,11 @@ func TestCLI_RootSpelling(t *testing.T) {
 			stdout, stderr, code := runCLIIn(t, dir, args...)
 
 			// Assert: the entry is not registered, so its name shows in the
-			// bundle's header only.
+			// bundle's header only; util has the prefixed name only.
 			require.Equal(t, 0, code, stderr)
 			assert.Empty(t, stderr)
 			assert.Contains(t, stdout, entryHeader("app.main"))
-			assertEmbedded(t, stdout, []string{"app.util", "pk.app.util"}, nil)
+			assertEmbedded(t, stdout, []string{"pk.app.util"}, []string{"app.util"})
 		})
 	}
 }
