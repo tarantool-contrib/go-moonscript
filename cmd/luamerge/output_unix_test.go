@@ -55,10 +55,12 @@ func perm(t *testing.T, path string) string {
 }
 
 // TestCLI_OutputMode checks that a new output gets the mode os.Create would
-// give it (0666 less the umask) and that a rebuilt output keeps its permission
-// bits: the README's `--output app` followed by `chmod +x app` must stay
-// executable after the next build. 0775 is a mode the umask would strip, and
-// 0600 one it would loosen, were the bits taken from anywhere but the old file.
+// give it (0666 less the umask; umask 002 tells it from 0644), that missing
+// directories of the output are created 0750, and that a rebuilt output keeps
+// its permission bits: the README's `--output app` followed by `chmod +x app`
+// must stay executable after the next build. 0775 is a mode the umask would
+// strip, and 0600 one it would loosen, were the bits taken from anywhere but
+// the old file.
 //
 //nolint:paralleltest // withUmask changes the umask of the whole process.
 func TestCLI_OutputMode(t *testing.T) {
@@ -66,12 +68,25 @@ func TestCLI_OutputMode(t *testing.T) {
 
 	dir := writeProject(t)
 
-	t.Run("new file", func(t *testing.T) {
-		out := filepath.Join(t.TempDir(), "bundle.lua")
+	for mask, want := range map[int]string{0o022: "0644", 0o002: "0664"} {
+		t.Run(fmt.Sprintf("new file, umask %03o", mask), func(t *testing.T) {
+			withUmask(t, mask)
 
-		buildTo(t, dir, out)
+			out := filepath.Join(t.TempDir(), "bundle.lua")
 
-		assert.Equal(t, "0644", perm(t, out))
+			buildTo(t, dir, out)
+
+			assert.Equal(t, want, perm(t, out))
+		})
+	}
+
+	t.Run("new directories", func(t *testing.T) {
+		outRoot := t.TempDir()
+
+		buildTo(t, dir, filepath.Join(outRoot, "dist", "lua", "bundle.lua"))
+
+		assert.Equal(t, "0750", perm(t, filepath.Join(outRoot, "dist")))
+		assert.Equal(t, "0750", perm(t, filepath.Join(outRoot, "dist", "lua")))
 	})
 
 	for _, mode := range []fs.FileMode{0o755, 0o775, 0o600} {
@@ -275,4 +290,41 @@ func TestCLI_FailedWriteKeepsPreviousOutput(t *testing.T) {
 	assert.Contains(t, stderr.String(), "write output")
 	assert.Equal(t, previous, readFile(t, out), "the previous bundle was modified by a failed write")
 	assert.Equal(t, []string{"bundle.lua"}, dirNames(t, outDir), "a failed write left files behind")
+}
+
+// TestCLI_FailedStdoutWrite checks that a bundle that cannot be written to
+// stdout, the default output, is an error as a failed write to a file is:
+// `luamerge ... > bundle.lua` onto a full disk must not exit 0 with no
+// bundle. A zero file-size limit makes the write fail with EFBIG, as in
+// TestCLI_FailedWriteKeepsPreviousOutput.
+func TestCLI_FailedStdoutWrite(t *testing.T) {
+	t.Parallel()
+
+	// Arrange.
+	dir := writeProject(t)
+	outDir := t.TempDir()
+
+	// The shell sends the CLI's stdout to bundle.lua in outDir, the working
+	// directory; stderr stays a pipe, which the limit does not bind.
+	script := `ulimit -f 0 && exec "$0" "$@" >bundle.lua`
+	args := slices.Concat([]string{"-c", script, luatest.CLIPath(t)}, entryArgs(dir))
+
+	// #nosec G204 -- the shell and its script are fixed; the CLI is the binary luatest built.
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", args...)
+	cmd.Dir = outDir
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+
+	var stderr bytes.Buffer
+
+	cmd.Stderr = &stderr
+
+	// Act.
+	err := cmd.Run()
+
+	// Assert.
+	exitErr, ok := errors.AsType[*exec.ExitError](err)
+	require.True(t, ok, "the write must fail: %v", err)
+	assert.Equal(t, 1, exitErr.ExitCode(), "exit code (-1 is a signal): %s", stderr.String())
+	assert.Contains(t, stderr.String(), "write output")
+	assert.Empty(t, readFile(t, filepath.Join(outDir, "bundle.lua")))
 }

@@ -42,6 +42,7 @@ func TestCLI_PositionalArguments(t *testing.T) {
 		{"entry without its flag", []string{"main.lua"},
 			[]string{`unexpected argument "main.lua"`, "--entry main.lua"}},
 		{"stray word", []string{"--entry", "main.lua", "extra"}, []string{`unexpected argument "extra"`}},
+		{"stray word first", []string{"extra"}, []string{`unexpected argument "extra"`}},
 		{"after the terminator", []string{"--entry", "main.lua", "--", "--minify"},
 			[]string{`unexpected argument "--minify"`}},
 	}
@@ -91,6 +92,61 @@ func TestCLI_PositionalArgumentsHint(t *testing.T) {
 			assert.Contains(t, stderr, "unexpected argument")
 			assert.NotContains(t, stderr, "=")
 		})
+	}
+}
+
+// TestCLI_EntryRequired checks that a run without an entry, on the command
+// line or in the configuration, says what is missing and how to give it.
+func TestCLI_EntryRequired(t *testing.T) {
+	t.Parallel()
+
+	dir := luatest.WriteProject(t, luatest.Project{"main.lua": "print(\"hi\")\n", "luamerge.yaml": "strict: true\n"})
+
+	stdout, stderr, code := runCLIIn(t, dir)
+
+	assert.Equal(t, 1, code, "exit code")
+	assert.Empty(t, stdout)
+	assert.Equal(t, "error: --entry is required (or set in config file)\n", stderr)
+}
+
+// TestCLI_BooleanFlagValue checks that a boolean flag given a value after "="
+// takes only a boolean: --minify=maybe is a usage error, not false.
+func TestCLI_BooleanFlagValue(t *testing.T) {
+	t.Parallel()
+
+	dir := luatest.WriteProject(t, luatest.Project{"main.lua": "-- COMMENT_MARK\nprint(\"hi\")\n"})
+
+	for _, flag := range booleanFlags() {
+		t.Run(flag, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, code := runCLIIn(t, dir, "--entry", "main.lua", "--"+flag+"=maybe")
+
+			assert.Equal(t, usageExitCode, code, "exit code")
+			assert.Empty(t, stdout)
+			assert.Contains(t, stderr, `invalid argument "maybe" for "--`+flag+`" flag`)
+		})
+	}
+}
+
+// booleanFlags are the flags that take no value, or a boolean after "=".
+func booleanFlags() []string {
+	return []string{
+		"strict", "debug", "fallback", "no-arg-fix", "remove-comments", "remove-empty-lines", "minify", "version",
+	}
+}
+
+// TestCLI_BooleanFlagsHelp checks that --help lists every boolean flag alone,
+// with no value after its name: "--strict", not "--strict string[="true"]".
+func TestCLI_BooleanFlagsHelp(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, code := runCLI(t, "--help")
+
+	require.Equal(t, 0, code, stderr)
+
+	for _, flag := range booleanFlags() {
+		assert.Regexp(t, `(?m)^\s*--`+flag+`\s{2,}\S`, stderr, "--%s takes no value", flag)
 	}
 }
 

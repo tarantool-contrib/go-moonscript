@@ -311,6 +311,51 @@ func TestCLI_PackageNameOverride(t *testing.T) {
 	}
 }
 
+// argLine is the line of a module's wrapper that arg_fix controls.
+const argLine = `arg = rawget(_G, "arg")`
+
+// TestCLI_ArgFixFromConfig checks that arg_fix: false in luamerge.yaml or
+// LUAMERGE_ARG_FIX=false leaves the arg line out when --no-arg-fix is not
+// given, and that --no-arg-fix=false puts it back.
+func TestCLI_ArgFixFromConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		yaml string   // luamerge.yaml; "" writes none.
+		env  []string // KEY=VALUE pairs.
+		args []string // Added to --entry main.lua.
+		want bool     // Whether the bundle has the arg line.
+	}{
+		{"config file", "arg_fix: false\n", nil, nil, false},
+		{"environment", "", []string{"LUAMERGE_ARG_FIX=false"}, nil, false},
+		{"flag over config file", "arg_fix: false\n", nil, []string{"--no-arg-fix=false"}, true},
+		{"flag over environment", "", []string{"LUAMERGE_ARG_FIX=false"}, []string{"--no-arg-fix=false"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange.
+			project := luatest.Project{"main.lua": "require(\"m\")\n", "m.lua": "return 1\n"}
+			if tt.yaml != "" {
+				project["luamerge.yaml"] = tt.yaml
+			}
+
+			dir := luatest.WriteProject(t, project)
+
+			// Act.
+			result := luatest.RunCLI(t, dir, tt.env, append([]string{"--entry", "main.lua"}, tt.args...)...)
+
+			// Assert.
+			require.Equal(t, 0, result.ExitCode, result.Stderr)
+			assert.Contains(t, result.Stdout, preloaded("m"))
+			assert.Equal(t, tt.want, strings.Contains(result.Stdout, argLine), "the arg line")
+		})
+	}
+}
+
 // TestCLI_ConfigPathsFromWorkingDirectory checks that relative paths in a
 // config file are taken from the working directory, not from the file's
 // directory: entry, root and search of build/luamerge.yaml name ./src and
