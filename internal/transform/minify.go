@@ -1,145 +1,69 @@
 package transform
 
+import (
+	"bytes"
+	"fmt"
+
+	"github.com/tarantool/go-luamerge/internal/lex"
+)
+
 type minifyTransformer struct{}
 
+// Transform keeps every token but the comments byte for byte and rebuilds
+// what lies between them: nothing where the two tokens stay apart without it,
+// a space where they would run together ("local x", "a - -b", "1 ..2"), and a
+// line break where the source had one or more, in white space or inside a
+// comment. No line break goes away and none is added: Lua 5.1 and LuaJIT
+// refuse a call whose "(" starts a new line as ambiguous, where Lua 5.2+
+// reads the call. The header that the interpreter skips when it loads a file
+// (see lex.Header), a byte order mark and a first line starting with "#", is
+// dropped. Line numbers are not kept.
 func (t *minifyTransformer) Transform(source []byte) ([]byte, error) {
-	// Remove shebang line if present.
-	source = StripShebang(source)
-
-	// First remove comments.
-	ct := &commentTransformer{}
-
-	withoutComments, err := ct.Transform(source)
+	tokens, err := lex.NewFile(source).Tokens()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("minify: %w", err)
 	}
 
-	// Then remove empty lines.
-	elt := &emptyLineTransformer{}
+	out := make([]byte, 0, len(source))
+	pos := lex.Header(source)
 
-	withoutEmptyLines, err := elt.Transform(withoutComments)
-	if err != nil {
-		return nil, err
-	}
+	var prev []byte
 
-	// Simple whitespace reduction: collapse multiple spaces to single space.
-	// This is a basic implementation; a proper minifier would do more.
-	result := reduceWhitespace(withoutEmptyLines)
+	newline := false // A line break since prev.
 
-	return result, nil
-}
+	for _, tok := range tokens {
+		text := source[tok.Start:tok.End]
+		newline = newline || hasLineBreak(source[pos:tok.Start])
+		pos = tok.End
 
-func reduceWhitespace(source []byte) []byte {
-	var out []byte
-
-	i := 0
-	n := len(source)
-	inString := false
-	stringChar := byte(0)
-
-	for i < n {
-		char := source[i]
-
-		// Track string state.
-		if !inString && (char == '"' || char == '\'') {
-			inString = true
-			stringChar = char
-			out = append(out, char)
-			i++
+		if isComment(tok) {
+			newline = newline || tok.EndLine > tok.Line
 
 			continue
 		}
 
-		if inString && char == stringChar {
-			// An escaped quote keeps us inside the string.
-			if i == 0 || source[i-1] != '\\' {
-				inString = false
+		if prev != nil {
+			switch {
+			case newline:
+				out = append(out, '\n')
+			case lex.NeedsSeparator(prev, text):
+				out = append(out, ' ')
 			}
-
-			out = append(out, char)
-			i++
-
-			continue
 		}
 
-		if !inString && isLongBracketStart(source, i, n) {
-			// Long string start.
-			out, i = copyLongBracketBytes(source, out, i, n)
-
-			continue
-		}
-
-		if !inString && (char == ' ' || char == '\t') {
-			out, i = collapseSpaces(source, out, i, n)
-
-			continue
-		}
-
-		// Remove trailing whitespace at end of line.
-		if !inString && char == '\n' {
-			out = trimTrailingWhitespace(out)
-		}
-
-		out = append(out, char)
-		i++
+		out = append(out, text...)
+		prev = text
+		newline = false
 	}
 
-	return out
-}
-
-// isLongBracketStart reports whether source[i:] begins a long bracket "[[".
-func isLongBracketStart(source []byte, i, n int) bool {
-	return i+1 < n && source[i] == '[' && source[i+1] == '['
-}
-
-// copyLongBracketBytes copies a long string [[ ... ]] (with support for
-// nested long brackets) starting at source[i] into out, and returns the
-// updated out slice and the index following the copied bracket.
-func copyLongBracketBytes(source []byte, out []byte, i, n int) ([]byte, int) {
-	out = append(out, source[i], source[i+1])
-	i += 2
-	depth := 0
-
-	for i < n {
-		if i+1 < n && source[i] == ']' && source[i+1] == ']' && depth == 0 {
-			out = append(out, ']', ']')
-			i += 2
-
-			break
-		}
-
-		if i+1 < n && source[i] == '[' && source[i+1] == '[' {
-			depth++
-		} else if i+1 < n && source[i] == ']' && source[i+1] == ']' && depth > 0 {
-			depth--
-		}
-
-		out = append(out, source[i])
-		i++
+	if prev != nil && (newline || hasLineBreak(source[pos:])) {
+		out = append(out, '\n')
 	}
 
-	return out, i
+	return out, nil
 }
 
-// collapseSpaces collapses the run of spaces/tabs starting at source[i] into
-// a single space appended to out, and returns the updated out slice and the
-// index following the run.
-func collapseSpaces(source []byte, out []byte, i, n int) ([]byte, int) {
-	out = append(out, ' ')
-
-	// Skip all consecutive whitespace.
-	for i < n && (source[i] == ' ' || source[i] == '\t') {
-		i++
-	}
-
-	return out, i
-}
-
-// trimTrailingWhitespace removes trailing spaces/tabs from the end of out.
-func trimTrailingWhitespace(out []byte) []byte {
-	for len(out) > 0 && (out[len(out)-1] == ' ' || out[len(out)-1] == '\t') {
-		out = out[:len(out)-1]
-	}
-
-	return out
+// hasLineBreak reports whether text holds a line break.
+func hasLineBreak(text []byte) bool {
+	return bytes.ContainsAny(text, "\r\n")
 }

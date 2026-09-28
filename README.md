@@ -128,7 +128,7 @@ A module reachable under several names is registered under each of them with the
 | `--no-arg-fix` | Omit the `arg` line, which only acts on PUC Lua 5.1 (`LUA_COMPAT_VARARG`): there it restores the global `arg` inside module code | – |
 | `--remove-comments` | Remove comments, keeping line numbers (see [Source transforms](#source-transforms)) | `false` |
 | `--remove-empty-lines` | Remove lines that hold only white space, outside strings and comments | `false` |
-| `--minify` | Minify source (subsumes comment / empty-line / shebang removal) | `false` |
+| `--minify` | Remove comments, a shebang and the white space between tokens (see [Source transforms](#source-transforms)) | `false` |
 | `--strip-shebang` | Remove shebang lines from input module sources | `false` |
 | `--prefix` | Lua code run before the modules are registered, in a block of its own | – |
 | `--suffix` | Lua code run after the entry, in a block of its own | – |
@@ -143,10 +143,11 @@ The output is written only once the build has succeeded: a failed build leaves a
 
 ## Source transforms
 
-`--remove-comments` and `--remove-empty-lines` read each module with a lexer that knows the lexical grammar of Lua 5.1 to 5.5, LuaJIT and Tarantool (long brackets of any level, every string escape, the line breaks `\n`, `\r`, `\r\n` and `\n\r`), and they never change a token: strings, numbers and names reach the bundle byte for byte.
+The transforms read each module with a lexer that knows the lexical grammar of Lua 5.1 to 5.5, LuaJIT and Tarantool (long brackets of any level, every string escape, the line breaks `\n`, `\r`, `\r\n` and `\n\r`), and they never change a token: strings, numbers and names reach the bundle byte for byte. A module the lexer cannot read, such as one with an unfinished string, fails the build.
 
 - `--remove-comments` removes every comment. A removed comment keeps the line breaks it contained, so every line keeps its number and `--debug` tracebacks stay exact; where the tokens on both sides would otherwise run together (`local--[[c]]b`), a space stays between them.
 - `--remove-empty-lines` removes the lines that hold nothing but white space between tokens; a blank line inside a long string or a long comment is part of it and stays. The lines after a removed one move up, so `--debug` line numbers no longer match the source.
+- `--minify` removes the comments and the white space between tokens. A single space stays where two tokens would otherwise run together (`local x`, `a - -b`, `1 ..2`), and a single line break where the source had one or more: Lua 5.1 and LuaJIT read a `(` at the start of a line differently from Lua 5.2+, so no line break is taken out or put in. A first line starting with `#` and a byte order mark are dropped. Line numbers are not kept.
 
 ## Configuration
 
@@ -254,7 +255,7 @@ In fallback mode loaders live in `package.postload` behind a searcher appended *
 luamerge --entry src/main.lua --minify --output dist/bundle.lua
 ```
 
-`--minify` subsumes comment, empty-line, and shebang removal.
+`--minify` subsumes comment, empty-line, and shebang removal, and keeps every token as it is (see [Source transforms](#source-transforms)).
 
 ### Inject startup / teardown code
 

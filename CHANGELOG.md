@@ -99,6 +99,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including those inside long strings and long comments, which changed
   string values, and it dropped the final line break of a module whose
   last line held only white space.
+- `--minify` keeps every token byte for byte. It used to delete blank
+  lines inside long strings, take leveled long strings (`[=[ … ]=]`) for
+  code, lose track of strings after one ending in an escaped backslash
+  (`"\\"`) and collapse the white space inside the strings that followed,
+  and glue the tokens around a removed block comment. It now removes the
+  white space between tokens instead of collapsing it: a single space
+  stays where two tokens would otherwise run together (`local x`,
+  `a - -b`, `1 ..2`), and a line break where the source had one, since
+  Lua 5.1 and LuaJIT read a `(` at the start of a line differently from
+  Lua 5.2+.
 - Release archives now include a `darwin_arm64` build for Apple Silicon
   Macs. GoReleaser's build matrix excluded that target under a comment
   claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.

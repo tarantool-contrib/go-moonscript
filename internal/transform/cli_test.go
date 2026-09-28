@@ -16,7 +16,7 @@ func TestMain(m *testing.M) { luatest.Main(m) }
 
 // transformFlags are the CLI flags of the source transforms.
 func transformFlags() []string {
-	return []string{"--remove-comments", "--remove-empty-lines"}
+	return []string{"--remove-comments", "--remove-empty-lines", "--minify"}
 }
 
 // transformCase is a differential test of main.lua bundled with the CLI flags
@@ -79,6 +79,23 @@ func TestCLI_TransformsKeepProgramData(t *testing.T) {
 			name: "line comment ended by a carriage return",
 			main: "local x = 1 -- one\rprint(\"x is\", x)\rprint(\"done\")\r",
 		},
+		{
+			name: "tokens that would run together",
+			//nolint:dupword // "not not" is Lua, and the point of the case.
+			main: "local a, b = 1, 2\nprint(a - -b, 1 .. 2, a .. 1, not not a, #{ [ [[k]] ] = 1 })\n",
+		},
+		{
+			// Lua 5.1 and LuaJIT refuse the call as ambiguous, Lua 5.2+ reads
+			// it: a line break taken out would change both.
+			name: "line break before a parenthesis",
+			//nolint:dupword // "end end" is Lua.
+			main: "local function f(x) return function() return x end end\nlocal g = 7\nlocal h = f\n(g)\nprint(h())\n",
+		},
+		{
+			// Lua 5.2+ and LuaJIT; Lua 5.1 has no goto.
+			name: "goto and labels",
+			main: "for i = 1, 3 do\n  if i == 2 then goto continue end\n  print(i)\n  ::continue::\nend\n",
+		},
 	}
 
 	for _, tt := range tests {
@@ -139,6 +156,7 @@ func TestCLI_TransformFlagsTakeEffect(t *testing.T) {
 	}{
 		{flag: "--remove-comments", module: "local x = 1 \n\n\nprint(x)\n", gone: "MARK"},
 		{flag: "--remove-empty-lines", module: "local x = 1 -- MARK\nprint(x)\n", gone: "\n\nprint(x)"},
+		{flag: "--minify", module: "local x=1\nprint(x)\n", gone: "MARK"},
 	}
 
 	for _, tt := range tests {
