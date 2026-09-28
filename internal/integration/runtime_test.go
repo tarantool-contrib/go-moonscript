@@ -731,3 +731,39 @@ func TestBundle_ArgLineUnderStrictGlobals(t *testing.T) {
 		})
 	}
 }
+
+// TestBundle_PrefixHasItsOwnScope: the prefix is code of its own. Its locals
+// are not visible to the modules or to the entry, in either mode, and its
+// last statement does not run on into the program's first one.
+func TestBundle_PrefixHasItsOwnScope(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		prefix  string
+		project luatest.Project
+	}{
+		"local": {
+			prefix: "local helper = \"prefix local\"",
+			project: luatest.Project{
+				"main.lua": "print(\"main sees \" .. tostring(helper))\nprint((require(\"m\")))\n",
+				"m.lua":    "return \"m sees \" .. tostring(helper)\n",
+			},
+		},
+		"trailing expression": {
+			// Glued to the entry, `print` would call the function and then
+			// the nothing print returns.
+			prefix:  "handler = print",
+			project: luatest.Project{"main.lua": "(function() print(\"entry ran\") end)()\n"},
+		},
+	}
+
+	for mode, flags := range modes() {
+		for name, tt := range cases {
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				luatest.Differential(t, cliCase(tt.project, append([]string{"--prefix", tt.prefix}, flags...)...))
+			})
+		}
+	}
+}

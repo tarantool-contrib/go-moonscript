@@ -54,6 +54,11 @@ import (
 // natively (Lua 5.1, LuaJIT and Tarantool report the loop; later versions
 // recurse until the C stack overflows).
 //
+// The prefix runs first, in a `do` block of its own: its locals are not
+// visible to the rest of the bundle, as they are not to modules loaded as
+// chunks of their own in debug mode, and its last statement cannot run on
+// into the next one.
+//
 // By default loaders go into package.preload, which the built-in preload
 // searcher consults before searching package.path — so embedded modules win.
 // In fallback mode (.Fallback) loaders go into package.postload and a searcher
@@ -91,7 +96,9 @@ assert((rawget(_G, "loadstring") or load)({{bracket .Source}}, {{q (chunkname .P
 {{end}}-- Amalgamated by luamerge
 -- Entry: {{.EntryName}}
 
-{{if .Prefix}}{{.Prefix}}
+{{if .Prefix}}do
+{{.Prefix}}end
+
 {{end}}{{if .Fallback}}package.postload = package.postload or {}
 do
   local postload = package.postload

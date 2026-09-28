@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `return require("<entry>")`, and the entry is registered in
   `package.preload` only when a module requires it by name, as a separate
   instance, the way a `require` of the entry's file loads one natively.
+- The `--prefix` code runs in a block of its own: its locals are no longer
+  visible to the modules and to the entry, in either mode (before, they were
+  visible to them without `--debug` only), and its last statement no longer
+  runs on into the next one, which made a prefix ending in an expression
+  call it with the entry's first parenthesized expression.
 
 ### Fixed
 
