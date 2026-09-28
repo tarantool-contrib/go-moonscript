@@ -3,7 +3,6 @@ package integration_test
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,147 +13,130 @@ import (
 	"github.com/tarantool/go-luamerge/internal/config"
 	"github.com/tarantool/go-luamerge/internal/emit"
 	"github.com/tarantool/go-luamerge/internal/graph"
+	"github.com/tarantool/go-luamerge/internal/luatest"
 	"github.com/tarantool/go-luamerge/internal/parse"
 	"github.com/tarantool/go-luamerge/internal/resolve"
 )
 
-func findLua() string {
-	path, err := exec.LookPath("lua")
-	if err == nil {
-		return path
-	}
+// TestMain lets tests here bundle through the CLI (luatest.CLI): luatest.Main
+// removes the binary it builds.
+func TestMain(m *testing.M) { luatest.Main(m) }
 
-	path, err = exec.LookPath("lua5.1")
-	if err == nil {
-		return path
-	}
+// bundler builds the project in dir the way these tests always have: the
+// default path templates, the project directory as root, graph.Build and
+// emit.Emit without transforms. tweak, when set, adjusts the config first.
+func bundler(opts emit.Options, tweak func(cfg *config.Config)) luatest.Bundler {
+	return func(tb testing.TB, dir string) []byte {
+		tb.Helper()
 
-	path, err = exec.LookPath("lua5.2")
-	if err == nil {
-		return path
-	}
+		cfg := config.Config{
+			Entry:    filepath.Join(dir, "main.lua"),
+			Output:   "",
+			Root:     dir,
+			Path:     "?.lua;?/init.lua",
+			Search:   nil,
+			Strict:   false,
+			Debug:    false,
+			Fallback: false,
+			ArgFix:   false,
+			Transform: config.TransformConfig{
+				RemoveComments:   false,
+				RemoveEmptyLines: false,
+				Minify:           false,
+				StripShebang:     false,
+			},
+			Prefix:          "",
+			Suffix:          "",
+			Shebang:         "",
+			PackagePrefix:   "",
+			PackageName:     "",
+			StripPrefix:     "",
+			SkipPackages:    nil,
+			IncludePackages: nil,
+		}
+		if tweak != nil {
+			tweak(&cfg)
+		}
 
-	path, err = exec.LookPath("lua5.3")
-	if err == nil {
-		return path
-	}
+		require.NoError(tb, cfg.ResolveRoot(), "resolve root")
 
-	path, err = exec.LookPath("lua5.4")
-	if err == nil {
-		return path
-	}
+		g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
+		require.NoError(tb, err, "build graph")
 
-	return ""
+		var buf bytes.Buffer
+
+		require.NoError(tb, emit.Emit(&buf, g, nil, opts), "emit")
+
+		return buf.Bytes()
+	}
 }
 
+// emitOptions are the emit options of these tests: everything off except
+// what debug and fallback say.
+func emitOptions(debug, fallback bool) emit.Options {
+	return emit.Options{Prefix: "", Suffix: "", Debug: debug, Fallback: fallback, Shebang: "", NoArgFix: false}
+}
+
+// differential is a luatest.Case with the given project and bundler and
+// every other field at its default.
+func differential(project luatest.Project, dir string, bundle luatest.Bundler) luatest.Case {
+	return luatest.Case{
+		Project: project,
+		Dir:     dir,
+		Entry:   "",
+		Bundle:  bundle,
+		Args:    nil,
+		Options: luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0},
+		Check:   nil,
+	}
+}
+
+// TestIntegration bundles every testdata project that has a main.lua and
+// checks, on every interpreter, that the bundle run from an empty directory
+// behaves like the original run from the project directory.
 func TestIntegration(t *testing.T) {
 	t.Parallel()
 
-	luaPath := findLua()
-	if luaPath == "" {
-		t.Skip("lua interpreter not found in PATH")
-	}
+	luatest.Interpreters(t) // Skip or fail once, not per fixture.
 
 	testDirs, err := filepath.Glob("../../testdata/*")
 	require.NoError(t, err)
 
-	skipDirs := map[string]bool{
-		// Original fails with C stack overflow; amalgamator fixes circular deps.
-		"circular": true,
+	skip := map[string]string{
+		"circular": "known: circular requires break the original program, which fails on the cycle, " +
+			"while the bundle breaks the cycle; TestCircularDependency pins the bundle's behaviour",
+	}
+	tweaks := map[string]func(cfg *config.Config){
+		// require(modname) cannot be resolved statically: the bundler warns and
+		// leaves it to runtime. --include is how its target gets embedded; the
+		// fixture used to pass only because the bundle ran next to module.lua.
+		"dynamic": func(cfg *config.Config) { cfg.IncludePackages = []string{"module"} },
 	}
 
-	for _, dir := range testDirs {
-		// Skip directories that don't have a main.lua.
-		mainPath := filepath.Join(dir, "main.lua")
+	projects := 0
 
-		_, err := os.Stat(mainPath)
+	for _, dir := range testDirs {
+		_, err := os.Stat(filepath.Join(dir, "main.lua"))
 		if err != nil {
 			continue
 		}
 
+		projects++
 		name := filepath.Base(dir)
-		if skipDirs[name] {
-			continue
-		}
 
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			runIntegrationTest(t, luaPath, dir, mainPath)
+
+			reason, known := skip[name]
+			if known {
+				t.Skip(reason)
+			}
+
+			luatest.Differential(t, differential(nil, dir, bundler(emitOptions(false, false), tweaks[name])))
 		})
 	}
-}
 
-func runIntegrationTest(t *testing.T, luaPath, dir, entryPath string) {
-	t.Helper()
-
-	// Run original project.
-	origOut, origErr := runLua(t, luaPath, entryPath, dir)
-
-	// Build amalgamated bundle.
-	cfg := config.Config{
-		Entry:    entryPath,
-		Output:   "",
-		Root:     dir,
-		Path:     "?.lua;?/init.lua",
-		Search:   nil,
-		Strict:   false,
-		Debug:    false,
-		Fallback: false,
-		ArgFix:   false,
-		Transform: config.TransformConfig{
-			RemoveComments:   false,
-			RemoveEmptyLines: false,
-			Minify:           false,
-			StripShebang:     false,
-		},
-		Prefix:          "",
-		Suffix:          "",
-		Shebang:         "",
-		PackagePrefix:   "",
-		PackageName:     "",
-		StripPrefix:     "",
-		SkipPackages:    nil,
-		IncludePackages: nil,
-	}
-	require.NoError(t, cfg.ResolveRoot(), "resolve root")
-
-	parser := parse.New()
-	resolver := resolve.New(cfg.Root, nil, cfg.Path)
-	g, err := graph.Build(&cfg, parser, resolver)
-	require.NoError(t, err, "build graph")
-
-	var buf bytes.Buffer
-
-	emitOpts := emit.Options{
-		Prefix:   "",
-		Suffix:   "",
-		Debug:    false,
-		Fallback: false,
-		Shebang:  "",
-		NoArgFix: false,
-	}
-	require.NoError(t, emit.Emit(&buf, g, nil, emitOpts), "emit")
-	bundle := buf.Bytes()
-
-	// Write bundle to temp file; t.TempDir() handles cleanup.
-	tmpFile, err := os.CreateTemp(t.TempDir(), "amalg-test-*.lua")
-	require.NoError(t, err, "create temp file")
-
-	_, err = tmpFile.Write(bundle)
-	require.NoError(t, err, "write temp file")
-	require.NoError(t, tmpFile.Close(), "close temp file")
-
-	// Run bundle.
-	bundleOut, bundleErr := runLua(t, luaPath, tmpFile.Name(), dir)
-
-	// Compare outputs.
-	assert.Equal(t, origOut, bundleOut, "output mismatch\noriginal output:\n%s\nbundle output:\n%s", origOut, bundleOut)
-
-	// Compare errors: both empty or both non-empty.
-	assert.Equal(
-		t, origErr == "", bundleErr == "",
-		"error presence mismatch\noriginal error:\n%s\nbundle error:\n%s", origErr, bundleErr,
-	)
+	require.NotZero(t, projects, "no testdata project with a main.lua under ../../testdata")
 }
 
 // TestDebugTraceback verifies that --debug makes runtime errors report the
@@ -162,148 +144,58 @@ func runIntegrationTest(t *testing.T, luaPath, dir, entryPath string) {
 func TestDebugTraceback(t *testing.T) {
 	t.Parallel()
 
-	luaPath := findLua()
-	if luaPath == "" {
-		t.Skip("lua interpreter not found in PATH")
+	spec := differential(luatest.Project{
+		"main.lua": "local m = require(\"boom\")\nm.go()\n",
+		// error() is on line 3 of boom.lua.
+		"boom.lua": "local M = {}\nfunction M.go()\n  error(\"kaboom\")\nend\nreturn M\n",
+	}, "", bundler(emitOptions(true, false), nil))
+	spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+		t.Helper()
+
+		luatest.AssertSame(t, orig, bundle)
+
+		// The error origin (first line) must report the original module
+		// file:line, not an offset into the bundle.
+		errLine, _, _ := strings.Cut(bundle.Stderr, "\n")
+
+		// Lua truncates long chunk names (LUA_IDSIZE) with a leading "...", so
+		// match on the base name + line rather than the full temp path.
+		want := "boom.lua:3"
+		assert.Contains(
+			t, errLine, want,
+			"debug error should point at original file:line\nwant substring: %q\ngot first line: %q\nfull stderr:\n%s",
+			want, errLine, bundle.Stderr,
+		)
+		assert.NotContains(
+			t, errLine, "bundle.lua:",
+			"debug error should not originate from bundle.lua\ngot first line: %q", errLine,
+		)
 	}
 
-	dir := t.TempDir()
-	mainPath := filepath.Join(dir, "main.lua")
-	boomPath := filepath.Join(dir, "boom.lua")
-
-	require.NoError(t, os.WriteFile(mainPath, []byte("local m = require(\"boom\")\nm.go()\n"), 0o600))
-
-	// error() is on line 3 of boom.lua.
-	boomSrc := "local M = {}\nfunction M.go()\n  error(\"kaboom\")\nend\nreturn M\n"
-	require.NoError(t, os.WriteFile(boomPath, []byte(boomSrc), 0o600))
-
-	cfg := config.Config{
-		Entry:    mainPath,
-		Output:   "",
-		Root:     dir,
-		Path:     "?.lua;?/init.lua",
-		Search:   nil,
-		Strict:   false,
-		Debug:    false,
-		Fallback: false,
-		ArgFix:   false,
-		Transform: config.TransformConfig{
-			RemoveComments:   false,
-			RemoveEmptyLines: false,
-			Minify:           false,
-			StripShebang:     false,
-		},
-		Prefix:          "",
-		Suffix:          "",
-		Shebang:         "",
-		PackagePrefix:   "",
-		PackageName:     "",
-		StripPrefix:     "",
-		SkipPackages:    nil,
-		IncludePackages: nil,
-	}
-	require.NoError(t, cfg.ResolveRoot(), "resolve root")
-	g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
-	require.NoError(t, err, "build graph")
-
-	var buf bytes.Buffer
-
-	emitOpts := emit.Options{
-		Prefix:   "",
-		Suffix:   "",
-		Debug:    true,
-		Fallback: false,
-		Shebang:  "",
-		NoArgFix: false,
-	}
-	require.NoError(t, emit.Emit(&buf, g, nil, emitOpts), "emit")
-
-	bundlePath := filepath.Join(dir, "bundle.lua")
-	require.NoError(t, os.WriteFile(bundlePath, buf.Bytes(), 0o600))
-
-	_, stderr := runLua(t, luaPath, bundlePath, dir)
-
-	// The error origin (first line) must report the original module file:line,
-	// not an offset into the bundle.
-	errLine, _, found := strings.Cut(stderr, "\n")
-	if !found {
-		errLine = stderr
-	}
-
-	// Lua truncates long chunk names (LUA_IDSIZE) with a leading "...", so match
-	// on the base name + line rather than the full temp path.
-	want := "boom.lua:3"
-	assert.Contains(
-		t, errLine, want,
-		"debug error should point at original file:line\nwant substring: %q\ngot first line: %q\nfull stderr:\n%s",
-		want, errLine, stderr,
-	)
-	assert.NotContains(
-		t, errLine, "bundle.lua:",
-		"debug error should not originate from bundle.lua\ngot first line: %q", errLine,
-	)
+	luatest.Differential(t, spec)
 }
 
 // TestCircularDependency verifies that the bundle resolves a require() cycle
-// (a -> b -> a). The un-bundled project stack-overflows, so TestIntegration
-// skips this dir; here we run the bundle directly and assert it succeeds — this
-// is what the `package.loaded[name] = true` guard buys.
+// (a -> b -> a). Circular requires break the original program: it fails on
+// the cycle, so TestIntegration skips this fixture. Here only the bundle runs,
+// from an empty directory, and it must succeed; this is what the
+// `package.loaded[name] = true` guard buys. Until the bundle fails like the
+// original, this pins what the bundle does.
 func TestCircularDependency(t *testing.T) {
 	t.Parallel()
 
-	luaPath := findLua()
-	if luaPath == "" {
-		t.Skip("lua interpreter not found in PATH")
-	}
+	luatest.Interpreters(t)
 
-	dir := "../../testdata/circular"
-	cfg := config.Config{
-		Entry:    filepath.Join(dir, "main.lua"),
-		Output:   "",
-		Root:     dir,
-		Path:     "?.lua;?/init.lua",
-		Search:   nil,
-		Strict:   false,
-		Debug:    false,
-		Fallback: false,
-		ArgFix:   false,
-		Transform: config.TransformConfig{
-			RemoveComments:   false,
-			RemoveEmptyLines: false,
-			Minify:           false,
-			StripShebang:     false,
-		},
-		Prefix:          "",
-		Suffix:          "",
-		Shebang:         "",
-		PackagePrefix:   "",
-		PackageName:     "",
-		StripPrefix:     "",
-		SkipPackages:    nil,
-		IncludePackages: nil,
-	}
-	require.NoError(t, cfg.ResolveRoot())
-	g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
-	require.NoError(t, err, "build graph")
+	bundle := bundler(emitOptions(false, false), nil)(t, luatest.CopyDir(t, "../../testdata/circular"))
 
-	var buf bytes.Buffer
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
 
-	emitOpts := emit.Options{
-		Prefix:   "",
-		Suffix:   "",
-		Debug:    false,
-		Fallback: false,
-		Shebang:  "",
-		NoArgFix: false,
-	}
-	require.NoError(t, emit.Emit(&buf, g, nil, emitOpts), "emit")
-
-	bundlePath := filepath.Join(t.TempDir(), "bundle.lua")
-	require.NoError(t, os.WriteFile(bundlePath, buf.Bytes(), 0o600))
-
-	stdout, stderr := runLua(t, luaPath, bundlePath, dir)
-	assert.Empty(t, stderr, "circular bundle should run without error")
-	assert.Equal(t, "circular test\na\nb", stdout)
+		r := luatest.RunBundle(t, interp, bundle, luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0})
+		assert.Equal(t, 0, r.ExitCode, "circular bundle should run without error\n%s", r)
+		assert.Empty(t, r.Stderr, "circular bundle should run without error\n%s", r)
+		assert.Equal(t, "circular test\na\nb\n", r.Stdout)
+	})
 }
 
 // TestFallbackOnDiskOverride verifies that in fallback mode an on-disk module
@@ -312,103 +204,33 @@ func TestCircularDependency(t *testing.T) {
 func TestFallbackOnDiskOverride(t *testing.T) {
 	t.Parallel()
 
-	luaPath := findLua()
-	if luaPath == "" {
-		t.Skip("lua interpreter not found in PATH")
-	}
+	luatest.Interpreters(t)
 
-	src := t.TempDir()
-	mainSrc := "local g = require(\"greet\")\nprint(g())\n"
-	require.NoError(t, os.WriteFile(filepath.Join(src, "main.lua"), []byte(mainSrc), 0o600))
+	src := luatest.WriteProject(t, luatest.Project{
+		"main.lua":  "local g = require(\"greet\")\nprint(g())\n",
+		"greet.lua": "return function() return \"EMBEDDED\" end\n",
+	})
+	normal := bundler(emitOptions(false, false), nil)(t, src)
+	fallback := bundler(emitOptions(false, true), nil)(t, src)
 
-	embeddedGreetSrc := "return function() return \"EMBEDDED\" end\n"
-	require.NoError(t, os.WriteFile(filepath.Join(src, "greet.lua"), []byte(embeddedGreetSrc), 0o600))
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
 
-	cfg := config.Config{
-		Entry:    filepath.Join(src, "main.lua"),
-		Output:   "",
-		Root:     src,
-		Path:     "?.lua;?/init.lua",
-		Search:   nil,
-		Strict:   false,
-		Debug:    false,
-		Fallback: false,
-		ArgFix:   false,
-		Transform: config.TransformConfig{
-			RemoveComments:   false,
-			RemoveEmptyLines: false,
-			Minify:           false,
-			StripShebang:     false,
-		},
-		Prefix:          "",
-		Suffix:          "",
-		Shebang:         "",
-		PackagePrefix:   "",
-		PackageName:     "",
-		StripPrefix:     "",
-		SkipPackages:    nil,
-		IncludePackages: nil,
-	}
-	require.NoError(t, cfg.ResolveRoot())
-	g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
-	require.NoError(t, err, "build graph")
+		// The run directory holds an on-disk override of greet, reachable via
+		// ./?.lua on the default LUA_PATH.
+		run := luatest.WriteProject(t, luatest.Project{
+			"greet.lua":    "return function() return \"ON-DISK\" end\n",
+			"normal.lua":   string(normal),
+			"fallback.lua": string(fallback),
+		})
+		runScript := func(script string) string {
+			r := luatest.Run(t, interp, run, luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0}, script)
+			require.Equal(t, 0, r.ExitCode, "run %s\n%s", script, r)
 
-	emitBundle := func(opts emit.Options) string {
-		var buf bytes.Buffer
-		require.NoError(t, emit.Emit(&buf, g, nil, opts), "emit")
+			return r.Stdout
+		}
 
-		return buf.String()
-	}
-
-	// Run directory holds an on-disk override of greet reachable via ./?.lua.
-	run := t.TempDir()
-	onDiskGreetSrc := "return function() return \"ON-DISK\" end\n"
-	require.NoError(t, os.WriteFile(filepath.Join(run, "greet.lua"), []byte(onDiskGreetSrc), 0o600))
-
-	normalOpts := emit.Options{
-		Prefix: "", Suffix: "", Debug: false, Fallback: false, Shebang: "", NoArgFix: false,
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(run, "normal.lua"), []byte(emitBundle(normalOpts)), 0o600))
-
-	fallbackOpts := emit.Options{
-		Prefix: "", Suffix: "", Debug: false, Fallback: true, Shebang: "", NoArgFix: false,
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(run, "fallback.lua"), []byte(emitBundle(fallbackOpts)), 0o600))
-
-	runWithPath := func(script string) string {
-		// #nosec G204 -- script is one of the fixed bundle files this test just wrote to run, not attacker input.
-		cmd := exec.CommandContext(t.Context(), luaPath, script)
-		cmd.Dir = run
-
-		cmd.Env = append(os.Environ(), "LUA_PATH=./?.lua;;")
-
-		var stdout, stderr bytes.Buffer
-
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		require.NoError(t, cmd.Run(), "run %s: %s", script, stderr.String())
-
-		return strings.TrimSpace(stdout.String())
-	}
-
-	assert.Equal(t, "EMBEDDED", runWithPath("normal.lua"), "normal bundle should use the embedded module")
-	assert.Equal(t, "ON-DISK", runWithPath("fallback.lua"), "fallback bundle should prefer the on-disk module")
-}
-
-func runLua(t *testing.T, luaPath, scriptPath, workingDir string) (string, string) {
-	t.Helper()
-
-	// #nosec G204 -- luaPath is resolved via exec.LookPath in findLua and scriptPath is a bundle this test just wrote.
-	cmd := exec.CommandContext(t.Context(), luaPath, scriptPath)
-	cmd.Dir = workingDir
-
-	var stdout, stderr bytes.Buffer
-
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	// Run error is ignored on purpose; the caller inspects stdout/stderr instead.
-	_ = cmd.Run()
-
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String())
+		assert.Equal(t, "EMBEDDED\n", runScript("normal.lua"), "normal bundle should use the embedded module")
+		assert.Equal(t, "ON-DISK\n", runScript("fallback.lua"), "fallback bundle should prefer the on-disk module")
+	})
 }

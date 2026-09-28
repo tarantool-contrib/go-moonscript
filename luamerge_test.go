@@ -3,7 +3,6 @@ package luamerge_test
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tarantool/go-luamerge"
+	"github.com/tarantool/go-luamerge/internal/luatest"
 )
 
 // writeProject creates a minimal main + module project and returns its dir.
@@ -149,30 +149,36 @@ func TestBundleMissingEntry(t *testing.T) {
 	assert.ErrorIs(t, err, luamerge.ErrNoEntry)
 }
 
-// TestBundleRunsUnderLua proves the public API produces a runnable bundle.
+// TestBundleRunsUnderLua proves the public API produces a runnable bundle: run
+// from an empty directory on every interpreter, it behaves like the project.
 func TestBundleRunsUnderLua(t *testing.T) {
 	t.Parallel()
 
-	lua, err := exec.LookPath("lua")
-	if err != nil {
-		t.Skip("lua interpreter not found in PATH")
-	}
+	luatest.Differential(t, luatest.Case{
+		Project: nil,
+		Dir:     writeProject(t),
+		Entry:   "",
+		Bundle: func(tb testing.TB, dir string) []byte {
+			tb.Helper()
 
-	dir := writeProject(t)
-	opts := luamerge.DefaultOptions()
-	opts.Entry = filepath.Join(dir, "main.lua")
-	opts.Root = dir
+			opts := luamerge.DefaultOptions()
+			opts.Entry = filepath.Join(dir, "main.lua")
+			opts.Root = dir
 
-	var buf bytes.Buffer
+			var buf bytes.Buffer
 
-	_, err = luamerge.Bundle(opts, &buf)
-	require.NoError(t, err)
+			_, err := luamerge.Bundle(opts, &buf)
+			require.NoError(tb, err)
 
-	bundle := filepath.Join(t.TempDir(), "bundle.lua")
-	require.NoError(t, os.WriteFile(bundle, buf.Bytes(), 0o600))
+			return buf.Bytes()
+		},
+		Args:    nil,
+		Options: luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0},
+		Check: func(t *testing.T, orig, bundle luatest.Result) {
+			t.Helper()
 
-	// #nosec G204 -- lua resolved via exec.LookPath; bundle is a file we just wrote.
-	out, err := exec.CommandContext(t.Context(), lua, bundle).CombinedOutput()
-	require.NoError(t, err, "bundle should run: %s", out)
-	assert.Equal(t, "hi", strings.TrimSpace(string(out)))
+			luatest.AssertSame(t, orig, bundle)
+			assert.Equal(t, "hi\n", bundle.Stdout)
+		},
+	})
 }

@@ -1,71 +1,29 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tarantool/go-luamerge/internal/luatest"
 )
 
-// binPath is the freshly built CLI binary, shared across all CLI tests.
-//
-//nolint:gochecknoglobals // built once in TestMain, read-only for the rest of the run
-var binPath string
+// TestMain removes the CLI binary luatest builds once for this test process.
+func TestMain(m *testing.M) { luatest.Main(m) }
 
-func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "luamerge-bin-*")
-	if err != nil {
-		panic(err)
-	}
-
-	binPath = filepath.Join(dir, "luamerge")
-
-	// #nosec G204 -- "go" and the build args are fixed by this test, not attacker input.
-	out, err := exec.CommandContext(context.Background(), "go", "build", "-o", binPath, ".").CombinedOutput()
-	if err != nil {
-		_, _ = os.Stderr.Write(out)
-		_ = os.RemoveAll(dir)
-
-		panic("build failed: " + err.Error())
-	}
-
-	code := m.Run()
-
-	_ = os.RemoveAll(dir)
-
-	os.Exit(code)
-}
-
-// runCLI runs the built binary and returns stdout, stderr, and the exit code.
+// runCLI runs the built binary from an empty directory with a scrubbed
+// environment (no LUAMERGE_* variable of the caller leaks in) and returns
+// stdout, stderr, and the exit code.
 func runCLI(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
 
-	// #nosec G204 -- binPath is the binary this test suite just built, not attacker input.
-	cmd := exec.CommandContext(t.Context(), binPath, args...)
+	result := luatest.RunCLI(t, t.TempDir(), nil, args...)
 
-	var stdout, stderr bytes.Buffer
-
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	code := 0
-
-	if err != nil {
-		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
-			code = ee.ExitCode()
-		} else {
-			t.Fatalf("run %v: %v", args, err)
-		}
-	}
-
-	return stdout.String(), stderr.String(), code
+	return result.Stdout, result.Stderr, result.ExitCode
 }
 
 // writeProject creates a minimal two-module project and returns its directory.

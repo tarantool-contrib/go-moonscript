@@ -81,12 +81,26 @@ linters:
           files:
             - "$all"
             - "!$test"
+            - "!**/internal/luatest/*.go"
           allow:
             - $gostd
             - "github.com/tarantool/go-luamerge"
             - "github.com/tarantool/go-config"
             - "github.com/spf13/pflag"
             - "github.com/yuin/gopher-lua"
+          deny:
+            - pkg: "github.com/tarantool/go-luamerge/internal/luatest"
+              desc: test support code, import it only from _test.go files
+        # internal/luatest is the differential test harness: test support code
+        # that only _test.go files import (the main list denies it to every
+        # other file), so like a test file it may assert with testify.
+        luatest:
+          files:
+            - "**/internal/luatest/*.go"
+          allow:
+            - $gostd
+            - "github.com/tarantool/go-luamerge"
+            - "github.com/stretchr/testify"
         test:
           files:
             - "$test"
