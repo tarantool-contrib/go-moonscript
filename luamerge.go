@@ -36,6 +36,11 @@ const (
 	WarnUnresolved     = graph.WarnUnresolved
 	WarnCModule        = graph.WarnCModule
 	WarnNonLua         = graph.WarnNonLua
+	// WarnIndirectRequire is require used other than by a call — aliased
+	// (`local r = require`), stored or passed on as a value — so the modules
+	// loaded through it are not embedded; list them in
+	// Options.IncludePackages.
+	WarnIndirectRequire = graph.WarnIndirectRequire
 )
 
 // Options configures a bundling run. The zero value is not valid — at minimum

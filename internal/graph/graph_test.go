@@ -471,3 +471,117 @@ func TestGraphIncludeSkipConflict(t *testing.T) {
 
 	assert.True(t, foundSkipWarning, "expected skip warning for include package not found")
 }
+
+func TestWarningKind_String(t *testing.T) {
+	t.Parallel()
+
+	for kind, want := range map[graph.WarningKind]string{
+		graph.WarnDynamicRequire:  "dynamic-require",
+		graph.WarnSkipped:         "skipped",
+		graph.WarnUnresolved:      "unresolved",
+		graph.WarnCModule:         "c-module",
+		graph.WarnNonLua:          "non-lua",
+		graph.WarnIndirectRequire: "indirect-require",
+		graph.WarningKind(-1):     "unknown",
+	} {
+		assert.Equal(t, want, kind.String(), "WarningKind(%d)", int(kind))
+	}
+}
+
+// testBuild writes files into a fresh project directory and builds its graph
+// from main.lua in strict mode. It returns the graph and the directory.
+func testBuild(t *testing.T, files map[string]string) (*graph.Graph, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+	}
+
+	cfg := config.Default()
+	cfg.Entry = filepath.Join(dir, "main.lua")
+	cfg.Root = dir
+	cfg.Path = "?.lua"
+	cfg.Strict = true
+
+	g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
+	require.NoError(t, err, "Build() error")
+
+	return g, dir
+}
+
+// testModuleNames is every name under which g embeds a module.
+func testModuleNames(g *graph.Graph) []string {
+	var names []string
+	for _, mod := range g.Modules {
+		names = append(names, mod.Names...)
+	}
+
+	return names
+}
+
+// TestBuild_IndirectRequire: of the indirect forms of require, those that name
+// their module literally are embedded, and each of the others leaves a warning
+// of the right kind at the right line instead of nothing. Strict mode does not
+// turn these warnings into errors.
+func TestBuild_IndirectRequire(t *testing.T) {
+	t.Parallel()
+
+	g, dir := testBuild(t, map[string]string{
+		"main.lua": `local r = require; print((r("m1")))
+print((_G.require("m2")))
+print(select(2, xpcall(require, debug.traceback, "m3")))
+local name = "m4"; print(select(2, pcall(require, name)))
+print(load_all(require, { "m5" })[1])
+`,
+		"m1.lua": `return "m1"`,
+		"m2.lua": `return "m2"`,
+		"m3.lua": `return "m3"`,
+		"m4.lua": `return "m4"`,
+		"m5.lua": `return "m5"`,
+	})
+
+	assert.ElementsMatch(t, []string{"main", "m2", "m3"}, testModuleNames(g), "embedded modules")
+
+	mainPath := filepath.Join(dir, "main.lua")
+	assert.Equal(t, []graph.Warning{
+		{
+			Kind:   graph.WarnIndirectRequire,
+			Module: "",
+			File:   mainPath,
+			Line:   1,
+			Message: `require aliased as local "r" at line 1, ` +
+				"cannot resolve the modules loaded through it",
+		},
+		{
+			Kind:    graph.WarnDynamicRequire,
+			Module:  "",
+			File:    mainPath,
+			Line:    4,
+			Message: "dynamic require at line 4, cannot resolve",
+		},
+		{
+			Kind:   graph.WarnIndirectRequire,
+			Module: "",
+			File:   mainPath,
+			Line:   5,
+			Message: "require used as a value at line 5, " +
+				"cannot resolve the modules loaded through it",
+		},
+	}, g.Warnings)
+}
+
+// TestBuild_CachedGlobalRequire: `local require = require` caches the global,
+// and calls through the local are found by name, so it is neither a warning
+// nor a reason to miss the module.
+func TestBuild_CachedGlobalRequire(t *testing.T) {
+	t.Parallel()
+
+	g, _ := testBuild(t, map[string]string{
+		"main.lua": "local require = require\nlocal x = require(\"x\")\n",
+		"x.lua":    "return {}\n",
+	})
+
+	assert.ElementsMatch(t, []string{"main", "x"}, testModuleNames(g), "embedded modules")
+	assert.Empty(t, g.Warnings)
+}

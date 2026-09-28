@@ -79,7 +79,7 @@ func TestEmitMultiModule(t *testing.T) {
 				FilePath: "/test/main.lua",
 				Names:    []string{"main"},
 				Source:   []byte("require('a')"),
-				Requires: []parse.RequireInfo{{Name: "a", Line: 1, Static: true}},
+				Requires: []parse.RequireInfo{{Name: "a", Line: 1, Static: true, Indirect: ""}},
 			},
 			{
 				ID:       1,
@@ -95,7 +95,7 @@ func TestEmitMultiModule(t *testing.T) {
 				FilePath: "/test/main.lua",
 				Names:    []string{"main"},
 				Source:   []byte("require('a')"),
-				Requires: []parse.RequireInfo{{Name: "a", Line: 1, Static: true}},
+				Requires: []parse.RequireInfo{{Name: "a", Line: 1, Static: true, Indirect: ""}},
 			},
 			"/test/a.lua": {
 				ID:       1,
@@ -110,7 +110,7 @@ func TestEmitMultiModule(t *testing.T) {
 			FilePath: "/test/main.lua",
 			Names:    []string{"main"},
 			Source:   []byte("require('a')"),
-			Requires: []parse.RequireInfo{{Name: "a", Line: 1, Static: true}},
+			Requires: []parse.RequireInfo{{Name: "a", Line: 1, Static: true, Indirect: ""}},
 		},
 		Warnings: []graph.Warning{},
 	}

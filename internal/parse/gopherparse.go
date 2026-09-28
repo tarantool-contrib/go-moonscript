@@ -5,10 +5,18 @@ package parse
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 
 	"github.com/yuin/gopher-lua/ast"
 	"github.com/yuin/gopher-lua/parse"
 )
+
+// requireName is the name of Lua's global require function.
+const requireName = "require"
+
+// xpcallArgsStart is the index of the first argument that
+// xpcall(f, handler, ...) passes on to f.
+const xpcallArgsStart = 2
 
 type gopherParser struct{}
 
@@ -41,10 +49,9 @@ func walkStmts(w *requireWalker, stmts []ast.Stmt) {
 func walkStmt(w *requireWalker, stmt ast.Stmt) {
 	switch stmt := stmt.(type) {
 	case *ast.AssignStmt:
-		walkExprs(w, stmt.Lhs)
-		walkExprs(w, stmt.Rhs)
+		walkAssign(w, stmt)
 	case *ast.LocalAssignStmt:
-		walkExprs(w, stmt.Exprs)
+		walkLocalAssign(w, stmt)
 	case *ast.FuncCallStmt:
 		walkExpr(w, stmt.Expr)
 	case *ast.DoBlockStmt:
@@ -83,6 +90,55 @@ func walkStmt(w *requireWalker, stmt ast.Stmt) {
 	}
 }
 
+// walkAssign walks an assignment. Storing require where the walker finds its
+// calls by name (`require = require`, `_G.require = require`) is not a use of
+// it; storing it anywhere else is.
+func walkAssign(w *requireWalker, stmt *ast.AssignStmt) {
+	for _, target := range stmt.Lhs {
+		walkTarget(w, target)
+	}
+
+	for i, value := range stmt.Rhs {
+		if i < len(stmt.Lhs) && isRequire(value) {
+			if !isRequire(stmt.Lhs[i]) {
+				recordIndirect(w, value, "assigned to "+describeTarget(stmt.Lhs[i]))
+			}
+
+			continue
+		}
+
+		walkExpr(w, value)
+	}
+}
+
+// walkLocalAssign walks a local declaration. `local require = require` caches
+// the global, and calls through the local are still found by name, so only
+// binding require to another name is a use of it.
+func walkLocalAssign(w *requireWalker, stmt *ast.LocalAssignStmt) {
+	for i, value := range stmt.Exprs {
+		if i < len(stmt.Names) && isRequire(value) {
+			if stmt.Names[i] != requireName {
+				recordIndirect(w, value, "aliased as local "+strconv.Quote(stmt.Names[i]))
+			}
+
+			continue
+		}
+
+		walkExpr(w, value)
+	}
+}
+
+// walkTarget walks the target of an assignment. A name assigned to is not a
+// use of its value, but a table field's object and key are evaluated:
+// `t[require("x")] = v`.
+func walkTarget(w *requireWalker, target ast.Expr) {
+	field, ok := target.(*ast.AttrGetExpr)
+	if ok {
+		walkExpr(w, field.Object)
+		walkExpr(w, field.Key)
+	}
+}
+
 func walkExprs(w *requireWalker, exprs []ast.Expr) {
 	for _, expr := range exprs {
 		walkExpr(w, expr)
@@ -90,14 +146,16 @@ func walkExprs(w *requireWalker, exprs []ast.Expr) {
 }
 
 func walkExpr(w *requireWalker, expr ast.Expr) {
+	// A require reached here is neither called by the expression around it
+	// nor bound to a name: it is passed on, stored or returned. Nothing inside
+	// `require` or `_G.require` can be a use of require, so the walk goes on.
+	if isRequire(expr) {
+		recordIndirect(w, expr, "used as a value")
+	}
+
 	switch expr := expr.(type) {
 	case *ast.FuncCallExpr:
-		checkRequireCall(w, expr)
-		// A method call `obj:m(...)` has a Receiver instead of a Func, and the
-		// receiver can hold a require: `require("x"):new()`.
-		walkExpr(w, expr.Receiver)
-		walkExpr(w, expr.Func)
-		walkExprs(w, expr.Args)
+		walkCall(w, expr)
 	case *ast.FunctionExpr:
 		walkStmts(w, expr.Stmts)
 	case *ast.AttrGetExpr:
@@ -137,65 +195,127 @@ func walkExpr(w *requireWalker, expr ast.Expr) {
 	}
 }
 
-// minPcallRequireArgs is the minimum argument count for pcall(require, "name", ...)
-// to be recognized as a require call.
-const minPcallRequireArgs = 2
+// walkCall walks a function call. The expression that stands for require in a
+// call of require is not walked, so it is not taken for a use of require as a
+// value.
+func walkCall(w *requireWalker, call *ast.FuncCallExpr) {
+	requireExpr := checkRequireCall(w, call)
+	// A method call `obj:m(...)` has a Receiver instead of a Func, and the
+	// receiver can hold a require: `require("x"):new()`.
+	walkExpr(w, call.Receiver)
 
-func checkRequireCall(w *requireWalker, call *ast.FuncCallExpr) {
-	ident, ok := call.Func.(*ast.IdentExpr)
-	if !ok {
-		return
+	if call.Func != requireExpr {
+		walkExpr(w, call.Func)
 	}
 
-	switch ident.Value {
-	case "require":
-		checkDirectRequireCall(w, call)
-	case "pcall":
-		checkPcallRequireCall(w, call)
+	for _, arg := range call.Args {
+		if arg != requireExpr {
+			walkExpr(w, arg)
+		}
 	}
 }
 
-// checkDirectRequireCall handles the require("...") pattern.
-func checkDirectRequireCall(w *requireWalker, call *ast.FuncCallExpr) {
-	if len(call.Args) == 1 {
-		if str, ok := call.Args[0].(*ast.StringExpr); ok {
-			w.requires = append(w.requires, RequireInfo{
-				Name:   str.Value,
-				Line:   call.Line(),
-				Static: true,
-			})
+// checkRequireCall records call if it calls require: `require(...)`,
+// `_G.require(...)`, `pcall(require, ...)` or `xpcall(require, handler, ...)`.
+// The call is static when the first argument require gets is a string literal
+// (require ignores the others) and dynamic otherwise, including when it gets
+// none. It returns the expression that stands for require in the call, or nil
+// when call does not call require.
+func checkRequireCall(w *requireWalker, call *ast.FuncCallExpr) ast.Expr {
+	requireExpr, args := requireCallArgs(call)
+	if requireExpr == nil {
+		return nil
+	}
 
-			return
+	info := RequireInfo{Name: "", Line: call.Line(), Static: false, Indirect: ""}
+
+	if len(args) > 0 {
+		if str, ok := args[0].(*ast.StringExpr); ok {
+			info.Name, info.Static = str.Value, true
 		}
 	}
 
-	// Dynamic require: argument is not a single string literal.
+	w.requires = append(w.requires, info)
+
+	return requireExpr
+}
+
+// requireCallArgs returns the expression that stands for require in call and
+// the arguments require is called with, or nil and nil when call does not call
+// require.
+func requireCallArgs(call *ast.FuncCallExpr) (ast.Expr, []ast.Expr) {
+	switch {
+	case isRequire(call.Func):
+		return call.Func, call.Args
+	case callsGlobal(call, "pcall") && len(call.Args) > 0 && isRequire(call.Args[0]):
+		return call.Args[0], call.Args[1:]
+	case callsGlobal(call, "xpcall") && len(call.Args) > 0 && isRequire(call.Args[0]):
+		// The call xpcall(f, handler, ...) calls f(...). PUC Lua 5.1's xpcall
+		// passes f no arguments, so there the call fails natively; embedding
+		// the module changes nothing about that.
+		if len(call.Args) <= xpcallArgsStart {
+			return call.Args[0], nil
+		}
+
+		return call.Args[0], call.Args[xpcallArgsStart:]
+	default:
+		return nil, nil
+	}
+}
+
+// requireRef returns how expr names the global require function: "require",
+// "_G.require" or "_ENV.require" (`_G["require"]` parses the same as
+// `_G.require`), and "" when it names something else. Like the rest of the
+// walker it goes by spelling: a local named require counts as the global.
+func requireRef(expr ast.Expr) string {
+	switch expr := expr.(type) {
+	case *ast.IdentExpr:
+		if expr.Value == requireName {
+			return expr.Value
+		}
+	case *ast.AttrGetExpr:
+		table, isIdent := expr.Object.(*ast.IdentExpr)
+		key, isString := expr.Key.(*ast.StringExpr)
+
+		if isIdent && isString && key.Value == requireName &&
+			(table.Value == "_G" || table.Value == "_ENV") {
+			return table.Value + "." + key.Value
+		}
+	}
+
+	return ""
+}
+
+// isRequire reports whether expr names the global require function; see
+// requireRef.
+func isRequire(expr ast.Expr) bool {
+	return requireRef(expr) != ""
+}
+
+// callsGlobal reports whether call calls the global function name directly.
+func callsGlobal(call *ast.FuncCallExpr, name string) bool {
+	fn, ok := call.Func.(*ast.IdentExpr)
+
+	return ok && fn.Value == name
+}
+
+// recordIndirect records ref, which names require, as a use of require other
+// than a call; how says what is done with it.
+func recordIndirect(w *requireWalker, ref ast.Expr, how string) {
 	w.requires = append(w.requires, RequireInfo{
-		Name:   "",
-		Line:   call.Line(),
-		Static: false,
+		Name:     "",
+		Line:     ref.Line(),
+		Static:   false,
+		Indirect: requireRef(ref) + " " + how,
 	})
 }
 
-// checkPcallRequireCall handles the pcall(require, "...") pattern.
-func checkPcallRequireCall(w *requireWalker, call *ast.FuncCallExpr) {
-	if len(call.Args) < minPcallRequireArgs {
-		return
+// describeTarget names an assignment target for a warning.
+func describeTarget(target ast.Expr) string {
+	name, ok := target.(*ast.IdentExpr)
+	if ok {
+		return strconv.Quote(name.Value)
 	}
 
-	reqIdent, ok := call.Args[0].(*ast.IdentExpr)
-	if !ok || reqIdent.Value != "require" {
-		return
-	}
-
-	str, ok := call.Args[1].(*ast.StringExpr)
-	if !ok {
-		return
-	}
-
-	w.requires = append(w.requires, RequireInfo{
-		Name:   str.Value,
-		Line:   call.Line(),
-		Static: true,
-	})
+	return "a table field"
 }

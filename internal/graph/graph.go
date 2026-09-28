@@ -35,6 +35,12 @@ const (
 	WarnCModule
 	// WarnNonLua is a require() that resolved to a non-.lua file.
 	WarnNonLua
+	// WarnIndirectRequire is a use of require other than a call: require
+	// aliased (`local r = require`), stored in a table or passed on as a value.
+	// The calls made through it can't be seen, so the modules they load are
+	// not embedded. `local require = require` is not one: calls through it are
+	// still found by name.
+	WarnIndirectRequire
 )
 
 func (k WarningKind) String() string {
@@ -49,6 +55,8 @@ func (k WarningKind) String() string {
 		return "c-module"
 	case WarnNonLua:
 		return "non-lua"
+	case WarnIndirectRequire:
+		return "indirect-require"
 	default:
 		return "unknown"
 	}
@@ -328,6 +336,20 @@ func processModuleRequires(
 	var newMods []*Module
 
 	for _, req := range requires {
+		if req.Indirect != "" {
+			g.Warnings = append(g.Warnings, Warning{
+				Kind:   WarnIndirectRequire,
+				Module: "",
+				File:   mod.FilePath,
+				Line:   req.Line,
+				Message: fmt.Sprintf(
+					"%s at line %d, cannot resolve the modules loaded through it", req.Indirect, req.Line,
+				),
+			})
+
+			continue
+		}
+
 		if !req.Static {
 			g.Warnings = append(g.Warnings, Warning{
 				Kind:    WarnDynamicRequire,

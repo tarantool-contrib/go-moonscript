@@ -21,14 +21,14 @@ func TestParseStaticRequire(t *testing.T) {
 			name:   "simple require",
 			source: `require("foo")`,
 			expected: []parse.RequireInfo{
-				{Name: "foo", Line: 1, Static: true},
+				{Name: "foo", Line: 1, Static: true, Indirect: ""},
 			},
 		},
 		{
 			name:   "require with dots",
 			source: `require("foo.bar")`,
 			expected: []parse.RequireInfo{
-				{Name: "foo.bar", Line: 1, Static: true},
+				{Name: "foo.bar", Line: 1, Static: true, Indirect: ""},
 			},
 		},
 		{
@@ -36,22 +36,22 @@ func TestParseStaticRequire(t *testing.T) {
 			source: `local a = require("a")
 local b = require("b")`,
 			expected: []parse.RequireInfo{
-				{Name: "a", Line: 1, Static: true},
-				{Name: "b", Line: 2, Static: true},
+				{Name: "a", Line: 1, Static: true, Indirect: ""},
+				{Name: "b", Line: 2, Static: true, Indirect: ""},
 			},
 		},
 		{
 			name:   "pcall require",
 			source: `pcall(require, "module")`,
 			expected: []parse.RequireInfo{
-				{Name: "module", Line: 1, Static: true},
+				{Name: "module", Line: 1, Static: true, Indirect: ""},
 			},
 		},
 		{
 			name:   "dynamic require",
 			source: `require(var)`,
 			expected: []parse.RequireInfo{
-				{Name: "", Line: 1, Static: false},
+				{Name: "", Line: 1, Static: false, Indirect: ""},
 			},
 		},
 		{
@@ -60,7 +60,7 @@ local b = require("b")`,
   require("inner")
 end`,
 			expected: []parse.RequireInfo{
-				{Name: "inner", Line: 2, Static: true},
+				{Name: "inner", Line: 2, Static: true, Indirect: ""},
 			},
 		},
 		{
@@ -102,7 +102,19 @@ func testParse(t *testing.T, source string) []parse.RequireInfo {
 // testStatic is the RequireInfo of a require call with the literal name on
 // line.
 func testStatic(name string, line int) parse.RequireInfo {
-	return parse.RequireInfo{Name: name, Line: line, Static: true}
+	return parse.RequireInfo{Name: name, Line: line, Static: true, Indirect: ""}
+}
+
+// testDynamic is the RequireInfo of a require call on line whose module name
+// is not a literal.
+func testDynamic(line int) parse.RequireInfo {
+	return parse.RequireInfo{Name: "", Line: line, Static: false, Indirect: ""}
+}
+
+// testIndirect is the RequireInfo of a use of require on line that is not a
+// call; use says how require is used.
+func testIndirect(use string, line int) parse.RequireInfo {
+	return parse.RequireInfo{Name: "", Line: line, Static: false, Indirect: use}
 }
 
 // TestParse_RequireAsReceiver: a require whose result is the receiver of a
@@ -151,6 +163,208 @@ func TestParse_RequireAsReceiver(t *testing.T) {
 			name:   "module that starts a method chain",
 			source: `require("app"):use(require "a"):listen()`,
 			want:   []parse.RequireInfo{testStatic("app", 1), testStatic("a", 1)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, testParse(t, tt.source))
+		})
+	}
+}
+
+// TestParse_IndirectRequire: require reached other than by a plain call of the
+// name require must not be dropped silently. The forms that name their module
+// literally are resolved (`_G.require("x")`, `xpcall(require, h, "x")`), a call
+// with a computed name is dynamic whichever form it takes, and every other use
+// of require is reported as indirect, except binding it to a name the walker
+// already finds calls by, as in the common `local require = require`.
+func TestParse_IndirectRequire(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		source string
+		want   []parse.RequireInfo
+	}{
+		// Forms whose module name is a literal: resolved statically.
+		{
+			name:   "_G.require",
+			source: `print((_G.require("m2")))`,
+			want:   []parse.RequireInfo{testStatic("m2", 1)},
+		},
+		{
+			name:   "_G indexed with a string",
+			source: `_G["require"]("x")`,
+			want:   []parse.RequireInfo{testStatic("x", 1)},
+		},
+		{
+			name:   "_ENV.require",
+			source: `_ENV.require("x")`,
+			want:   []parse.RequireInfo{testStatic("x", 1)},
+		},
+		{
+			name:   "xpcall",
+			source: `print(select(2, xpcall(require, debug.traceback, "m3")))`,
+			want:   []parse.RequireInfo{testStatic("m3", 1)},
+		},
+		{
+			name:   "xpcall with extra arguments",
+			source: `xpcall(require, handler, "x", "ignored")`,
+			want:   []parse.RequireInfo{testStatic("x", 1)},
+		},
+		{
+			name:   "pcall of _G.require",
+			source: `pcall(_G.require, "x")`,
+			want:   []parse.RequireInfo{testStatic("x", 1)},
+		},
+		{
+			name:   "xpcall of _G.require",
+			source: `xpcall(_G.require, handler, "x")`,
+			want:   []parse.RequireInfo{testStatic("x", 1)},
+		},
+		{
+			name:   "extra arguments are ignored",
+			source: `require("x", "ignored")`,
+			want:   []parse.RequireInfo{testStatic("x", 1)},
+		},
+		{
+			name:   "local require = require",
+			source: "local require = require\nlocal m = require(\"x\")\n",
+			want:   []parse.RequireInfo{testStatic("x", 2)},
+		},
+		{
+			name:   "local require = _G.require",
+			source: "local require = _G.require\nrequire(\"x\")\n",
+			want:   []parse.RequireInfo{testStatic("x", 2)},
+		},
+		{
+			name:   "require cached among other globals",
+			source: "local pcall, require = pcall, require\npcall(require, \"x\")\n",
+			want:   []parse.RequireInfo{testStatic("x", 2)},
+		},
+		{
+			name:   "global require assigned to itself",
+			source: "require = require\nrequire(\"x\")\n",
+			want:   []parse.RequireInfo{testStatic("x", 2)},
+		},
+		{
+			name:   "require stored back into _G",
+			source: "_G.require = require\n_G.require(\"x\")\n",
+			want:   []parse.RequireInfo{testStatic("x", 2)},
+		},
+
+		// Calls whose module name is computed: dynamic, whichever form.
+		{
+			name:   "pcall with a variable",
+			source: "local name = \"m4\"\nprint(select(2, pcall(require, name)))\n",
+			want:   []parse.RequireInfo{testDynamic(2)},
+		},
+		{
+			name:   "xpcall with a variable",
+			source: `xpcall(require, handler, name)`,
+			want:   []parse.RequireInfo{testDynamic(1)},
+		},
+		{
+			name:   "_G.require with a variable",
+			source: `_G.require(name)`,
+			want:   []parse.RequireInfo{testDynamic(1)},
+		},
+		{
+			name:   "pcall without a module name",
+			source: `pcall(require)`,
+			want:   []parse.RequireInfo{testDynamic(1)},
+		},
+		{
+			name:   "xpcall without a module name",
+			source: `xpcall(require, handler)`,
+			want:   []parse.RequireInfo{testDynamic(1)},
+		},
+
+		// Uses of require that are not calls: indirect.
+		{
+			name:   "alias",
+			source: `local r = require; print((r("m1")))`,
+			want:   []parse.RequireInfo{testIndirect(`require aliased as local "r"`, 1)},
+		},
+		{
+			name:   "alias of _G.require",
+			source: `local r = _G.require`,
+			want:   []parse.RequireInfo{testIndirect(`_G.require aliased as local "r"`, 1)},
+		},
+		{
+			name:   "alias among several locals",
+			source: `local a, r = 1, require`,
+			want:   []parse.RequireInfo{testIndirect(`require aliased as local "r"`, 1)},
+		},
+		{
+			name:   "assigned to a name",
+			source: "local r = nil\nr = require\n",
+			want:   []parse.RequireInfo{testIndirect(`require assigned to "r"`, 2)},
+		},
+		{
+			name:   "assigned to a table field",
+			source: `M.load = require`,
+			want:   []parse.RequireInfo{testIndirect(`require assigned to a table field`, 1)},
+		},
+		{
+			name:   "passed as an argument",
+			source: `setup(require)`,
+			want:   []parse.RequireInfo{testIndirect(`require used as a value`, 1)},
+		},
+		{
+			name:   "stored in a table constructor",
+			source: `local env = { require = require }`,
+			want:   []parse.RequireInfo{testIndirect(`require used as a value`, 1)},
+		},
+		{
+			name:   "returned",
+			source: `return require`,
+			want:   []parse.RequireInfo{testIndirect(`require used as a value`, 1)},
+		},
+		{
+			name:   "operand of or",
+			source: `local r = require or dofile`,
+			want:   []parse.RequireInfo{testIndirect(`require used as a value`, 1)},
+		},
+		{
+			name:   "_G.require passed as an argument",
+			source: `setup(_G.require)`,
+			want:   []parse.RequireInfo{testIndirect(`_G.require used as a value`, 1)},
+		},
+		{
+			name:   "line of the use itself",
+			source: "setup(\n  require\n)\n",
+			want:   []parse.RequireInfo{testIndirect(`require used as a value`, 2)},
+		},
+
+		// Not the global require at all.
+		{
+			name:   "method named require",
+			source: `loader:require("x")`,
+			want:   []parse.RequireInfo{},
+		},
+		{
+			name:   "field named require",
+			source: `M.require("x")`,
+			want:   []parse.RequireInfo{},
+		},
+		{
+			name:   "other fields of _G and _ENV",
+			source: "_G.print(\"x\")\nlocal p = _ENV.print\nsetup(_G.dofile, _G[\"loadfile\"])\n",
+			want:   []parse.RequireInfo{},
+		},
+		{
+			name:   "functions named require",
+			source: "function M.require(name) end\nlocal function require(name) end\n",
+			want:   []parse.RequireInfo{},
+		},
+		{
+			name:   "global require rebound",
+			source: `require = function(name) end`,
+			want:   []parse.RequireInfo{},
 		},
 	}
 

@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Result.Files` lists the absolute path of every source file embedded in the
   bundle, the entry first, so a caller can refuse an output path that is one of
   the inputs or record the bundle's dependencies.
+- `WarnIndirectRequire` (`indirect-require`): a warning for `require` used
+  other than by a call — aliased (`local r = require`), stored in a table or
+  passed to a function — because the modules loaded through it cannot be found
+  and are not embedded. Such uses used to be dropped without a word.
 
 ### Changed
 
@@ -58,5 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `require("x").field:m()` and every require inside a method chain such as
   `app:use(require "a"):listen()`. These modules were left out of the bundle
   without a warning, even with `--strict`.
+- `_G.require("x")`, `_ENV.require("x")` and `xpcall(require, handler, "x")`
+  embed their module, and `pcall(require, name)` with a computed name warns
+  as a dynamic require, like `require(name)`. All of them used to be ignored
+  silently. `require("x", …)` is the require of `"x"`, as in Lua, rather
+  than a dynamic require.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
