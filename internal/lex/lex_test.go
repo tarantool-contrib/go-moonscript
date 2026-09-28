@@ -85,6 +85,17 @@ func TestLexer_Tokens_Names(t *testing.T) {
 			src:    "local café = λ1",
 			tokens: []tok{name("local"), name("café"), symbol("="), name("λ1")},
 		},
+		{
+			name:   "first and last letters and digits",
+			src:    "AZ az _09 Zz",
+			tokens: []tok{name("AZ"), name("az"), name("_09"), name("Zz")},
+		},
+		{
+			// A name may start with either end of the range, and hold both.
+			name:   "bytes 0x80 and 0xFF (LuaJIT)",
+			src:    "\x80 \xff a\x80\xff",
+			tokens: []tok{name("\x80"), name("\xff"), name("a\x80\xff")},
+		},
 	})
 }
 
@@ -257,6 +268,12 @@ func TestLexer_Tokens_LongBrackets(t *testing.T) {
 			name:   "closing bracket after the closer",
 			src:    "[[a]]]",
 			tokens: []tok{on(lex.LongString, "[[a]]", 1), symbol("]")},
+		},
+		{
+			// A closer is "]", the "=" signs and "]" again: "]=[" closes nothing.
+			name:   "closer ending in an opening bracket",
+			src:    "[=[a]=[b]=] --[=[c]=[d]=] x",
+			tokens: []tok{on(lex.LongString, "[=[a]=[b]=]", 1), on(lex.LongComment, "--[=[c]=[d]=]", 1), name("x")},
 		},
 		{
 			name: "every kind of line break inside",
@@ -464,6 +481,11 @@ func TestLexer_Next_Errors(t *testing.T) {
 		{
 			name: "equals signs at the end of the source", src: "[==",
 			err: lex.ErrLongBracket, offset: 0, line: 1, message: "line 1: invalid long string delimiter",
+		},
+		{
+			// An opener is "[", the "=" signs and "[" again.
+			name: "equals sign before a closing bracket", src: "t[=]",
+			err: lex.ErrLongBracket, offset: 1, line: 1, message: "line 1: invalid long string delimiter",
 		},
 	}
 
