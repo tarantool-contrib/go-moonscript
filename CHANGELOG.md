@@ -288,5 +288,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   module wins over every file on disk, as the modules in `package.preload`
   do; a `shadows-builtin` warning names those runtimes. With `--fallback`
   such a module goes to `package.postload` like every other one.
+- A module name is decoded the way Lua 5.2 and later, LuaJIT and Tarantool
+  decode it: `require("\x61x")` embeds the module `ax`,
+  `require("\u{62}ar")` the module `bar` and `require("c\z   z")` the module
+  `cz`. Names were decoded as Lua 5.1 decodes them, reading an escape it
+  does not know as the character after the backslash, so the bundler looked
+  for `x61x`, `u{62}ar` and `cz   z`, and the modules the program loads were
+  not embedded. A string with a `\z` escape over a line break, and a form
+  feed or a vertical tab between tokens, no longer fail the build.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

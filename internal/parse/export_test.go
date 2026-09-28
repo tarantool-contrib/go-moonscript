@@ -14,3 +14,9 @@ var ErrUnsupportedNodeForTest = errUnsupportedNode
 func FindRequiresForTest(chunk []ast.Stmt) ([]RequireInfo, error) {
 	return findRequires(chunk)
 }
+
+// NormalizeForTest is normalize, exported for tests: the copy of a source
+// that gopher-lua reads.
+func NormalizeForTest(src []byte) ([]byte, error) {
+	return normalize(src)
+}

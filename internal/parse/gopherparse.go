@@ -1,5 +1,7 @@
 // Package parse extracts require(...) call information from Lua source code
-// using the gopher-lua parser.
+// using the gopher-lua parser. gopher-lua reads Lua 5.1; the source is read
+// with a lexer that knows every dialect first, and gopher-lua gets a copy of
+// it written in Lua 5.1 (see normalize).
 package parse
 
 import (
@@ -27,9 +29,12 @@ var errUnsupportedNode = errors.New("the require walker does not handle")
 type gopherParser struct{}
 
 func (p *gopherParser) Parse(source []byte, filename string) ([]RequireInfo, error) {
-	reader := bytes.NewReader(source)
+	normalized, err := normalize(source)
+	if err != nil {
+		return nil, fmt.Errorf("parsing lua source %q: %w", filename, err)
+	}
 
-	chunk, err := parse.Parse(reader, filename)
+	chunk, err := parse.Parse(bytes.NewReader(normalized), filename)
 	if err != nil {
 		return nil, fmt.Errorf("parsing lua source %q: %w", filename, err)
 	}
