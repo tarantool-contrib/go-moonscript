@@ -7,9 +7,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	gopherparse "github.com/yuin/gopher-lua/parse"
 
 	"github.com/tarantool/go-luamerge/internal/emit"
 	"github.com/tarantool/go-luamerge/internal/graph"
+	"github.com/tarantool/go-luamerge/internal/lex"
 	"github.com/tarantool/go-luamerge/internal/luatest"
 )
 
@@ -44,12 +46,21 @@ func defaults() emit.Options {
 	}
 }
 
-// emitBundle emits g with opts.
+// emitBundle emits g with opts and asserts that gopher-lua parses the bundle.
+// The bundle's own code is Lua 5.1, which every interpreter reads, and so is
+// the code of every fixture here, so a template that writes invalid Lua fails
+// these tests even where no interpreter is installed to run the bundle.
+// gopher-lua knows no header: it gets what follows a shebang, as the
+// interpreter does.
 func emitBundle(t *testing.T, g *graph.Graph, opts emit.Options) string {
 	t.Helper()
 
 	var buf bytes.Buffer
 	require.NoError(t, emit.Emit(&buf, g, nil, opts))
+
+	bundle := buf.Bytes()
+	_, err := gopherparse.Parse(bytes.NewReader(bundle[lex.Header(bundle):]), "bundle.lua")
+	require.NoError(t, err, "gopher-lua cannot parse the bundle\n%s", bundle)
 
 	return buf.String()
 }
