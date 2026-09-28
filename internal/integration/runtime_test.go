@@ -767,3 +767,43 @@ func TestBundle_PrefixHasItsOwnScope(t *testing.T) {
 		}
 	}
 }
+
+// TestBundle_ModulesInheritTheEnvironment: the modules of a bundle run in the
+// environment the bundle was loaded with, in both modes. That is a documented
+// difference from native modules, which require loads with the global
+// environment.
+func TestBundle_ModulesInheritTheEnvironment(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	project := luatest.Project{
+		"main.lua": "print(\"main\")\nrequire(\"m\").hello()\n",
+		"m.lua":    "return { hello = function() print(\"module\") end }\n",
+	}
+	// A host that gives the program it runs its own print.
+	host := "local env = setmetatable({ print = function(...) print(\"[plugin]\", ...) end }, { __index = _G })\n" +
+		"local f = assert(loadfile(arg[1]))\n" +
+		"if setfenv then setfenv(f, env) else f = assert(loadfile(arg[1], \"t\", env)) end\n" +
+		"f()\n"
+	suffix := []string{"--suffix", "-- a suffix that does nothing"}
+	variants := map[string][]string{
+		"default": nil, "debug": {"--debug"}, "suffix": suffix, "debug suffix": append([]string{"--debug"}, suffix...),
+	}
+	bundles := make(map[string][]byte, len(variants))
+
+	for name, flags := range variants {
+		bundles[name] = bundleProject(t, project, append([]string{"--entry", "main.lua"}, flags...)...)
+	}
+
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		for name, bundle := range bundles {
+			orig, bun := hostRuns(t, interp, host, project, bundle)
+			require.Equal(t, "[plugin]\tmain\nmodule\n", orig.Stdout, "the original\n%s", orig)
+			assert.Equal(t, "[plugin]\tmain\n[plugin]\tmodule\n", bun.Stdout, "the %s bundle\n%s", name, bun)
+			luatest.AssertSameExitCode(t, orig, bun)
+		}
+	})
+}

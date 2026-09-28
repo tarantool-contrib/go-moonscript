@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   visible to them without `--debug` only), and its last statement no longer
   runs on into the next one, which made a prefix ending in an expression
   call it with the entry's first parenthesized expression.
+- With `--debug`, modules and the entry are loaded in the environment the
+  bundle runs in, as they inherit it without `--debug`. They were loaded in
+  the global environment, so a host that ran the bundle in an environment of
+  its own saw the two modes behave differently.
 
 ### Fixed
 

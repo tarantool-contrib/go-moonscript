@@ -45,7 +45,15 @@ import (
 //     loader the embedding application put in package.preload wins over the
 //     file on package.path, and LuaJIT's own table.new lives there too.
 //
-// In debug mode the loader loads the body as a chunk of its own instead.
+// In debug mode the bundle embeds each body as a string and the loader
+// loads it as a chunk of its own, named after its file, with
+// __luamerge_load, so errors report the original file and line. The chunk
+// gets the environment the bundle itself runs in (load's env argument on
+// Lua 5.2 and later, setfenv on Lua 5.1, LuaJIT and Tarantool): the one the
+// modules of a default-mode bundle inherit as closures of the bundle's
+// chunk. Natively require loads a module in the global environment, which
+// makes a difference only for a bundle loaded in an environment of its own.
+//
 // Aliases delegate to the primary name so the body executes exactly once
 // regardless of how it's required.
 //
@@ -91,7 +99,7 @@ function(...)
 {{if .ArgFix}}if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 {{end}}{{indent .Source 0}}end
 {{- end}}{{define "load" -}}
-assert((rawget(_G, "loadstring") or load)({{bracket .Source}}, {{q (chunkname .Path)}}))
+__luamerge_load({{bracket .Source}}, {{q (chunkname .Path)}})
 {{- end}}{{if .Shebang}}{{.Shebang}}
 {{end}}-- Amalgamated by luamerge
 -- Entry: {{.EntryName}}
@@ -112,8 +120,17 @@ do
   end
 end
 
+{{end}}{{if .Debug}}local __luamerge_load
+do
+{{template "env"}}__luamerge_load = function(source, chunkname)
+  local chunk = assert((rawget(_G, "loadstring") or load)(source, chunkname, "t", _ENV))
+  if _ENV == nil then setfenv(chunk, getfenv(1)) end
+  return chunk
+end
+end
+
 {{end}}{{range .Modules}}{{$primary := .PrimaryName}}do
-{{template "env"}}local __luamerge_loader = {{if $.Debug -}}
+{{if not $.Debug}}{{template "env"}}{{end}}local __luamerge_loader = {{if $.Debug -}}
 function(...) return {{template "load" .Code}}(...) end
 {{- else}}{{template "function" .Code}}{{end}}
 if package.{{$.RegTable}}[{{q $primary}}] == nil then package.{{$.RegTable}}[{{q $primary}}] = __luamerge_loader end
