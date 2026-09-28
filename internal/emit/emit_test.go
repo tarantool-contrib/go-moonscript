@@ -16,7 +16,9 @@ import (
 // newModule is a module of the graph at path with source, registered under
 // names.
 func newModule(path, source string, names ...string) *graph.Module {
-	return &graph.Module{ID: 0, FilePath: path, Names: names, Aliases: nil, Source: []byte(source), Requires: nil}
+	return &graph.Module{
+		ID: 0, FilePath: path, Names: names, BuiltinNames: nil, Aliases: nil, Source: []byte(source), Requires: nil,
+	}
 }
 
 // newGraph is the graph of entry and modules, the entry first, as
@@ -198,6 +200,55 @@ func TestEmit_Fallback(t *testing.T) {
 	assert.Contains(t, bundle, "searchers[#searchers+1] = function(mod)", "fallback should append a searcher")
 	assert.NotContains(t, bundle, "package.preload[", "fallback should not use package.preload")
 	assertRuns(t, bundle, "embedded m\n")
+}
+
+// TestEmit_RegistersBuiltinNamesBehindTheRuntime: a name that some runtime
+// has a built-in module of goes into package.postload behind a searcher
+// appended after the interpreter's own, in every mode, so the runtime's
+// module wins where there is one and the embedded one is used elsewhere. The
+// other names of the module stay in package.preload. Tarantool finds its csv
+// with a searcher that runs after package.preload, so there a loader in
+// package.preload would win over the built-in.
+func TestEmit_RegistersBuiltinNamesBehindTheRuntime(t *testing.T) {
+	t.Parallel()
+
+	csv := newModule("/test/csv.lua", "return { impl = \"embedded\" }\n", "csv", "compat.csv")
+	csv.BuiltinNames = []string{"csv"}
+	g := newGraph(newModule("/test/main.lua",
+		"print(require(\"csv\").impl or \"built-in\", require(\"compat.csv\").impl)\n"), csv)
+
+	for name, debug := range map[string]bool{"default": false, "debug": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := defaults()
+			opts.Debug = debug
+
+			bundle := emitBundle(t, g, opts)
+
+			assert.Contains(t, bundle, "package.postload[\"csv\"] = __luamerge_loader")
+			assert.NotContains(t, bundle, "package.preload[\"csv\"]")
+			assert.Contains(t, bundle, "package.preload[\"compat.csv\"] = __luamerge_loader")
+			assert.Contains(t, bundle, "searchers[#searchers+1] = function(mod)")
+
+			luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+				t.Helper()
+
+				// Whether the interpreter has a csv module of its own: a probe
+				// run where no csv.lua is on package.path.
+				opts := luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0}
+				dir := luatest.WriteProject(t, luatest.Project{
+					"probe.lua": "io.write(pcall(require, \"csv\") and \"built-in\" or \"embedded\")\n",
+				})
+				probe := luatest.Run(t, interp, dir, opts, "probe.lua")
+				require.Equal(t, 0, probe.ExitCode, "the probe\n%s", probe)
+
+				r := luatest.RunBundle(t, interp, []byte(bundle), opts)
+				assert.Equal(t, 0, r.ExitCode, "the bundle failed\n%s\n--- bundle:\n%s", r, bundle)
+				assert.Equal(t, probe.Stdout+"\tembedded\n", r.Stdout, "%s\n--- bundle:\n%s", r, bundle)
+			})
+		})
+	}
 }
 
 func TestEmit_Debug(t *testing.T) {

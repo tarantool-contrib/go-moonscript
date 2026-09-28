@@ -77,9 +77,18 @@ import (
 //
 // By default loaders go into package.preload, which the built-in preload
 // searcher consults before searching package.path — so embedded modules win.
-// In fallback mode (.Fallback) loaders go into package.postload and a searcher
-// is appended last, so an on-disk copy on package.path takes precedence and the
+// In fallback mode loaders go into package.postload and a searcher is
+// appended last, so an on-disk copy on package.path takes precedence and the
 // embedded module is used only as a fallback.
+//
+// A name that some runtime has a built-in module of (a module's LateNames)
+// goes into package.postload behind the same appended searcher in either
+// mode. Natively, where the runtime has that module, require loads it and
+// never the file: from package.loaded, from package.preload (LuaJIT's
+// table.new) or, on Tarantool, from a searcher of its own that runs after
+// package.preload, where a loader of the bundle would win over it. Behind
+// the interpreter's own searchers the embedded module is found only where
+// the runtime has no module of that name.
 //
 // The entry is not a module: its code comes last, at the top level of the
 // bundle, so it runs as the main chunk, the way the interpreter runs a script.
@@ -115,7 +124,7 @@ __luamerge_load({{bracket .Source}}, {{q (chunkname .Path)}})
 {{if .Prefix}}do
 {{.Prefix}}end
 
-{{end}}{{if .Fallback}}package.postload = package.postload or {}
+{{end}}{{if .Postload}}package.postload = package.postload or {}
 do
   local postload = package.postload
   local searchers = package.searchers or package.loaders
@@ -142,6 +151,7 @@ end
 function(...) return {{template "load" .Code}}(...) end
 {{- else}}{{template "function" .Code}}{{end}}
 {{range .Names}}if package.{{$.RegTable}}[{{q .}}] == nil then package.{{$.RegTable}}[{{q .}}] = __luamerge_loader end
+{{end}}{{range .LateNames}}if package.postload[{{q .}}] == nil then package.postload[{{q .}}] = __luamerge_loader end
 {{end}}end
 {{end}}{{range .Aliases}}if package.{{$.RegTable}}[{{q .Name}}] == nil then
   package.{{$.RegTable}}[{{q .Name}}] = function(...) return require({{q .Target}}) end
@@ -268,12 +278,15 @@ type templateData struct {
 	Modules   []moduleData
 	// Aliases are the names --package-prefix generated, registered after
 	// every module.
-	Aliases  []graph.Alias
-	Prefix   string
-	Suffix   string
-	Shebang  string
-	Debug    bool
-	Fallback bool
+	Aliases []graph.Alias
+	Prefix  string
+	Suffix  string
+	Shebang string
+	Debug   bool
+	// Postload sets up package.postload and the searcher, appended after the
+	// interpreter's own, that consults it: in fallback mode, and whenever a
+	// module has LateNames.
+	Postload bool
 	// RegTable is the package field loaders are registered in: "preload"
 	// normally, "postload" in fallback mode.
 	RegTable string
@@ -293,6 +306,11 @@ type codeData struct {
 // moduleData is a module: its code and the names it is registered under,
 // every one with the same loader.
 type moduleData struct {
+	// Names are registered in RegTable.
 	Names []string
-	Code  codeData
+	// LateNames are the names some runtime has a built-in module of,
+	// registered in package.postload behind the interpreter's own searchers.
+	// In fallback mode they are among Names instead.
+	LateNames []string
+	Code      codeData
 }

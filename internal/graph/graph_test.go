@@ -593,6 +593,7 @@ func TestWarningKind_String(t *testing.T) {
 		graph.WarnCModule:         "c-module",
 		graph.WarnNonLua:          "non-lua",
 		graph.WarnIndirectRequire: "indirect-require",
+		graph.WarnShadowsBuiltin:  "shadows-builtin",
 		graph.WarningKind(-1):     "unknown",
 	} {
 		assert.Equal(t, want, kind.String(), "WarningKind(%d)", int(kind))
@@ -701,4 +702,75 @@ func TestBuild_CachedGlobalRequire(t *testing.T) {
 
 	assert.ElementsMatch(t, []string{"x"}, testModuleNames(g), "embedded modules")
 	assert.Empty(t, g.Warnings)
+}
+
+// TestBuild_ModuleNamedLikeABuiltin: a module of the project required by the
+// name of a module some runtimes have built in is embedded, that name is
+// marked so the bundle can let the runtime's module win, and a warning, one
+// per name, says which runtimes load their own. Another name of the same
+// file is not marked.
+func TestBuild_ModuleNamedLikeABuiltin(t *testing.T) {
+	t.Parallel()
+
+	g, dir := testBuild(t, map[string]string{
+		"main.lua": "require(\"csv\")\nrequire(\"./csv\")\nrequire(\"utf8\")\nlocal again = require(\"utf8\")\n",
+		"csv.lua":  "return {}\n",
+		"utf8.lua": "return {}\n",
+	})
+
+	csv := g.ByPath[filepath.Join(dir, "csv.lua")]
+	require.NotNil(t, csv, "csv.lua is embedded")
+	assert.Equal(t, []string{"csv", "./csv"}, csv.Names)
+	assert.Equal(t, []string{"csv"}, csv.BuiltinNames)
+
+	utf8 := g.ByPath[filepath.Join(dir, "utf8.lua")]
+	require.NotNil(t, utf8, "utf8.lua is embedded")
+	assert.Equal(t, []string{"utf8"}, utf8.BuiltinNames)
+
+	mainPath := filepath.Join(dir, "main.lua")
+	assert.Equal(t, []graph.Warning{
+		{
+			Kind:    graph.WarnShadowsBuiltin,
+			Module:  "csv",
+			File:    mainPath,
+			Line:    1,
+			Message: `require "csv": Tarantool loads its built-in module "csv" instead of the project's`,
+		},
+		{
+			Kind:   graph.WarnShadowsBuiltin,
+			Module: "utf8",
+			File:   mainPath,
+			Line:   3,
+			Message: `require "utf8": Lua 5.3, Lua 5.4, Lua 5.5 and Tarantool load their built-in ` +
+				`module "utf8" instead of the project's`,
+		},
+	}, g.Warnings)
+}
+
+// TestBuild_IncludedModuleNamedLikeABuiltin: an --include package named like
+// a module some runtime has built in is embedded and reported the same way.
+func TestBuild_IncludedModuleNamedLikeABuiltin(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"), []byte("print(\"main\")\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "bit.lua"), []byte("return {}\n"), 0o600))
+
+	cfg := entryConfig(dir, "main.lua")
+	cfg.IncludePackages = []string{"bit"}
+
+	g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
+	require.NoError(t, err)
+
+	bit := g.ByPath[filepath.Join(dir, "bit.lua")]
+	require.NotNil(t, bit, "bit.lua is embedded")
+	assert.Equal(t, []string{"bit"}, bit.BuiltinNames)
+	assert.Equal(t, []graph.Warning{{
+		Kind:   graph.WarnShadowsBuiltin,
+		Module: "bit",
+		File:   "",
+		Line:   0,
+		Message: `include package "bit": LuaJIT and Tarantool load their built-in module "bit" ` +
+			`instead of the project's`,
+	}}, g.Warnings)
 }

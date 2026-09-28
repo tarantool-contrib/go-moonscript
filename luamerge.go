@@ -43,6 +43,12 @@ const (
 	// loaded through it are not embedded; list them in
 	// Options.IncludePackages.
 	WarnIndirectRequire = graph.WarnIndirectRequire
+	// WarnShadowsBuiltin is a module of the project required by the name of
+	// a module some runtimes have built in (a pure-Lua bit.lua or utf8.lua,
+	// a csv.lua on Tarantool). The module is embedded, but where the runtime
+	// has its own module of that name require loads that one, as natively;
+	// the message names those runtimes.
+	WarnShadowsBuiltin = graph.WarnShadowsBuiltin
 )
 
 // Options configures a bundling run. The zero value is not valid — at minimum

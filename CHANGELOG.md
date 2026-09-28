@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other than by a call — aliased (`local r = require`), stored in a table or
   passed to a function — because the modules loaded through it cannot be found
   and are not embedded. Such uses used to be dropped without a word.
+- `WarnShadowsBuiltin` (`shadows-builtin`): a warning for a module of the
+  project required by the name of a module that some runtimes have built in,
+  such as a pure-Lua `bit.lua` or `utf8.lua`, naming the runtimes that load
+  their own module instead of the project's.
 
 ### Changed
 
@@ -273,5 +277,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   require when the project had no file for it. Such a require is now left to
   the runtime without a warning, from a list of the modules that PUC Lua,
   LuaJIT, OpenResty's LuaJIT and Tarantool have without a file.
+- A module of the project named like a module a runtime has built in, such
+  as a `csv.lua` on Tarantool, was registered in `package.preload`, which
+  Tarantool consults before its own built-in modules: the bundle loaded the
+  project's `csv.lua` where the program natively loads Tarantool's `csv`.
+  Such a module is now registered in `package.postload` behind a searcher
+  appended after the interpreter's own, as with `--fallback`, so the
+  runtime's module wins wherever there is one and the embedded module is
+  used elsewhere; a `shadows-builtin` warning names those runtimes.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

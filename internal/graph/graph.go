@@ -40,6 +40,13 @@ const (
 	// not embedded. `local require = require` is not one: calls through it are
 	// still found by name.
 	WarnIndirectRequire
+	// WarnShadowsBuiltin is a module of the project required by the name of a
+	// module some runtimes have built in, such as a pure-Lua bit.lua or
+	// utf8.lua, or a csv.lua on Tarantool. Where the runtime has its own
+	// module of that name, require loads that one and not the file, natively
+	// and from the bundle alike; elsewhere it loads the module of the
+	// project. The module is embedded, and Message names those runtimes.
+	WarnShadowsBuiltin
 )
 
 func (k WarningKind) String() string {
@@ -56,13 +63,16 @@ func (k WarningKind) String() string {
 		return "non-lua"
 	case WarnIndirectRequire:
 		return "indirect-require"
+	case WarnShadowsBuiltin:
+		return "shadows-builtin"
 	default:
 		return "unknown"
 	}
 }
 
-// Warning is a non-fatal issue found while building the graph. The require was
-// left in place to resolve at runtime rather than being embedded.
+// Warning is a non-fatal issue found while building the graph. For most kinds
+// the require was left in place to resolve at runtime rather than being
+// embedded; a WarnShadowsBuiltin module is embedded.
 type Warning struct {
 	Kind   WarningKind
 	Module string // the require()d module name (may be empty for dynamic requires).
@@ -111,6 +121,12 @@ type Module struct {
 	// requires it by, usually none: the program runs it, no require() loads
 	// it.
 	Names []string
+	// BuiltinNames are the names in Names that some runtime has a built-in
+	// module of (see WarnShadowsBuiltin). Where it has one, require loads the
+	// runtime's own module and never this file, so the bundle must register
+	// the module under these names where the runtime's own searchers come
+	// first.
+	BuiltinNames []string
 	// Aliases are the names --package-prefix generated from Names. Nothing in
 	// the project requires the module by them.
 	Aliases []Alias
@@ -217,10 +233,46 @@ func unresolvedWarningMessage(target requireTarget, err error) string {
 	}
 }
 
-func addModuleName(mod *Module, name string) {
-	if !slices.Contains(mod.Names, name) {
-		mod.Names = append(mod.Names, name)
+// addModuleName adds the name target requires mod by to mod's names, once. A
+// name that some runtime has a built-in module of is one of mod's
+// BuiltinNames too, and the graph warns that those runtimes load their own.
+func addModuleName(g *Graph, mod *Module, target requireTarget) {
+	if slices.Contains(mod.Names, target.Name) {
+		return
 	}
+
+	mod.Names = append(mod.Names, target.Name)
+
+	providers := builtinRuntimes(target.Name)
+	if providers == 0 {
+		return
+	}
+
+	mod.BuiltinNames = append(mod.BuiltinNames, target.Name)
+	g.Warnings = append(g.Warnings, Warning{
+		Kind:    WarnShadowsBuiltin,
+		Module:  target.Name,
+		File:    target.File,
+		Line:    target.Line,
+		Message: shadowsBuiltinMessage(target, providers),
+	})
+}
+
+// shadowsBuiltinMessage describes the WarnShadowsBuiltin warning for target,
+// whose name the runtimes in providers have a built-in module of. Like every
+// message it leaves the position to the warning's File and Line.
+func shadowsBuiltinMessage(target requireTarget, providers runtimes) string {
+	where := fmt.Sprintf("require %q", target.Name)
+	if target.File == "" {
+		where = fmt.Sprintf("include package %q", target.Name)
+	}
+
+	verb := "load their"
+	if len(providers.names()) == 1 {
+		verb = "loads its"
+	}
+
+	return fmt.Sprintf("%s: %s %s built-in module %q instead of the project's", where, providers, verb, target.Name)
 }
 
 // Resolver locates the file of a require()d module name. A name resolves the
@@ -306,7 +358,7 @@ func resolveTarget(
 	}
 
 	if existing, ok := g.ByPath[result.FilePath]; ok {
-		addModuleName(existing, target.Name)
+		addModuleName(g, existing, target)
 		return nil, false, nil
 	}
 
@@ -320,13 +372,15 @@ func resolveTarget(
 	source = skipHeader(source)
 
 	newMod := &Module{
-		ID:       len(g.Modules),
-		FilePath: result.FilePath,
-		Names:    []string{target.Name},
-		Aliases:  nil,
-		Source:   source,
-		Requires: nil,
+		ID:           len(g.Modules),
+		FilePath:     result.FilePath,
+		Names:        nil,
+		BuiltinNames: nil,
+		Aliases:      nil,
+		Source:       source,
+		Requires:     nil,
 	}
+	addModuleName(g, newMod, target)
 	g.Modules = append(g.Modules, newMod)
 	g.ByPath[result.FilePath] = newMod
 
@@ -504,12 +558,13 @@ func Build(cfg *config.Config, parser parse.Parser, resolver Resolver) (*Graph, 
 	// The entry gets a name only when something requires it (resolveTarget
 	// adds it then): the bundle runs the entry as its main chunk.
 	entryMod := &Module{
-		ID:       0,
-		FilePath: entryPath,
-		Names:    nil,
-		Aliases:  nil,
-		Source:   entrySource,
-		Requires: nil,
+		ID:           0,
+		FilePath:     entryPath,
+		Names:        nil,
+		BuiltinNames: nil,
+		Aliases:      nil,
+		Source:       entrySource,
+		Requires:     nil,
 	}
 	g.Modules = append(g.Modules, entryMod)
 	g.ByPath[entryPath] = entryMod

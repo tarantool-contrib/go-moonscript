@@ -159,14 +159,17 @@ func TestCLI_WarningPosition(t *testing.T) {
 			"require(\"cjson\")\n" + // Skipped.
 			"require(\"missing\")\n" + // Unresolved.
 			"local r = require\n" + // Indirect, where require is used other than by a call.
-			"local ok = pcall(require, \"optional\")\n", // Unresolved, in protected mode.
+			"local ok = pcall(require, \"optional\")\n" + // Unresolved, in protected mode.
+			"require(\"csv\")\n", // A module of the project named like Tarantool's built-in.
+		"csv.lua": "return {}\n",
+		"bit.lua": "return {}\n",
 	})
 	mainLua, err := filepath.EvalSymlinks(filepath.Join(dir, "main.lua"))
 	require.NoError(t, err)
 
 	// Act.
 	_, stderr, code := runCLIIn(t, dir, "--entry", "main.lua", "--skip", "cjson", "--include", "nothere",
-		"--include", "debug")
+		"--include", "debug", "--include", "bit")
 
 	// Assert.
 	require.Equal(t, 0, code, stderr)
@@ -200,6 +203,8 @@ func TestCLI_WarningPosition(t *testing.T) {
 		"warning: include package \"nothere\" not found: ",
 		"warning: include package \"debug\" skipped: ",
 		"warning: " + mainLua + ":6: unresolved require \"optional\" in protected mode (pcall or xpcall): ",
+		"warning: " + mainLua + ":7: require \"csv\": Tarantool loads its built-in module \"csv\" instead",
+		"warning: include package \"bit\": LuaJIT and Tarantool load their built-in module \"bit\" instead",
 	} {
 		found := slices.ContainsFunc(warnings, func(warning string) bool { return strings.HasPrefix(warning, want) })
 		assert.True(t, found, "no warning starts with %q:\n%s", want, stderr)

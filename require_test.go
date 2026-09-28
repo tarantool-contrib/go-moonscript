@@ -154,6 +154,34 @@ func TestBundle_RuntimeBuiltinWithoutAFile(t *testing.T) {
 	}
 }
 
+// TestBundle_ModuleNamedLikeABuiltin: a module of the project named like a
+// module Tarantool has built in is embedded, and registered where Tarantool's
+// own searchers come first, with a warning of its own kind that says so.
+func TestBundle_ModuleNamedLikeABuiltin(t *testing.T) {
+	t.Parallel()
+
+	dir := testResolvedDir(t)
+	main := filepath.Join(dir, "main.lua")
+	csv := filepath.Join(dir, "csv.lua")
+
+	require.NoError(t, os.WriteFile(main, []byte("local csv = require(\"csv\")\nprint(csv.name)\n"), 0o600))
+	require.NoError(t, os.WriteFile(csv, []byte("return { name = \"project csv\" }\n"), 0o600))
+
+	res, out := testStrictBundle(t, dir)
+	require.Len(t, res.Warnings, 1)
+
+	w := res.Warnings[0]
+	assert.Equal(t, luamerge.WarnShadowsBuiltin, w.Kind)
+	assert.Equal(t, "shadows-builtin", w.Kind.String())
+	assert.Equal(t, "csv", w.Module)
+	assert.Equal(t, main, w.File)
+	assert.Equal(t, 1, w.Line)
+	assert.Contains(t, w.Message, "Tarantool", "the warning names the runtime")
+	assert.Equal(t, []string{main, csv}, res.Files, "the module is embedded")
+	assert.Contains(t, out, `package.postload["csv"] = __luamerge_loader`)
+	assert.NotContains(t, out, `package.preload["csv"]`)
+}
+
 // TestBundle_ProtectedRequireIsOptional: a module required in protected mode,
 // `pcall(require, "cjson")`, is an optional dependency: the program is
 // written to run on without it. When the module is not found, that is a
