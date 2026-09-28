@@ -222,6 +222,22 @@ func TestNormalizeStderr(t *testing.T) {
 			want:   "table: 0x?",
 		},
 		{
+			// Tarantool cuts a message longer than 16 KiB short, and its fatal
+			// line follows the cut on the same line. The cut may fall inside
+			// the "\tno " of a searched file too.
+			name:   "module not found, Tarantool, cut before a file",
+			interp: "tarantool",
+			orig: "main.lua:1: module 'nothere' not found:\n" +
+				"\tno field package.preload['nothere']\n" +
+				"\tno file '/private/tmp/proj/override/nothere.lua'\n" +
+				"\tfatal error, exiting the event loop\n",
+			bundle: "bundle.lua:9: module 'nothere' not found:\n" +
+				"\tno field package.preload['nothere']\n" +
+				"\tno file '/private/tmp/empty/override/nothere.lua'\n" +
+				"\tnofatal error, exiting the event loop\n",
+			want: "module 'nothere' not found:",
+		},
+		{
 			name:   "stacked positions",
 			interp: "lua5.4",
 			orig:   "lua5.4: rethrow.lua:3: rethrow.lua:1: deep\nstack traceback:\n",
@@ -288,6 +304,9 @@ func TestNormalizeStderr_KeepsDifferences(t *testing.T) {
 			"lua: m.lua:1: module 'x' not found:\n\tno file './x.lua'\n",
 			"lua: bundle.lua:1: module 'x' not found:\n\tno file './x.lua'\n\t\n" +
 				"\tno field package.postload['x']\n"},
+		{"long messages cut short, Tarantool", "tarantool",
+			"main.lua:1: first long messagefatal error, exiting the event loop\n",
+			"main.lua:1: other long messagefatal error, exiting the event loop\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()

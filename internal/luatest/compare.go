@@ -130,6 +130,10 @@ const tarantoolFatal = "fatal error, exiting the event loop"
 // uncaught Lua error, where later releases append a trailer.
 const tarantoolErrorType = "LuajitError: "
 
+// searcherLine starts every line of "module 'x' not found:" that names a
+// place a searcher looked: "\tno file ...", "\tno field ...".
+const searcherLine = "\tno "
+
 // NormalizeStderr reduces the stderr of a run of the interpreter named interp
 // to what must agree between an original program and its bundle. Positions
 // legitimately differ (`./flaky.lua:1: init failed` natively, `bundle.lua:10:
@@ -139,7 +143,10 @@ const tarantoolErrorType = "LuajitError: "
 //   - the traceback after "stack traceback:" (PUC Lua, LuaJIT);
 //   - the "<interp>: " prefix of an uncaught error (PUC Lua, LuaJIT);
 //   - Tarantool's JSON trailer, the "LuajitError: " prefix Tarantool 2.11 and
-//     3.0 print instead, and its "fatal error, exiting the event loop";
+//     3.0 print instead, and its "fatal error, exiting the event loop". That
+//     line follows a message longer than 16 KiB right after the cut Tarantool
+//     makes, on the same line; a cut that falls in the list of searched files
+//     is dropped with the list, as the two runs' lists part ways there;
 //   - the searcher lines of "module 'x' not found:" ("\tno file ...",
 //     "\tno field ..."): they enumerate the search path, which depends on the
 //     working directory (Tarantool lists absolute paths up to /) and, with
@@ -157,7 +164,13 @@ func NormalizeStderr(interp, stderr string) string {
 	var lines []string
 
 	for line := range strings.SplitSeq(stderr, "\n") {
-		if line == tarantoolFatal || strings.HasPrefix(line, "\tno ") {
+		line, cut := strings.CutSuffix(line, tarantoolFatal)
+		if cut && strings.HasPrefix(searcherLine, line) {
+			// The fatal line itself, or the cut inside "\tno ".
+			continue
+		}
+
+		if strings.HasPrefix(line, searcherLine) {
 			continue
 		}
 
