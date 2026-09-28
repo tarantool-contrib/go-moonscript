@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,14 +23,54 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Empty(t, cfg.Search, "len(Default().Search) = %d, want 0", len(cfg.Search))
 }
 
-func TestLoadConfigMissingFile(t *testing.T) {
+// TestLoadConfig_MissingNamedFile checks that a configuration file named
+// explicitly must exist: a typo in its name used to drop every setting in the
+// file without a word.
+func TestLoadConfig_MissingNamedFile(t *testing.T) {
 	t.Parallel()
 
-	// Non-existent file should not error.
-	cfg, err := config.LoadConfig("/non/existent.yaml")
+	path := filepath.Join(t.TempDir(), "luamerge.yml")
+
+	_, err := config.LoadConfig(path)
+
+	require.ErrorIs(t, err, fs.ErrNotExist)
+	assert.Contains(t, err.Error(), path)
+}
+
+// TestLoadConfig_MissingDefaultFile checks that the default file, unlike a
+// named one, may be absent: then the defaults apply.
+//
+//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+func TestLoadConfig_MissingDefaultFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	cfg, err := config.LoadConfig("")
+
 	require.NoError(t, err)
-	// Should return defaults.
-	assert.Equal(t, "-", cfg.Output, "LoadConfig() Output = %q, want \"-\"", cfg.Output)
+	assert.Equal(t, config.Default(), cfg)
+}
+
+// TestLoadConfig_DefaultFile checks that an empty path reads DefaultPath from
+// the working directory.
+//
+//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+func TestLoadConfig_DefaultFile(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, config.DefaultPath), []byte("strict: true\n"), 0o600))
+	t.Chdir(dir)
+
+	cfg, err := config.LoadConfig("")
+
+	require.NoError(t, err)
+	assert.True(t, cfg.Strict, "the default file was not read")
+}
+
+// TestFilePath checks the name of the file LoadConfig reads for a path.
+func TestFilePath(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "luamerge.yaml", config.FilePath(""))
+	assert.Equal(t, "build/luamerge.yaml", config.FilePath("build/luamerge.yaml"))
 }
 
 func TestLoadConfigValidYAML(t *testing.T) {
@@ -97,7 +138,12 @@ func TestLoadConfig_RejectsStripShebang(t *testing.T) {
 	// t.Setenv forbids t.Parallel().
 	t.Setenv("LUAMERGE_TRANSFORM_STRIP_SHEBANG", "true")
 
-	_, err = config.LoadConfig("does-not-exist.yaml")
+	// A named config file must exist, so the environment is checked over a
+	// file that holds no settings of its own.
+	commentOnly := filepath.Join(t.TempDir(), "luamerge.yaml")
+	require.NoError(t, os.WriteFile(commentOnly, []byte("# no settings\n"), 0600))
+
+	_, err = config.LoadConfig(commentOnly)
 	require.ErrorContains(t, err, "strip_shebang", "the key in the environment")
 }
 
@@ -452,8 +498,9 @@ func TestLoadConfigEnvOverrides(t *testing.T) {
 	t.Setenv("LUAMERGE_STRIP_PREFIX", "mylib")
 	t.Setenv("LUAMERGE_ARG_FIX", "false")
 	t.Setenv("LUAMERGE_TRANSFORM_REMOVE_COMMENTS", "true")
+	t.Chdir(t.TempDir()) // No luamerge.yaml.
 
-	cfg, err := config.LoadConfig("does-not-exist.yaml")
+	cfg, err := config.LoadConfig("")
 	require.NoError(t, err)
 	assert.Equal(t, "envmain.lua", cfg.Entry)
 	assert.Equal(t, "mylib", cfg.StripPrefix)

@@ -115,7 +115,7 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--config` | Path to config file | `luamerge.yaml` |
+| `--config` | Config file; a file named here must exist, while the default is read only if present (`--config ''` is the default) | `luamerge.yaml` |
 | `--entry` | Entry Lua file **(required)** | – |
 | `--output` | Output file, `-` for stdout | `-` |
 | `--root` | Base directory for module resolution | directory of entry file |
@@ -159,6 +159,8 @@ Settings are resolved with this precedence (later wins): **defaults → `luamerg
 Defaults, the YAML file, and the environment are assembled and merged by the Tarantool ecosystem's [go-config](https://github.com/tarantool/go-config) library, and the merged result is validated against a JSON Schema (draft 2020-12) before use — an unknown key or a wrong-typed value in `luamerge.yaml` is reported as an error rather than being silently ignored. CLI flags are applied on top of the validated config.
 
 ### YAML
+
+The file is `luamerge.yaml` in the working directory, or the one named with `--config`. The default file is optional; a file named with `--config` must exist, so a typo in its name is an error rather than a build without its settings.
 
 ```yaml
 entry: src/main.lua
@@ -345,7 +347,7 @@ Public API:
 
 - `luamerge.Options` — all bundling settings (entry, root, path, transforms, `Debug`, `Fallback`, `Shebang`, `ArgFix`, prefixes, skip/include, …). `Bundle` writes to the `io.Writer` you give it and ignores `Options.Output`.
 - `luamerge.DefaultOptions() Options` — defaults matching the CLI.
-- `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars (a missing file is not an error).
+- `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars. `""` means `luamerge.yaml` in the working directory, which may be absent; a file named explicitly must exist (a missing one is an error matching `fs.ErrNotExist`).
 - `luamerge.Bundle(opts Options, w io.Writer) (*Result, error)` — runs the full pipeline; resolves the root and the `package_name` convenience itself.
 - `luamerge.Result{ Warnings []Warning; Files []string }` — non-fatal issues, and the absolute path of every source file embedded in the bundle (the entry first). Each `Warning` is machine-readable: `Kind` (`WarnDynamicRequire`, `WarnSkipped`, `WarnUnresolved`, `WarnCModule`, `WarnNonLua`, `WarnIndirectRequire`), `Module` (the require name), plus `File`/`Line`/`Message` for display.
 

@@ -78,10 +78,11 @@ func DefaultOptions() Options {
 	return config.Default()
 }
 
-// LoadOptions reads Options from a YAML config file (and LUAMERGE_* environment
-// variables) layered over the defaults. A missing file is not an error — the
-// defaults plus environment are returned. Pass "" to use the default path
-// (luamerge.yaml).
+// LoadOptions reads Options from a YAML config file and LUAMERGE_* environment
+// variables, layered over the defaults. An empty path means luamerge.yaml in
+// the working directory, which may be absent: then the defaults plus the
+// environment are returned. A file named explicitly must exist; a missing one
+// is an error matching fs.ErrNotExist.
 func LoadOptions(path string) (Options, error) {
 	cfg, err := config.LoadConfig(path)
 	if err != nil {

@@ -6,10 +6,12 @@ package config
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,6 +101,16 @@ func Default() Config {
 // overrides (e.g. LUAMERGE_STRIP_PREFIX).
 const envPrefix = "LUAMERGE_"
 
+// DefaultPath is the configuration file read when no other is named. Unlike a
+// file named explicitly, it may be absent.
+const DefaultPath = "luamerge.yaml"
+
+// FilePath returns the configuration file LoadConfig(path) reads: path
+// itself, or DefaultPath when path is empty.
+func FilePath(path string) string {
+	return cmp.Or(path, DefaultPath)
+}
+
 // envKeyToPath maps a LUAMERGE_-prefixed environment variable name (with the
 // prefix already stripped by the env collector) to a go-config key path. The
 // only nested config section is `transform`, so LUAMERGE_TRANSFORM_X becomes
@@ -114,15 +126,15 @@ func envKeyToPath(name string) goconfig.KeyPath {
 	return goconfig.NewKeyPath(name)
 }
 
-// LoadConfig loads configuration from configPath (defaulting to
-// "luamerge.yaml" when empty), overlaying built-in defaults with the YAML
-// file (if it exists) and then LUAMERGE_-prefixed environment variables. The
-// three sources are assembled and merged by go-config, where a later collector
-// wins over an earlier one.
-func LoadConfig(configPath string) (Config, error) {
-	if configPath == "" {
-		configPath = "luamerge.yaml"
-	}
+// LoadConfig loads the configuration: the built-in defaults, overlaid with the
+// YAML file at path and then with LUAMERGE_-prefixed environment variables.
+// An empty path means DefaultPath, which is read only when it exists. A file
+// named explicitly must exist: a typo in its name is an error matching
+// fs.ErrNotExist, not a build without its settings. The three sources are
+// assembled and merged by go-config, where a later collector wins over an
+// earlier one.
+func LoadConfig(path string) (Config, error) {
+	configPath := FilePath(path)
 
 	ctx := context.Background()
 
@@ -135,7 +147,6 @@ func LoadConfig(configPath string) (Config, error) {
 
 	builder = builder.AddCollector(collectors.NewStruct(Default()).WithName("defaults"))
 
-	// Layer the YAML file only when it exists; a missing file is not an error.
 	_, statErr := os.Stat(configPath)
 
 	switch {
@@ -146,8 +157,10 @@ func LoadConfig(configPath string) (Config, error) {
 		}
 
 		builder = builder.AddCollector(source)
-	case !os.IsNotExist(statErr):
-		return Config{}, fmt.Errorf("stat config file %q: %w", configPath, statErr)
+	case path == "" && errors.Is(statErr, fs.ErrNotExist):
+		// Only the default file is optional.
+	default:
+		return Config{}, fmt.Errorf("config file: %w", statErr)
 	}
 
 	builder = builder.AddCollector(collectors.NewEnv().WithPrefix(envPrefix).WithTransform(envKeyToPath))

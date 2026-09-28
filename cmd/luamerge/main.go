@@ -54,7 +54,8 @@ func run() int {
 		showVersion      bool
 	)
 
-	pflag.StringVar(&configPath, "config", "luamerge.yaml", "Path to config file")
+	pflag.StringVar(&configPath, "config", config.DefaultPath,
+		"Config file; a file named here must exist, the default is read only if present")
 	pflag.StringVar(&entry, "entry", "", "Entry Lua file (required)")
 	pflag.StringVar(&output, "output", "", "Output file, '-' for stdout (empty = use config or default)")
 	pflag.StringVar(&root, "root", "", "Base directory for module resolution")
@@ -100,8 +101,17 @@ func run() int {
 		return 0
 	}
 
-	// Load defaults, the YAML config file (if present) and LUAMERGE_ environment
-	// variables via go-config.
+	flags := pflag.CommandLine
+
+	// Only a file named with --config must exist. Without the flag, or with
+	// an empty value, the default file is read if it is there. configPath is
+	// what LoadConfig takes, and config.FilePath(configPath) the file it reads.
+	if !flags.Changed("config") {
+		configPath = ""
+	}
+
+	// Load defaults, the YAML config file and LUAMERGE_ environment variables
+	// via go-config.
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -110,7 +120,6 @@ func run() int {
 
 	// CLI flags override the loaded config, but only when actually set — an
 	// unset flag must not clobber a value coming from the file or environment.
-	flags := pflag.CommandLine
 
 	stringOverrides := []struct {
 		name string
@@ -189,7 +198,7 @@ func run() int {
 	}
 
 	// The config file is as much an input as the sources are.
-	err = putOutput(cfg.Output, bundle.Bytes(), slices.Concat(res.Files, []string{configPath}))
+	err = putOutput(cfg.Output, bundle.Bytes(), slices.Concat(res.Files, []string{config.FilePath(configPath)}))
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1

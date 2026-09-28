@@ -2,6 +2,7 @@ package main
 
 import (
 	"maps"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -95,4 +96,99 @@ func TestCLI_ListFlagsReplaceConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+// commentProject is a project whose entry starts with a comment, so whether
+// a configuration that turns on remove_comments was read shows in the bundle.
+// With a config file: build/luamerge.yaml does that.
+func commentProject(t *testing.T) string {
+	t.Helper()
+
+	return luatest.WriteProject(t, luatest.Project{
+		"main.lua":            "-- COMMENT_MARK\nprint(\"hi\")\n",
+		"build/luamerge.yaml": "transform:\n  remove_comments: true\n",
+	})
+}
+
+// TestCLI_ConfigNamedFile checks that --config reads the file it names, and
+// that a named file that does not exist is an error, not a build without its
+// settings.
+func TestCLI_ConfigNamedFile(t *testing.T) {
+	t.Parallel()
+
+	dir := commentProject(t)
+
+	t.Run("exists", func(t *testing.T) {
+		t.Parallel()
+
+		stdout, stderr, code := runCLIIn(t, dir, "--config", "build/luamerge.yaml", "--entry", "main.lua")
+
+		require.Equal(t, 0, code, stderr)
+		assert.NotContains(t, stdout, "COMMENT_MARK", "the config file was not read")
+	})
+
+	for _, name := range []string{"build/luamerge.yml", "luamerge.yaml"} {
+		t.Run("missing "+name, func(t *testing.T) {
+			t.Parallel()
+
+			stdout, stderr, code := runCLIIn(t, dir, "--config", name, "--entry", "main.lua")
+
+			assert.Equal(t, 1, code, "exit code")
+			assert.Contains(t, stderr, name)
+			assert.Contains(t, stderr, "no such file or directory")
+			assert.Empty(t, stdout)
+		})
+	}
+}
+
+// TestCLI_ConfigEmptyMeansDefault checks that an empty --config value is the
+// default file, luamerge.yaml, wherever the file is used: it is read, and it
+// is protected as an input. The protection used to look at a file named "",
+// so an empty --config with --output luamerge.yaml replaced the config file
+// with the bundle.
+func TestCLI_ConfigEmptyMeansDefault(t *testing.T) {
+	t.Parallel()
+
+	const settings = "transform:\n  remove_comments: true\n"
+
+	t.Run("read", func(t *testing.T) {
+		t.Parallel()
+
+		dir := luatest.WriteProject(t, luatest.Project{
+			"main.lua":      "-- COMMENT_MARK\nprint(\"hi\")\n",
+			"luamerge.yaml": settings,
+		})
+
+		stdout, stderr, code := runCLIIn(t, dir, "--config", "", "--entry", "main.lua")
+
+		require.Equal(t, 0, code, stderr)
+		assert.NotContains(t, stdout, "COMMENT_MARK", "luamerge.yaml was not read")
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		t.Parallel()
+
+		dir := luatest.WriteProject(t, luatest.Project{"main.lua": "print(\"hi\")\n"})
+
+		stdout, stderr, code := runCLIIn(t, dir, "--config", "", "--entry", "main.lua")
+
+		require.Equal(t, 0, code, stderr)
+		assert.Contains(t, stdout, "print(\"hi\")", "the entry was not bundled")
+	})
+
+	t.Run("protected", func(t *testing.T) {
+		t.Parallel()
+
+		dir := luatest.WriteProject(t, luatest.Project{
+			"main.lua":      "print(\"hi\")\n",
+			"luamerge.yaml": settings,
+		})
+
+		stdout, stderr, code := runCLIIn(t, dir, "--config", "", "--entry", "main.lua", "--output", "luamerge.yaml")
+
+		assert.Equal(t, 1, code, "exit code")
+		assert.Contains(t, stderr, "refusing to overwrite")
+		assert.Empty(t, stdout)
+		assert.Equal(t, settings, readFile(t, filepath.Join(dir, "luamerge.yaml")), "luamerge.yaml changed")
+	})
 }

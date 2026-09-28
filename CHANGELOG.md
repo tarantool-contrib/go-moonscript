@@ -211,5 +211,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--path`, from a leading, trailing or doubled `;`, now stands for the
   default templates `?.lua;?/init.lua` at that position, instead of being
   silently dropped.
+- A config file named with `--config`, or passed to `LoadOptions`, must exist:
+  a missing one is an error. Only the default `luamerge.yaml` may be absent. A
+  typo in the name used to drop every setting in the file without a word.
+- `--config ''` is the default `luamerge.yaml` everywhere. The file was read
+  but not protected as an input, so `--config '' --output luamerge.yaml`
+  replaced the config file with the bundle.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
