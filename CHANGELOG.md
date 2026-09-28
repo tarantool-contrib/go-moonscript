@@ -268,5 +268,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `xpcall`, that cannot be resolved is now a warning even with `--strict`,
   and the bundle leaves it to runtime; an unprotected `require` of the same
   module still fails the build.
+- A `require` of a module that runtimes provide built in, such as `utf8`,
+  LuaJIT's `bit` or Tarantool's `csv`, failed `--strict` as an unresolved
+  require when the project had no file for it. Such a require is now left to
+  the runtime without a warning, from a list of the modules that PUC Lua,
+  LuaJIT, OpenResty's LuaJIT and Tarantool have without a file.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

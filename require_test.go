@@ -121,6 +121,39 @@ func TestBundle_StandardLibraryModules(t *testing.T) {
 	}
 }
 
+// TestBundle_RuntimeBuiltinWithoutAFile: a module that some runtime has built
+// in, and the project has no file for, is the runtime's to provide, so it is
+// no unresolved require: no warning, and no error in strict mode. One name of
+// each runtime that has any.
+func TestBundle_RuntimeBuiltinWithoutAFile(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{
+		"bit32",         // Lua 5.2 and 5.3.
+		"utf8",          // Lua 5.3 and later, Tarantool.
+		"bit",           // LuaJIT, Tarantool.
+		"table.new",     // LuaJIT, Tarantool.
+		"string.buffer", // LuaJIT.
+		"thread.exdata", // OpenResty's LuaJIT.
+		"csv",           // Tarantool.
+		"zlib",          // Tarantool's static build.
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := testResolvedDir(t)
+			main := filepath.Join(dir, "main.lua")
+			require.NoError(t, os.WriteFile(main,
+				fmt.Appendf(nil, "local m = require(%q)\nprint(type(m))\n", name), 0o600))
+
+			res, out := testStrictBundle(t, dir)
+			assert.Empty(t, res.Warnings)
+			assert.Equal(t, []string{main}, res.Files, "nothing but the entry is embedded")
+			assert.NotContains(t, out, fmt.Sprintf("[%q]", name), "no loader is registered for it")
+		})
+	}
+}
+
 // TestBundle_ProtectedRequireIsOptional: a module required in protected mode,
 // `pcall(require, "cjson")`, is an optional dependency: the program is
 // written to run on without it. When the module is not found, that is a

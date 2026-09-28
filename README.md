@@ -407,6 +407,8 @@ The file that contains the `require()` plays no part, as in Lua: `require("util"
 
 The standard library — `_G`, `coroutine`, `debug`, `io`, `math`, `os`, `package`, `string` and `table` — is never looked up. Every interpreter has it in `package.loaded` before the program starts, so `require("debug")` returns it without searching and never loads a file of that name; the bundler neither embeds nor reports it, even with `--strict`. `--include` of one of these names is skipped with a warning.
 
+Some modules only some runtimes have built in: `bit32` (Lua 5.2 and 5.3), `utf8` (Lua 5.3 and later, and Tarantool), LuaJIT's `bit`, `ffi`, `jit`, `table.new`, `string.buffer` and the like, and Tarantool's own, such as `json`, `fiber` or `csv`. A `require` of one that the project has no file for is left to the runtime and not reported, even with `--strict`: where the runtime has the module it loads it, and elsewhere the program fails as it does natively. The list, read from the interpreters themselves, is in [`internal/graph/builtin.go`](internal/graph/builtin.go).
+
 ### Prefix stripping
 
 Some projects name their modules with a package prefix that the directory layout does not mirror. A name that the lookup above finds nowhere is tried again without such a prefix. Only then, so a prefix is never stripped from a name that Lua itself would load a file for:

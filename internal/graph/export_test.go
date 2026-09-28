@@ -9,3 +9,20 @@ package graph
 func StandardLibraryForTest() []string {
 	return standardLibrary()
 }
+
+// RuntimeNamesForTest is runtimeNames, exported for tests: the name of every
+// runtime the lists know.
+func RuntimeNamesForTest() []string {
+	return runtimeNames()
+}
+
+// BuiltinModulesForTest is builtinModules, exported for tests, with the names
+// of the runtimes (see runtimeNames) that provide each module.
+func BuiltinModulesForTest() map[string][]string {
+	modules := make(map[string][]string)
+	for name, providers := range builtinModules() {
+		modules[name] = providers.names()
+	}
+
+	return modules
+}

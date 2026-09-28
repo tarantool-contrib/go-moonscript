@@ -2,6 +2,8 @@ package graph_test
 
 import (
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -12,51 +14,101 @@ import (
 	"github.com/tarantool/go-luamerge/internal/luatest"
 )
 
-// testProbeScript is a Lua script that reports, for each of names, whether
-// require finds it without a file: with every searcher but the first removed,
-// require has nothing left but package.loaded and the first searcher, which
-// is the preload searcher (on Tarantool also its override and built-in
-// module searchers). It runs from a directory that holds nothing else, so no
-// override module can be found either.
+// testProbeScript is a Lua script that reports what the interpreter running
+// it provides without a file, in lines of the form "<what> <name>":
+//
+//   - "has <module>": every module in package.loaded and package.preload at
+//     startup, and in Tarantool's table of built-in modules;
+//   - "runtime <runtime>": the runtimes the interpreter is, named as the
+//     graph package names them;
+//   - "provided <module>" or "missing <module>", for each of names: whether
+//     require finds it with every searcher but the first removed. That leaves
+//     require nothing but package.loaded and the first searcher: the preload
+//     searcher, and on Tarantool also its override and built-in module
+//     searchers. The script runs from a directory that holds nothing else, so
+//     no override module can be found either.
 func testProbeScript(names []string) string {
 	quoted := make([]string, 0, len(names))
 	for _, name := range names {
 		quoted = append(quoted, fmt.Sprintf("%q", name))
 	}
 
-	return "local searchers = package.searchers or package.loaders\n" +
-		"for i = #searchers, 2, -1 do searchers[i] = nil end\n" +
-		"for _, name in ipairs({ " + strings.Join(quoted, ", ") + " }) do\n" +
-		"  print((pcall(require, name) and \"provided \" or \"missing \") .. name)\n" +
-		"end\n"
+	return `local function list(modules)
+  for name in pairs(modules) do print("has " .. name) end
+  return modules
+end
+local loaders = package.loaded["internal.loaders"]
+list(package.loaded)
+list(package.preload)
+list(type(loaders) == "table" and loaders.builtin or {})
+if rawget(_G, "_TARANTOOL") then
+  print("runtime Tarantool")
+  if package.loaded.tarantool.build.linking == "static" then
+    print("runtime Tarantool's static build")
+  end
+elseif rawget(_G, "jit") then
+  print("runtime LuaJIT")
+  if jit.prngstate ~= nil then print("runtime OpenResty's LuaJIT") end
+else
+  print("runtime " .. _VERSION)
+end
+local searchers = package.searchers or package.loaders
+for i = #searchers, 2, -1 do searchers[i] = nil end
+for _, name in ipairs({ ` + strings.Join(quoted, ", ") + ` }) do
+  print((pcall(require, name) and "provided " or "missing ") .. name)
+end
+`
 }
 
-// testProvided runs testProbeScript for names on interp and returns the names
-// the interpreter provides without a file.
-func testProvided(t *testing.T, interp luatest.Interpreter, names []string) map[string]bool {
+// testProbe is what testProbeScript reported.
+type testProbe struct {
+	// has are the modules the interpreter has without a file.
+	has map[string]bool
+	// runtimes are the runtimes the interpreter is.
+	runtimes []string
+	// provided are the names require found without a file.
+	provided map[string]bool
+}
+
+// testRunProbe runs testProbeScript for names on interp.
+func testRunProbe(t *testing.T, interp luatest.Interpreter, names []string) testProbe {
 	t.Helper()
 
 	dir := luatest.WriteProject(t, luatest.Project{"probe.lua": testProbeScript(names)})
 	r := luatest.Run(t, interp, dir, luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0}, "probe.lua")
 	require.Equal(t, 0, r.ExitCode, "the probe\n%s", r)
 
-	provided := make(map[string]bool)
-	lines := strings.Split(strings.TrimSuffix(r.Stdout, "\n"), "\n")
-	require.Len(t, lines, len(names), "one line per name\n%s", r)
+	probe := testProbe{has: make(map[string]bool), runtimes: nil, provided: make(map[string]bool)}
+	answered := 0
 
-	for _, line := range lines {
-		name, ok := strings.CutPrefix(line, "provided ")
-		if ok {
-			provided[name] = true
-
-			continue
-		}
-
-		_, ok = strings.CutPrefix(line, "missing ")
+	for line := range strings.SplitSeq(strings.TrimSuffix(r.Stdout, "\n"), "\n") {
+		what, name, ok := strings.Cut(line, " ")
 		require.True(t, ok, "unexpected probe output %q\n%s", line, r)
+
+		switch what {
+		case "has":
+			probe.has[name] = true
+		case "runtime":
+			probe.runtimes = append(probe.runtimes, name)
+		case "provided":
+			probe.provided[name] = true
+			answered++
+		case "missing":
+			answered++
+		default:
+			require.Fail(t, "unexpected probe output", "%q\n%s", line, r)
+		}
 	}
 
-	return provided
+	require.Equal(t, len(names), answered, "one answer per name\n%s", r)
+	require.NotEmpty(t, probe.runtimes, "the probe names no runtime\n%s", r)
+
+	for _, runtime := range probe.runtimes {
+		require.Contains(t, graph.RuntimeNamesForTest(), runtime,
+			"%s is a runtime the lists do not know: find out what it provides and add it", interp)
+	}
+
+	return probe
 }
 
 // TestStandardLibrary_EveryInterpreterProvidesIt: the bundler never looks for
@@ -71,9 +123,61 @@ func TestStandardLibrary_EveryInterpreterProvidesIt(t *testing.T) {
 	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
 		t.Helper()
 
-		provided := testProvided(t, interp, names)
+		probe := testRunProbe(t, interp, names)
 		for _, name := range names {
-			assert.True(t, provided[name], "%s does not provide %q without a file", interp, name)
+			assert.True(t, probe.provided[name], "%s does not provide %q without a file", interp, name)
 		}
+	})
+}
+
+// TestBuiltinModules_MatchEveryInterpreter: the list of modules runtimes have
+// built in decides which requires need no file and which modules of a
+// project the runtime's own module takes precedence over. So on every
+// interpreter present, a listed module must be provided without a file
+// exactly when the list attributes it to one of the runtimes the interpreter
+// is, and every module the interpreter has without a file must be listed with
+// its runtime, so a new built-in cannot go unnoticed.
+func TestBuiltinModules_MatchEveryInterpreter(t *testing.T) {
+	t.Parallel()
+
+	modules := graph.BuiltinModulesForTest()
+	require.NotEmpty(t, modules)
+
+	names := make([]string, 0, len(modules))
+	for name := range modules {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		probe := testRunProbe(t, interp, names)
+		attributed := func(name string) bool {
+			return slices.ContainsFunc(modules[name], func(runtime string) bool {
+				return slices.Contains(probe.runtimes, runtime)
+			})
+		}
+
+		var wrong, missing []string
+
+		for _, name := range names {
+			if probe.provided[name] != attributed(name) {
+				wrong = append(wrong, fmt.Sprintf("%s (listed for %v, provided: %t)",
+					name, modules[name], probe.provided[name]))
+			}
+		}
+
+		for name := range probe.has {
+			if !slices.Contains(graph.StandardLibraryForTest(), name) && !attributed(name) {
+				missing = append(missing, name)
+			}
+		}
+
+		sort.Strings(missing)
+		assert.Empty(t, wrong, "%s, runtimes %v: listed modules attributed wrongly", interp, probe.runtimes)
+		assert.Empty(t, missing, "%s, runtimes %v: modules it has without a file that are not listed for it",
+			interp, probe.runtimes)
 	})
 }

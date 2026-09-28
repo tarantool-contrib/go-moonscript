@@ -246,16 +246,25 @@ func skipHeader(source []byte) []byte {
 // resolveTarget resolves a single require()/--include target against the
 // graph: it records a warning (or returns an *UnresolvedError in strict mode,
 // unless the require is protected) when the target can't be used, dedupes
-// against an already-known module, and
-// otherwise reads the source and returns a newly created module for the
-// caller to enqueue. created is false whenever mod is nil (the target
-// produced only a warning, or deduped into an existing module) and needs no
-// further work.
+// against an already-known module, and otherwise reads the source and returns
+// a newly created module for the caller to enqueue. created is false whenever
+// mod is nil (the target produced only a warning, or deduped into an existing
+// module) and needs no further work. A require of a module that some runtime
+// has built in and the project has no file for is left to the runtime
+// without a word.
 func resolveTarget(
 	g *Graph, resolver Resolver, cfg *config.Config, target requireTarget,
 ) (*Module, bool, error) {
 	result, err := resolver.Resolve(target.Name)
 	if err != nil {
+		// The runtimes that have the module provide it, and the others fail
+		// to load it natively too, so the bundle has nothing to add. An
+		// --include package is a file the user asked for, so it still counts.
+		isRequire := target.File != ""
+		if isRequire && builtinRuntimes(target.Name) != 0 {
+			return nil, false, nil
+		}
+
 		if cfg.Strict && !target.Protected {
 			return nil, false, &UnresolvedError{Module: target.Name, File: target.File, Line: target.Line, Err: err}
 		}

@@ -35,3 +35,21 @@ func TestCLI_StandardLibraryModules(t *testing.T) {
 
 	luatest.Differential(t, spec)
 }
+
+// TestCLI_RuntimeBuiltinWithoutAFile: a module that some runtimes have built
+// in, and the project has no file for, is left to the runtime without a
+// warning, even with --strict. The bundle loads the built-in where the
+// original does and fails like the original elsewhere.
+func TestCLI_RuntimeBuiltinWithoutAFile(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"utf8", "bit", "csv"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			luatest.Differential(t, differential(luatest.Project{
+				"main.lua": "local m = require(\"" + name + "\")\nprint(type(m))\n",
+			}, "", testCLIBundler(nil, "--entry", "main.lua", "--strict")))
+		})
+	}
+}
