@@ -16,7 +16,7 @@ func TestMain(m *testing.M) { luatest.Main(m) }
 
 // transformFlags are the CLI flags of the source transforms.
 func transformFlags() []string {
-	return []string{"--remove-comments"}
+	return []string{"--remove-comments", "--remove-empty-lines"}
 }
 
 // transformCase is a differential test of main.lua bundled with the CLI flags
@@ -135,8 +135,10 @@ func TestCLI_TransformFlagsTakeEffect(t *testing.T) {
 	tests := []struct {
 		flag   string
 		module string
+		gone   string
 	}{
-		{flag: "--remove-comments", module: "local x = 1 \n\n\nprint(x)\n"},
+		{flag: "--remove-comments", module: "local x = 1 \n\n\nprint(x)\n", gone: "MARK"},
+		{flag: "--remove-empty-lines", module: "local x = 1 -- MARK\nprint(x)\n", gone: "\n\nprint(x)"},
 	}
 
 	for _, tt := range tests {
@@ -148,7 +150,7 @@ func TestCLI_TransformFlagsTakeEffect(t *testing.T) {
 			result := luatest.RunCLI(t, dir, nil, "--entry", "main.lua", tt.flag)
 			require.Equal(t, 0, result.ExitCode, result.Stderr)
 			assert.Contains(t, result.Stdout, tt.module, "the module as the transform leaves it")
-			assert.NotContains(t, result.Stdout, "MARK")
+			assert.NotContains(t, result.Stdout, tt.gone)
 		})
 	}
 }

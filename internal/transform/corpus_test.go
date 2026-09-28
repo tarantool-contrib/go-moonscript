@@ -35,6 +35,7 @@ type corpusTransform struct {
 func corpusTransforms() []corpusTransform {
 	return []corpusTransform{
 		{name: "remove-comments", transformer: &transform.CommentTransformerForTest{}, keepsLines: true},
+		{name: "remove-empty-lines", transformer: &transform.EmptyLineTransformerForTest{}, keepsLines: false},
 	}
 }
 

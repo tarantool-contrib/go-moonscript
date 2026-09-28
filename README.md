@@ -127,7 +127,7 @@ A module reachable under several names is registered under each of them with the
 | `--shebang` | Shebang written as the first line of the bundle (e.g. `#!/usr/bin/env lua`) | – |
 | `--no-arg-fix` | Omit the `arg` line, which only acts on PUC Lua 5.1 (`LUA_COMPAT_VARARG`): there it restores the global `arg` inside module code | – |
 | `--remove-comments` | Remove comments, keeping line numbers (see [Source transforms](#source-transforms)) | `false` |
-| `--remove-empty-lines` | Strip empty/whitespace-only lines | `false` |
+| `--remove-empty-lines` | Remove lines that hold only white space, outside strings and comments | `false` |
 | `--minify` | Minify source (subsumes comment / empty-line / shebang removal) | `false` |
 | `--strip-shebang` | Remove shebang lines from input module sources | `false` |
 | `--prefix` | Lua code run before the modules are registered, in a block of its own | – |
@@ -143,7 +143,10 @@ The output is written only once the build has succeeded: a failed build leaves a
 
 ## Source transforms
 
-`--remove-comments` reads each module with a lexer that knows the lexical grammar of Lua 5.1 to 5.5, LuaJIT and Tarantool (long brackets of any level, every string escape, the line breaks `\n`, `\r`, `\r\n` and `\n\r`) and removes every comment, changing nothing else: strings, numbers and names reach the bundle byte for byte. A removed comment keeps the line breaks it contained, so every line keeps its number and `--debug` tracebacks stay exact; where the tokens on both sides would otherwise run together (`local--[[c]]b`), a space stays between them.
+`--remove-comments` and `--remove-empty-lines` read each module with a lexer that knows the lexical grammar of Lua 5.1 to 5.5, LuaJIT and Tarantool (long brackets of any level, every string escape, the line breaks `\n`, `\r`, `\r\n` and `\n\r`), and they never change a token: strings, numbers and names reach the bundle byte for byte.
+
+- `--remove-comments` removes every comment. A removed comment keeps the line breaks it contained, so every line keeps its number and `--debug` tracebacks stay exact; where the tokens on both sides would otherwise run together (`local--[[c]]b`), a space stays between them.
+- `--remove-empty-lines` removes the lines that hold nothing but white space between tokens; a blank line inside a long string or a long comment is part of it and stays. The lines after a removed one move up, so `--debug` line numbers no longer match the source.
 
 ## Configuration
 

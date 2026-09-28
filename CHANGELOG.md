@@ -94,6 +94,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   became `localb`, `1--[[c]]..2` the malformed number `1..2`. A removed
   comment now keeps its line breaks, so `--debug` tracebacks keep their
   line numbers.
+- `--remove-empty-lines` removes only the lines that hold nothing but
+  white space between tokens. It used to delete every blank line,
+  including those inside long strings and long comments, which changed
+  string values, and it dropped the final line break of a module whose
+  last line held only white space.
 - Release archives now include a `darwin_arm64` build for Apple Silicon
   Macs. GoReleaser's build matrix excluded that target under a comment
   claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.
