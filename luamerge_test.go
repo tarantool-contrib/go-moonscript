@@ -52,9 +52,9 @@ func TestBundle(t *testing.T) {
 	assert.Empty(t, res.Warnings)
 
 	out := buf.String()
-	assert.Contains(t, out, `package.preload["main"]`)
 	assert.Contains(t, out, `package.preload["module"]`)
-	assert.Contains(t, out, `return require("main")`)
+	assert.NotContains(t, out, `package.preload["main"]`, "the entry runs as the main chunk, not as a module")
+	assert.True(t, strings.HasSuffix(out, "\nprint(m.greet())\n"), "the bundle ends with the entry's code\n%s", out)
 }
 
 // TestBundle_Files checks that Result.Files lists every embedded source file

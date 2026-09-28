@@ -261,35 +261,72 @@ func TestGraphPackagePrefix(t *testing.T) {
 	require.NoError(t, err, "Build() error")
 
 	// Should have 2 modules.
-	assert.Len(t, g.Modules, 2, "len(g.Modules)")
+	require.Len(t, g.Modules, 2, "len(g.Modules)")
 
-	// Check module names.
-	for _, mod := range g.Modules {
-		// Each module should have at least 2 names (original and prefixed).
-		assert.GreaterOrEqual(t, len(mod.Names), 2, "module %v has too few names", mod.FilePath)
-		// First name for entry should be prefixed.
-		if mod == g.Entry {
-			assert.True(
-				t, strings.HasPrefix(mod.Names[0], "mypkg."),
-				"entry module first name = %q, want prefixed with 'mypkg.'", mod.Names[0],
-			)
-		}
-		// Check that both original and prefixed names exist.
-		hasOriginal := false
-		hasPrefixed := false
+	// a keeps the name main requires it by and gains the prefixed one. Nothing
+	// requires the entry, so it has no name to prefix.
+	assert.Equal(t, []string{"a", "mypkg.a"}, g.ByPath[filepath.Join(tmpDir, "a.lua")].Names)
+	assert.Empty(t, g.Entry.Names, "the entry's names")
+	assert.Equal(t, "main", g.EntryName)
+}
 
-		for _, name := range mod.Names {
-			if name == "main" || name == "a" {
-				hasOriginal = true
-			}
+// entryConfig is a strict configuration with the default path templates that
+// bundles entry, relative to root.
+func entryConfig(root, entry string) config.Config {
+	return config.Config{
+		Entry:    filepath.Join(root, entry),
+		Output:   "",
+		Root:     root,
+		Path:     "?.lua;?/init.lua",
+		Search:   nil,
+		Strict:   true,
+		Debug:    false,
+		Fallback: false,
+		ArgFix:   false,
+		Transform: config.TransformConfig{
+			RemoveComments:   false,
+			RemoveEmptyLines: false,
+			Minify:           false,
+			StripShebang:     false,
+		},
+		Prefix:          "",
+		Suffix:          "",
+		Shebang:         "",
+		PackagePrefix:   "",
+		PackageName:     "",
+		StripPrefix:     "",
+		SkipPackages:    nil,
+		IncludePackages: nil,
+	}
+}
 
-			if strings.HasPrefix(name, "mypkg.") {
-				hasPrefixed = true
-			}
-		}
+// TestBuild_EntryIsNamedOnlyByItsRequires: the program runs the entry, so
+// the entry has a module name only when something requires it by one. The
+// name derived from its path only labels the bundle.
+func TestBuild_EntryIsNamedOnlyByItsRequires(t *testing.T) {
+	t.Parallel()
 
-		assert.True(t, hasOriginal, "module missing original name")
-		assert.True(t, hasPrefixed, "module missing prefixed name")
+	for name, tt := range map[string]struct {
+		aSource string
+		want    []string
+	}{
+		"not required":         {aSource: "return {}\n", want: nil},
+		"required by a module": {aSource: "return require(\"app\")\n", want: []string{"app"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "app.lua"), []byte(requireAScript), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "a.lua"), []byte(tt.aSource), 0o600))
+
+			cfg := entryConfig(dir, "app.lua")
+			g, err := graph.Build(&cfg, parse.New(), resolve.New(cfg.Root, nil, cfg.Path))
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.want, g.Entry.Names)
+			assert.Equal(t, "app", g.EntryName)
+		})
 	}
 }
 
@@ -510,7 +547,9 @@ func testBuild(t *testing.T, files map[string]string) (*graph.Graph, string) {
 	return g, dir
 }
 
-// testModuleNames is every name under which g embeds a module.
+// testModuleNames is every name under which g embeds a module. The entry
+// runs as the bundle's main chunk and has no name unless something requires
+// it.
 func testModuleNames(g *graph.Graph) []string {
 	var names []string
 	for _, mod := range g.Modules {
@@ -541,7 +580,7 @@ print(load_all(require, { "m5" })[1])
 		"m5.lua": `return "m5"`,
 	})
 
-	assert.ElementsMatch(t, []string{"main", "m2", "m3"}, testModuleNames(g), "embedded modules")
+	assert.ElementsMatch(t, []string{"m2", "m3"}, testModuleNames(g), "embedded modules")
 
 	mainPath := filepath.Join(dir, "main.lua")
 	assert.Equal(t, []graph.Warning{
@@ -582,6 +621,6 @@ func TestBuild_CachedGlobalRequire(t *testing.T) {
 		"x.lua":    "return {}\n",
 	})
 
-	assert.ElementsMatch(t, []string{"main", "x"}, testModuleNames(g), "embedded modules")
+	assert.ElementsMatch(t, []string{"x"}, testModuleNames(g), "embedded modules")
 	assert.Empty(t, g.Warnings)
 }

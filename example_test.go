@@ -11,7 +11,8 @@ import (
 
 // Example bundles a tiny two-file Lua project into a single self-contained
 // script. Each module is registered into Lua's package.preload table, and the
-// bundle ends by requiring the entry module.
+// bundle ends with the entry's own code, which runs as the bundle's main
+// chunk.
 func Example() {
 	dir, err := os.MkdirTemp("", "luamerge-example-*")
 	if err != nil {
@@ -45,9 +46,9 @@ func Example() {
 
 	fmt.Println("warnings:", len(res.Warnings))
 	fmt.Println("greet preloaded:", bytes.Contains(buf.Bytes(), []byte(`package.preload["greet"]`)))
-	fmt.Println("requires entry:", bytes.Contains(buf.Bytes(), []byte(`return require("main")`)))
+	fmt.Println("ends with the entry:", bytes.HasSuffix(buf.Bytes(), []byte("\nprint(greet.hello())\n")))
 	// Output:
 	// warnings: 0
 	// greet preloaded: true
-	// requires entry: true
+	// ends with the entry: true
 }

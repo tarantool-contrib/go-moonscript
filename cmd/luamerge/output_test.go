@@ -13,6 +13,11 @@ import (
 // platform. The guards that need file modes, devices and symlinks are in
 // output_unix_test.go.
 
+// entryCode is the last line of the entry of writeProject's project. The
+// entry's code comes last in a bundle, so a file that holds it holds a whole
+// bundle.
+const entryCode = "print(m.greet())\n"
+
 // entryArgs points the CLI at the project in dir; the caller adds --output.
 func entryArgs(dir string) []string {
 	return []string{"--entry", filepath.Join(dir, "main.lua"), "--root", dir}
@@ -126,7 +131,7 @@ func TestCLI_FailedBuildKeepsPreviousOutput(t *testing.T) {
 	require.Equal(t, 0, code, "first build: %s", stderr)
 
 	good := readFile(t, out)
-	require.Contains(t, good, `return require("main")`)
+	require.Contains(t, good, entryCode)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"), []byte("require(\"missing\")\n"), 0o600))
 
 	// Act.
@@ -173,7 +178,7 @@ func TestCLI_OutputCreatesDirectories(t *testing.T) {
 
 	// Assert.
 	require.Equal(t, 0, code, stderr)
-	assert.Contains(t, readFile(t, out), `return require("main")`)
+	assert.Contains(t, readFile(t, out), entryCode)
 }
 
 // TestCLI_StdoutEmptyOnFailedBuild checks that with --output - a failed build

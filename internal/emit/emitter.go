@@ -3,6 +3,7 @@
 package emit
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -12,11 +13,18 @@ import (
 	"github.com/tarantool/go-luamerge/internal/transform"
 )
 
+// errNoEntry is returned by Emit for a graph without an entry.
+var errNoEntry = errors.New("the graph has no entry")
+
+// errNoName is returned by Emit for a module other than the entry that has no
+// name to register it under.
+var errNoName = errors.New("the module has no name")
+
 // Options controls how the bundle is rendered.
 type Options struct {
 	// Prefix is Lua code inserted before the modules.
 	Prefix string
-	// Suffix is Lua code appended after the entry require.
+	// Suffix is Lua code run after the entry.
 	Suffix string
 	// Debug emits each module via load(source, "@path") so runtime errors
 	// report the original file name and line numbers instead of offsets into
@@ -38,7 +46,16 @@ type Options struct {
 
 // Emit renders the graph g as a single amalgamated Lua bundle to w, applying
 // transforms to each module's source in order before it is embedded.
+//
+// Every module is registered under its names. The entry is not a module: its
+// code is the bundle's main chunk. Only when something requires the entry by
+// name is it also registered, as a module of its own, like the separate
+// instance a require of the entry's file loads natively.
 func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts Options) error {
+	if g.Entry == nil {
+		return errNoEntry
+	}
+
 	prefix, suffix := opts.Prefix, opts.Suffix
 	// Ensure prefix ends with newline if present.
 	if prefix != "" && !strings.HasSuffix(prefix, "\n") {
@@ -50,39 +67,40 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 		suffix += "\n"
 	}
 
-	// Sort modules by primary name. Copy the slice header first so we don't
-	// reorder the caller's graph as a side effect.
-	modules := make([]*graph.Module, len(g.Modules))
-	copy(modules, g.Modules)
-	sort.Slice(modules, func(i, j int) bool {
-		nameI := primaryName(modules[i])
-		nameJ := primaryName(modules[j])
+	entrySource, err := transformSource(g.Entry, transforms)
+	if err != nil {
+		return err
+	}
 
-		return nameI < nameJ
-	})
+	// Collect the modules to register, sorted by primary name. The caller's
+	// graph is not reordered.
+	modules := make([]*graph.Module, 0, len(g.Modules))
+
+	for _, mod := range g.Modules {
+		if len(mod.Names) > 0 {
+			modules = append(modules, mod)
+		} else if mod != g.Entry {
+			return fmt.Errorf("emit %s: %w", mod.FilePath, errNoName)
+		}
+	}
+
+	sort.Slice(modules, func(i, j int) bool { return modules[i].Names[0] < modules[j].Names[0] })
 
 	// Build module data for the template.
 	moduleDataList := make([]moduleData, 0, len(modules))
 	for _, mod := range modules {
-		source := mod.Source
-		for _, t := range transforms {
-			transformed, err := t.Transform(source)
+		source := entrySource
+		if mod != g.Entry {
+			source, err = transformSource(mod, transforms)
 			if err != nil {
-				return fmt.Errorf("transform %s: %w", mod.FilePath, err)
+				return err
 			}
-
-			source = transformed
-		}
-
-		var aliases []string
-		if len(mod.Names) > 1 {
-			aliases = mod.Names[1:]
 		}
 
 		data := moduleData{
-			PrimaryName: primaryName(mod),
-			AliasNames:  aliases,
-			Source:      string(source),
+			PrimaryName: mod.Names[0],
+			AliasNames:  mod.Names[1:],
+			Source:      source,
 			Path:        mod.FilePath,
 		}
 		moduleDataList = append(moduleDataList, data)
@@ -93,9 +111,9 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 		regTable = "postload"
 	}
 
-	entryName := primaryName(g.Entry)
 	data := templateData{
-		EntryName: entryName,
+		EntryName: g.EntryName,
+		Entry:     entryData{Source: entrySource, Path: g.Entry.FilePath},
 		Modules:   moduleDataList,
 		Prefix:    prefix,
 		Suffix:    suffix,
@@ -106,7 +124,7 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 		RegTable:  regTable,
 	}
 
-	err := outputTemplate.Execute(w, data)
+	err = outputTemplate.Execute(w, data)
 	if err != nil {
 		return fmt.Errorf("execute output template: %w", err)
 	}
@@ -114,12 +132,17 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 	return nil
 }
 
-// primaryName returns the canonical require name for mod, i.e. the first
-// entry in its Names list.
-func primaryName(mod *graph.Module) string {
-	if len(mod.Names) == 0 {
-		return ""
+// transformSource returns the source of mod with transforms applied in order.
+func transformSource(mod *graph.Module, transforms []transform.Transformer) (string, error) {
+	source := mod.Source
+	for _, t := range transforms {
+		transformed, err := t.Transform(source)
+		if err != nil {
+			return "", fmt.Errorf("transform %s: %w", mod.FilePath, err)
+		}
+
+		source = transformed
 	}
 
-	return mod.Names[0]
+	return string(source), nil
 }

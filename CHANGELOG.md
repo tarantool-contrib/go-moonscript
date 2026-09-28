@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Go 1.26.5 is the minimum supported version, as required by the updated
   dependencies. The update also makes the module build with Go 1.27, where the
   previous `go-json-experiment/json` failed to compile.
+- The entry's code is the bundle's main chunk: a bundle no longer ends with
+  `return require("<entry>")`, and the entry is registered in
+  `package.preload` only when a module requires it by name, as a separate
+  instance, the way a `require` of the entry's file loads one natively.
 
 ### Fixed
 
@@ -85,5 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `a/b/c.lua`, as they load natively. Such names used to be taken as they
   were: `../foo` pulled in a file from outside the project, `.foo` embedded
   `.foo.lua`, and `a/b.c` was not found.
+- The entry of a bundle runs like a script: its `...` holds the command-line
+  arguments, all of its return values are kept, the "am I the main script?"
+  idiom (`pcall(debug.getlocal, 4, 1)`) works, and the entry is not cached in
+  `package.loaded`, so a second bundle whose entry has the same name, or a
+  second `dofile` of the same bundle, runs its entry again.
+- A library bundled into `mylib.lua` from an entry named `mylib` can be loaded
+  with `require("mylib")` on Lua 5.1, LuaJIT and Tarantool.
+- With `--fallback`, a `main.lua` in the working directory no longer replaces
+  the bundle's entry.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

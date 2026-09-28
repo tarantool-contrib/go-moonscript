@@ -59,9 +59,9 @@ func TestCLI_BasicStdout(t *testing.T) {
 	dir := writeProject(t)
 	out, _, code := runCLI(t, base(dir)...)
 	assert.Equal(t, 0, code)
-	assert.Contains(t, out, `package.preload["main"]`)
 	assert.Contains(t, out, `package.preload["module"]`)
-	assert.Contains(t, out, `return require("main")`)
+	assert.NotContains(t, out, `package.preload["main"]`, "the entry runs as the main chunk, not as a module")
+	assert.True(t, strings.HasSuffix(out, "\nprint(m.greet())\n"), "the bundle ends with the entry's code\n%s", out)
 }
 
 func TestCLI_Debug(t *testing.T) {
@@ -164,14 +164,16 @@ func TestCLI_PrefixSuffix(t *testing.T) {
 	dir := writeProject(t)
 	out, _, code := runCLI(t, append(base(dir),
 		"--prefix", "print('PREFIX_MARK')", "--suffix", "print('SUFFIX_MARK')")...)
-	assert.Equal(t, 0, code)
+	require.Equal(t, 0, code)
 
-	pre := strings.Index(out, "PREFIX_MARK")
-	req := strings.Index(out, `return require("main")`)
-	suf := strings.Index(out, "SUFFIX_MARK")
-	require.True(t, pre >= 0 && req >= 0 && suf >= 0, "all markers present")
-	assert.Less(t, pre, req, "prefix before the entry require")
-	assert.Less(t, req, suf, "suffix after the entry require")
+	// The prefix runs before the program and the suffix after it.
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		r := luatest.RunBundle(t, interp, []byte(out), luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0})
+		assert.Equal(t, 0, r.ExitCode, "%s", r)
+		assert.Equal(t, "PREFIX_MARK\nhi\nSUFFIX_MARK\n", r.Stdout, "%s", r)
+	})
 }
 
 func TestCLI_PackagePrefix(t *testing.T) {
@@ -180,8 +182,8 @@ func TestCLI_PackagePrefix(t *testing.T) {
 	dir := writeProject(t)
 	out, _, code := runCLI(t, append(base(dir), "--package-prefix", "mypkg")...)
 	assert.Equal(t, 0, code)
-	assert.Contains(t, out, `package.preload["mypkg.main"]`, "--package-prefix should namespace module names")
-	assert.Contains(t, out, `return require("mypkg.main")`)
+	assert.Contains(t, out, `package.preload["mypkg.module"]`, "--package-prefix should namespace module names")
+	assert.NotContains(t, out, `package.preload["mypkg.main"]`, "the entry is not a module")
 }
 
 func TestCLI_PackageName(t *testing.T) {
@@ -232,5 +234,6 @@ func TestCLI_OutputToFile(t *testing.T) {
 	// #nosec G304 -- outFile is a path this test just created under t.TempDir().
 	data, err := os.ReadFile(outFile)
 	require.NoError(t, err)
-	assert.Contains(t, string(data), `return require("main")`)
+	assert.True(t, strings.HasSuffix(string(data), "\nprint(m.greet())\n"),
+		"the file holds the bundle, which ends with the entry's code\n%s", data)
 }

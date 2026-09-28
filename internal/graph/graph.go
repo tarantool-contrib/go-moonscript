@@ -104,8 +104,11 @@ var ErrNameConflict = errors.New("module name conflict")
 // along with every require-string that resolves to it.
 type Module struct {
 	ID       int
-	FilePath string              // canonical absolute path.
-	Names    []string            // all require-strings that map to this file.
+	FilePath string // canonical absolute path.
+	// Names are all require-strings that map to this file. The entry has
+	// only the names something requires it by, usually none: the program
+	// runs it, no require() loads it.
+	Names    []string
 	Source   []byte              // raw file contents.
 	Requires []parse.RequireInfo // parsed require edges.
 }
@@ -113,10 +116,14 @@ type Module struct {
 // Graph is the full set of Lua modules reachable from an entry file, along
 // with any non-fatal warnings collected while resolving them.
 type Graph struct {
-	Modules  []*Module          // all discovered modules.
-	ByPath   map[string]*Module // keyed by canonical filepath.
-	Entry    *Module
-	Warnings []Warning
+	Modules []*Module          // all discovered modules.
+	ByPath  map[string]*Module // keyed by canonical filepath.
+	Entry   *Module
+	// EntryName names the entry after its path relative to the root, e.g.
+	// "main" for main.lua. It only labels the bundle: nothing registers the
+	// entry under it.
+	EntryName string
+	Warnings  []Warning
 }
 
 func moduleNameFromPath(root, filePath string) string {
@@ -180,20 +187,6 @@ func applyPackagePrefix(g *Graph, packagePrefix string) {
 		}
 
 		mod.Names = prefixedNames
-	}
-	// For entry module, ensure a prefixed name is first so final require uses it.
-	if g.Entry != nil && len(g.Entry.Names) > 0 {
-		// Find a prefixed name.
-		for i, name := range g.Entry.Names {
-			if strings.HasPrefix(name, packagePrefix+".") {
-				// Move this prefixed name to the front.
-				if i != 0 {
-					g.Entry.Names = append([]string{name}, append(g.Entry.Names[:i], g.Entry.Names[i+1:]...)...)
-				}
-
-				break
-			}
-		}
 	}
 }
 
@@ -404,9 +397,9 @@ func processModuleRequires(
 
 // checkNames returns an error wrapping ErrNameConflict when a module name is
 // registered for two different files. A name resolves the same wherever it
-// is required from, so this guards against a resolver breaking that, and
-// against a name given to the entry by its path that another file resolves
-// to.
+// is required from, so this guards against a resolver breaking that. Names
+// holds only names something requires a file by: the name derived from the
+// entry's path (EntryName) registers nothing, so another file may have it.
 func checkNames(g *Graph) error {
 	owners := make(map[string]*Module)
 
@@ -448,16 +441,19 @@ func Build(cfg *config.Config, parser parse.Parser, resolver Resolver) (*Graph, 
 	entrySource = transform.StripShebang(entrySource)
 
 	g := &Graph{
-		Modules:  nil,
-		ByPath:   make(map[string]*Module),
-		Entry:    nil,
-		Warnings: nil,
+		Modules:   nil,
+		ByPath:    make(map[string]*Module),
+		Entry:     nil,
+		EntryName: moduleNameFromPath(cfg.Root, entryPath),
+		Warnings:  nil,
 	}
 
+	// The entry gets a name only when something requires it (resolveTarget
+	// adds it then): the bundle runs the entry as its main chunk.
 	entryMod := &Module{
 		ID:       0,
 		FilePath: entryPath,
-		Names:    []string{moduleNameFromPath(cfg.Root, entryPath)},
+		Names:    nil,
 		Source:   entrySource,
 		Requires: nil,
 	}

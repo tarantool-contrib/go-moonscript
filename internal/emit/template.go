@@ -19,6 +19,13 @@ import (
 // In fallback mode (.Fallback) loaders go into package.postload and a searcher
 // is appended last, so an on-disk copy on package.path takes precedence and the
 // embedded module is used only as a fallback.
+//
+// The entry is not a module: its code comes last, at the top level of the
+// bundle, so it runs as the main chunk, the way the interpreter runs a script.
+// Its `...` is the chunk's own (the command-line arguments), its return values
+// are the chunk's, the stack above it is a script's, and it is neither looked
+// up through the searchers nor cached in package.loaded. In debug mode its
+// loaded chunk is called with the bundle's `...` instead.
 const templateText = `{{if .Shebang}}{{.Shebang}}
 {{end}}-- Amalgamated by luamerge
 -- Entry: {{.EntryName}}
@@ -47,9 +54,9 @@ package.{{$.RegTable}}[{{q $primary}}] = function(...)
 {{else}}{{indent .Source 0}}{{end}}end
 end
 {{range .AliasNames}}package.{{$.RegTable}}[{{q .}}] = function(...) return require({{q $primary}}) end
-{{end}}{{end}}return require({{q .EntryName}}){{if .Suffix}}
-{{.Suffix}}{{end}}
-`
+{{end}}{{end}}{{with .Entry}}{{if $.Debug}}return assert((loadstring or load)({{bracket .Source}},
+  {{q (chunkname .Path)}}))(...)
+{{else}}{{indent .Source 0}}{{end}}{{end}}{{.Suffix}}`
 
 // indent prefixes every line of source with `spaces` spaces and normalizes the
 // trailing newline. Module bodies are emitted with spaces=0 (verbatim, column 0)
@@ -143,6 +150,7 @@ var outputTemplate = template.Must(
 
 type templateData struct {
 	EntryName string
+	Entry     entryData
 	Modules   []moduleData
 	Prefix    string
 	Suffix    string
@@ -153,6 +161,12 @@ type templateData struct {
 	// RegTable is the package field loaders are registered in: "preload"
 	// normally, "postload" in fallback mode.
 	RegTable string
+}
+
+// entryData is the entry: its source and, for debug mode, its path.
+type entryData struct {
+	Source string
+	Path   string
 }
 
 type moduleData struct {

@@ -87,7 +87,7 @@ func TestCLI_OutputMode(t *testing.T) {
 
 			// Assert.
 			assert.Equal(t, fmt.Sprintf("%04o", mode), perm(t, out))
-			assert.Contains(t, readFile(t, out), `return require("main")`)
+			assert.Contains(t, readFile(t, out), entryCode)
 			assert.Equal(t, []string{"app"}, dirNames(t, outDir), "the build left files behind")
 		})
 	}
@@ -200,7 +200,7 @@ func TestCLI_OutputSymlink(t *testing.T) {
 			dest, err := os.Readlink(link)
 			require.NoError(t, err, "the output path must still be a symlink")
 			assert.Equal(t, "bundle-v1.lua", dest)
-			assert.Contains(t, readFile(t, target), `return require("main")`)
+			assert.Contains(t, readFile(t, target), entryCode)
 			assert.Equal(t, []string{"bundle-v1.lua", "bundle.lua"}, dirNames(t, outDir),
 				"the build left files behind")
 		})

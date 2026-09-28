@@ -1,0 +1,223 @@
+package integration_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tarantool/go-luamerge/internal/luatest"
+)
+
+// The tests in this file are about what a bundle does when it runs: each one
+// bundles a project with the CLI and compares the bundle with the original
+// program on every interpreter.
+
+// runOptions are the default run options.
+func runOptions() luatest.RunOptions {
+	return luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0}
+}
+
+// cliCase is a differential test of project, bundled by the CLI with
+// `--entry main.lua` and args.
+func cliCase(project luatest.Project, args ...string) luatest.Case {
+	return luatest.Case{
+		Project: project,
+		Dir:     "",
+		Entry:   "",
+		Bundle:  luatest.CLI(append([]string{"--entry", "main.lua"}, args...)...),
+		Args:    nil,
+		Options: runOptions(),
+		Check:   nil,
+	}
+}
+
+// bundleProject writes project into a fresh directory and bundles it with the
+// CLI and args.
+func bundleProject(tb testing.TB, project luatest.Project, args ...string) []byte {
+	tb.Helper()
+
+	return luatest.CLI(args...)(tb, luatest.WriteProject(tb, project))
+}
+
+// TestBundle_EntrySeesCommandLineArguments: the entry's `...` holds the
+// command-line arguments, as in a script, not the arguments require passes
+// to a loader.
+func TestBundle_EntrySeesCommandLineArguments(t *testing.T) {
+	t.Parallel()
+
+	spec := cliCase(luatest.Project{
+		"main.lua": `print("n=" .. select("#", ...), ...)` + "\n",
+	})
+	spec.Args = []string{"x", "y"}
+
+	luatest.Differential(t, spec)
+}
+
+// TestBundle_EntryIsTheMainScript: the common "am I the main script?" idiom
+// counts stack levels, so it only works when the entry runs at the depth of
+// a script.
+func TestBundle_EntryIsTheMainScript(t *testing.T) {
+	t.Parallel()
+
+	luatest.Differential(t, cliCase(luatest.Project{
+		"main.lua": "local M = {}\n" +
+			"function M.main() print(\"running main\") end\n" +
+			"if not pcall(debug.getlocal, 4, 1) then M.main() end\n" +
+			"return M\n",
+	}))
+}
+
+// TestBundle_EntryReturnsEveryValue: a program run with dofile returns
+// whatever its main chunk returns, nil in the middle included.
+func TestBundle_EntryReturnsEveryValue(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	host := "local function show(...) print(select(\"#\", ...), ...) end\n" +
+		"show(dofile(arg[1]))\n"
+	entry := "return 1, nil, 3\n"
+	bundle := bundleProject(t, luatest.Project{"main.lua": entry}, "--entry", "main.lua")
+
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		dir := luatest.WriteProject(t, luatest.Project{
+			"host.lua":   host,
+			"main.lua":   entry,
+			"bundle.lua": string(bundle),
+		})
+		orig := luatest.Run(t, interp, dir, runOptions(), "host.lua", "main.lua")
+		bun := luatest.Run(t, interp, dir, runOptions(), "host.lua", "bundle.lua")
+		require.Equal(t, "3\t1\tnil\t3\n", orig.Stdout, "the original\n%s", orig)
+		luatest.AssertSame(t, orig, bun)
+	})
+}
+
+// TestBundle_TwoBundlesInOneProcess: bundles run with dofile in one process
+// each run their own entry, however their entries are named, and running the
+// same bundle twice runs its entry twice, as it does for the original.
+func TestBundle_TwoBundlesInOneProcess(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	one := bundleProject(t, luatest.Project{"main.lua": "print(\"one\")\n"}, "--entry", "main.lua")
+	two := bundleProject(t, luatest.Project{"main.lua": "print(\"two\")\n"}, "--entry", "main.lua")
+
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		dir := luatest.WriteProject(t, luatest.Project{
+			"one/main.lua": "print(\"one\")\n",
+			"two/main.lua": "print(\"two\")\n",
+			"one.lua":      string(one),
+			"two.lua":      string(two),
+			"originals.lua": "dofile(\"one/main.lua\")\ndofile(\"two/main.lua\")\n" +
+				"dofile(\"one/main.lua\")\n",
+			"bundles.lua": "dofile(\"one.lua\")\ndofile(\"two.lua\")\ndofile(\"one.lua\")\n",
+		})
+		orig := luatest.Run(t, interp, dir, runOptions(), "originals.lua")
+		bun := luatest.Run(t, interp, dir, runOptions(), "bundles.lua")
+		require.Equal(t, "one\ntwo\none\n", orig.Stdout, "the originals\n%s", orig)
+		luatest.AssertSame(t, orig, bun)
+	})
+}
+
+// TestBundle_LibraryRequiredByItsOwnName: a library bundled into mylib.lua
+// from an entry named mylib is loaded by require("mylib"): the bundle must
+// not require its own name while that require is still running.
+func TestBundle_LibraryRequiredByItsOwnName(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	library := "return { hello = function() return \"HELLO\" end }\n"
+	bundle := bundleProject(t, luatest.Project{"mylib.lua": library}, "--entry", "mylib.lua")
+	program := "print(require(\"mylib\").hello())\n"
+
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		origDir := luatest.WriteProject(t, luatest.Project{"main.lua": program, "mylib.lua": library})
+		bundleDir := luatest.WriteProject(t, luatest.Project{"main.lua": program, "mylib.lua": string(bundle)})
+		orig := luatest.Run(t, interp, origDir, runOptions(), "main.lua")
+		bun := luatest.Run(t, interp, bundleDir, runOptions(), "main.lua")
+		require.Equal(t, "HELLO\n", orig.Stdout, "the original\n%s", orig)
+		luatest.AssertSame(t, orig, bun)
+	})
+}
+
+// TestBundle_FallbackRunsTheEmbeddedEntry: with --fallback an on-disk module
+// may replace an embedded one, but the program is the bundle's own entry
+// even when the working directory has a main.lua.
+func TestBundle_FallbackRunsTheEmbeddedEntry(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	bundle := bundleProject(t, luatest.Project{"src/main.lua": "print(\"the real app\")\n"},
+		"--entry", "src/main.lua", "--fallback")
+
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		dir := luatest.WriteProject(t, luatest.Project{
+			"main.lua": "print(\"some unrelated main.lua\")\n",
+			"app.lua":  string(bundle),
+		})
+		r := luatest.Run(t, interp, dir, runOptions(), "app.lua")
+		assert.Equal(t, 0, r.ExitCode, "%s", r)
+		assert.Equal(t, "the real app\n", r.Stdout, "%s", r)
+	})
+}
+
+// TestBundle_EntryRequiredByAModule: a module that requires the entry by name
+// loads a second instance of it, as natively, while the program itself still
+// runs the entry as its main script.
+func TestBundle_EntryRequiredByAModule(t *testing.T) {
+	t.Parallel()
+
+	luatest.Differential(t, cliCase(luatest.Project{
+		"main.lua": "RUNS = (RUNS or 0) + 1\n" +
+			"local M = { value = 42 }\n" +
+			"function M.run() print(require(\"lib\").describe(), \"runs=\" .. RUNS) end\n" +
+			"if not pcall(debug.getlocal, 4, 1) then M.run() end\n" +
+			"return M\n",
+		"lib.lua": "local main = require(\"main\")\n" +
+			"return { describe = function() return \"main.value = \" .. main.value end }\n",
+	}))
+}
+
+// TestBundle_EntryPathNameIsFree: the name derived from the entry's path only
+// labels the bundle, so another file may be the module of that name: here
+// require("main") finds src/main.lua, natively and in the bundle.
+func TestBundle_EntryPathNameIsFree(t *testing.T) {
+	t.Parallel()
+
+	spec := cliCase(luatest.Project{
+		"main.lua":     "print(\"entry\")\nprint((require(\"main\")))\n",
+		"src/main.lua": "return \"src/main.lua\"\n",
+	}, "--path", "src/?.lua")
+	spec.Options.LuaPath = "./src/?.lua"
+	spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+		t.Helper()
+
+		if strings.HasPrefix(orig.Interp.Version, "Tarantool") {
+			// Tarantool searches the directory of the script before
+			// package.path, so natively require("main") loads the entry
+			// itself there. The bundle's preload comes first.
+			assert.Equal(t, 0, bundle.ExitCode, "the bundle\n%s", bundle)
+			assert.Equal(t, "entry\nsrc/main.lua\n", bundle.Stdout, "the bundle\n%s", bundle)
+
+			return
+		}
+
+		require.Equal(t, "entry\nsrc/main.lua\n", orig.Stdout, "the original\n%s", orig)
+		luatest.AssertSame(t, orig, bundle)
+	}
+
+	luatest.Differential(t, spec)
+}

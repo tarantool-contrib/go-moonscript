@@ -613,7 +613,7 @@ func TestRunCLI_ScrubsEnvironment(t *testing.T) {
 
 	r := luatest.RunCLI(t, dir, nil, "--entry", "main.lua")
 	assert.Equal(t, 0, r.ExitCode, "LUAMERGE_STRICT leaked into the CLI\n%s", r.Stderr)
-	assert.Contains(t, r.Stdout, "package.preload[\"main\"]")
+	assert.Contains(t, r.Stdout, "require(\"missing\")", "the bundle carries the entry's code")
 
 	r = luatest.RunCLI(t, dir, []string{"LUAMERGE_STRICT=true"}, "--entry", "main.lua")
 	assert.NotEqual(t, 0, r.ExitCode, "LUAMERGE_STRICT passed explicitly must make the build strict")
@@ -627,8 +627,7 @@ func TestDifferential_WithCLI(t *testing.T) {
 
 	luatest.Differential(t, luatest.Case{
 		Project: luatest.Project{
-			// The arguments are read from the global arg: the entry's own ...
-			// differs in a bundle, where the entry runs as a required module.
+			// The arguments are read from the global arg.
 			"main.lua": "local m = require(\"m\")\nprint(m.hello(arg[1], arg[2]))\n",
 			"m.lua":    "return { hello = function(a, b) return \"hi \" .. a .. \",\" .. b end }\n",
 		},
