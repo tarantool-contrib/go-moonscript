@@ -133,9 +133,10 @@ func TestBundle_RuntimeBuiltinWithoutAFile(t *testing.T) {
 		"utf8",          // Lua 5.3 and later, Tarantool.
 		"bit",           // LuaJIT, Tarantool.
 		"table.new",     // LuaJIT, Tarantool.
-		"string.buffer", // LuaJIT.
+		"string.buffer", // LuaJIT since 2021.
 		"thread.exdata", // OpenResty's LuaJIT.
 		"csv",           // Tarantool.
+		"config",        // Tarantool 3.
 		"zlib",          // Tarantool's static build.
 	} {
 		t.Run(name, func(t *testing.T) {

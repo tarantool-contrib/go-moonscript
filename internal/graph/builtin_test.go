@@ -20,7 +20,9 @@ import (
 //   - "has <module>": every module in package.loaded and package.preload at
 //     startup, and in Tarantool's table of built-in modules;
 //   - "runtime <runtime>": the runtimes the interpreter is, named as the
-//     graph package names them;
+//     graph package names them. A LuaJIT of 2021 or later is told from the
+//     2017 release by its string buffer library, since their versions can
+//     read the same, so string.buffer itself is not checked by this;
 //   - "provided <module>" or "missing <module>", for each of names: whether
 //     require finds it with every searcher but the first removed. That leaves
 //     require nothing but package.loaded and the first searcher: the preload
@@ -43,11 +45,13 @@ list(package.preload)
 list(type(loaders) == "table" and loaders.builtin or {})
 if rawget(_G, "_TARANTOOL") then
   print("runtime Tarantool")
+  if tonumber(_TARANTOOL:match("^%d+")) >= 3 then print("runtime Tarantool 3") end
   if package.loaded.tarantool.build.linking == "static" then
     print("runtime Tarantool's static build")
   end
 elseif rawget(_G, "jit") then
   print("runtime LuaJIT")
+  if package.preload["string.buffer"] ~= nil then print("runtime LuaJIT since 2021") end
   if jit.prngstate ~= nil then print("runtime OpenResty's LuaJIT") end
 else
   print("runtime " .. _VERSION)
@@ -136,7 +140,9 @@ func TestStandardLibrary_EveryInterpreterProvidesIt(t *testing.T) {
 // interpreter present, a listed module must be provided without a file
 // exactly when the list attributes it to one of the runtimes the interpreter
 // is, and every module the interpreter has without a file must be listed with
-// its runtime, so a new built-in cannot go unnoticed.
+// its runtime, so a new built-in cannot go unnoticed. The one exception is
+// Tarantool 3, whose list is the union of what its releases have: a release
+// may lack a module listed for it.
 func TestBuiltinModules_MatchEveryInterpreter(t *testing.T) {
 	t.Parallel()
 
@@ -150,27 +156,44 @@ func TestBuiltinModules_MatchEveryInterpreter(t *testing.T) {
 
 	sort.Strings(names)
 
+	// partial are the runtimes a release of which may lack a module listed
+	// for them.
+	partial := []string{"Tarantool 3"}
+
 	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
 		t.Helper()
 
 		probe := testRunProbe(t, interp, names)
-		attributed := func(name string) bool {
-			return slices.ContainsFunc(modules[name], func(runtime string) bool {
-				return slices.Contains(probe.runtimes, runtime)
-			})
+		// listedFor returns the runtimes the interpreter is that name is
+		// listed for.
+		listedFor := func(name string) []string {
+			var runtimes []string
+
+			for _, runtime := range modules[name] {
+				if slices.Contains(probe.runtimes, runtime) {
+					runtimes = append(runtimes, runtime)
+				}
+			}
+
+			return runtimes
 		}
+		isPartial := func(runtime string) bool { return slices.Contains(partial, runtime) }
 
 		var wrong, missing []string
 
 		for _, name := range names {
-			if probe.provided[name] != attributed(name) {
-				wrong = append(wrong, fmt.Sprintf("%s (listed for %v, provided: %t)",
-					name, modules[name], probe.provided[name]))
+			runtimes := listedFor(name)
+			provided := probe.provided[name]
+			// The runtimes whose every release must have the module.
+			strict := slices.DeleteFunc(slices.Clone(runtimes), isPartial)
+
+			if (provided && len(runtimes) == 0) || (!provided && len(strict) > 0) {
+				wrong = append(wrong, fmt.Sprintf("%s (listed for %v, provided: %t)", name, modules[name], provided))
 			}
 		}
 
 		for name := range probe.has {
-			if !slices.Contains(graph.StandardLibraryForTest(), name) && !attributed(name) {
+			if !slices.Contains(graph.StandardLibraryForTest(), name) && len(listedFor(name)) == 0 {
 				missing = append(missing, name)
 			}
 		}

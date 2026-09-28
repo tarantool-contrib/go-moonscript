@@ -275,8 +275,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `require` of a module that runtimes provide built in, such as `utf8`,
   LuaJIT's `bit` or Tarantool's `csv`, failed `--strict` as an unresolved
   require when the project had no file for it. Such a require is now left to
-  the runtime without a warning, from a list of the modules that PUC Lua,
-  LuaJIT, OpenResty's LuaJIT and Tarantool have without a file.
+  the runtime without a warning, from a list of the modules that PUC Lua
+  5.2 to 5.5, LuaJIT, OpenResty's LuaJIT and Tarantool 2.11 to 3.9 have
+  without a file.
 - A module of the project named like a module a runtime has built in, such
   as a `csv.lua` on Tarantool, was registered in `package.preload`, which
   Tarantool consults before its own built-in modules: the bundle loaded the
