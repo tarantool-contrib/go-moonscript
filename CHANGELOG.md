@@ -29,4 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against a JSON Schema, so an unknown key or a wrong-typed value in
   `luamerge.yaml` is reported as an error rather than silently ignored.
 
+### Changed
+
+- Go 1.26.5 is the minimum supported version, as required by the updated
+  dependencies. The update also makes the module build with Go 1.27, where the
+  previous `go-json-experiment/json` failed to compile.
+
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

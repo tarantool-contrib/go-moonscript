@@ -1,6 +1,6 @@
 GOTEST := go test
 COVERAGE_FILE := coverage.out
-GOLANGCI_LINT_VERSION := v2.11.4
+GOLANGCI_LINT_VERSION := v2.14.0
 
 .PHONY: codespell
 codespell:

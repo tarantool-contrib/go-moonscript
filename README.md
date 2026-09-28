@@ -21,7 +21,7 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 
 ### Requirements
 
-- Go 1.25 or later (to build the CLI or import the library).
+- Go 1.26.5 or later (to build the CLI or import the library).
 - A Lua interpreter (5.1–5.4 or LuaJIT) to *run* the produced bundle. It is not
   required to build one.
 

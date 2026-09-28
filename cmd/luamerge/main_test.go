@@ -58,8 +58,7 @@ func runCLI(t *testing.T, args ...string) (string, string, int) {
 	code := 0
 
 	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			code = ee.ExitCode()
 		} else {
 			t.Fatalf("run %v: %v", args, err)

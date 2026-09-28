@@ -20,9 +20,11 @@ linters:
     - cyclop # Cyclomatic complexity is an abstract metric that leads to strange
       # linter behaviour; the parser/graph code is naturally branchy.
     - dupl # A lot of near-identical table-driven test cases and transform steps.
+    - exhaustruct # Deprecated; using exhaustruct_v5 instead.
     - funlen # Function length limits are too restrictive for the emit templates.
     - gocognit # Cognitive complexity is too restrictive for the same reason.
     - godox # Allow TODO comments for unimplemented functionality.
+    - gomodguard # Deprecated; using gomodguard_v2 instead.
     - ireturn # Returning interfaces is intentional for the parser/transform APIs.
     - maintidx # Maintainability index is an opaque metric with no clear action.
     - nlreturn # Duplicated by wsl_v5.return check.
@@ -31,10 +33,13 @@ linters:
   exclusions:
     generated: lax
     rules:
+      # Table-driven tests repeat their input literals on purpose; hoisting them
+      # into constants would make each case harder to read on its own.
       - path: _test.go
         linters:
           - err113
           - funlen
+          - goconst
           - wrapcheck
       # The emit templates contain verbatim Lua (`end` on consecutive lines),
       # which dupword misreads as an English duplicate-word typo.
