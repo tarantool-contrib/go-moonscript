@@ -639,3 +639,95 @@ func TestBundle_FallbackKeepsRegisteredLoaders(t *testing.T) {
 		assert.Equal(t, "codec impl: registered first\n", r.Stdout, "%s", r)
 	})
 }
+
+// strictGlobals makes reading or assigning an undeclared global raise, as
+// strict modes such as Tarantool's `strict` or Lua's etc/strict.lua do.
+const strictGlobals = "setmetatable(_G, {\n" +
+	"  __index = function(_, name) error(\"undeclared global '\" .. tostring(name) .. \"'\", 2) end,\n" +
+	"  __newindex = function(_, name)\n" +
+	"    error(\"assignment to undeclared global '\" .. tostring(name) .. \"'\", 2)\n" +
+	"  end,\n" +
+	"})\n"
+
+// TestBundle_StrictGlobals: a program that turns strict mode on before its
+// first require works in a bundle whose prefix does the same, in every mode:
+// the bundle's own code reads no global that does not exist.
+func TestBundle_StrictGlobals(t *testing.T) {
+	t.Parallel()
+
+	variants := map[string][]string{
+		"fallback": {"--fallback"},
+		"suffix":   {"--suffix", "-- a suffix that does nothing"},
+	}
+	maps.Copy(variants, modes())
+
+	for name, flags := range variants {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			luatest.Differential(t, cliCase(luatest.Project{
+				"main.lua": strictGlobals + "local m = require(\"m\")\nprint(m.v)\n",
+				"m.lua":    "return { v = \"ok\" }\n",
+			}, append([]string{"--prefix", strictGlobals}, flags...)...))
+		})
+	}
+}
+
+// TestBundle_StrictModeExample is the README's example of startup and
+// teardown code: Tarantool's strict mode turned on in the prefix, a message
+// in the suffix. It runs where require("strict") works natively.
+func TestBundle_StrictModeExample(t *testing.T) {
+	t.Parallel()
+
+	spec := cliCase(luatest.Project{
+		"main.lua": "require(\"strict\").on()\nlocal m = require(\"m\")\nprint(m.v)\n",
+		"m.lua":    "return { v = \"ok\" }\n",
+	}, "--prefix", "require(\"strict\").on()", "--suffix", "print(\"bundle loaded\")")
+	spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+		t.Helper()
+
+		if orig.ExitCode != 0 && strings.Contains(orig.Message(), "module 'strict' not found") {
+			t.Skipf("%s has no strict module", orig.Interp.Name)
+		}
+
+		require.Equal(t, "ok\n", orig.Stdout, "the original\n%s", orig)
+		assert.Equal(t, orig.Stdout+"bundle loaded\n", bundle.Stdout, "the bundle\n%s", bundle)
+		luatest.AssertSameExitCode(t, orig, bundle)
+		luatest.AssertSameStderr(t, orig, bundle)
+	}
+
+	luatest.Differential(t, spec)
+}
+
+// TestBundle_ArgLineUnderStrictGlobals: the arg line reads the global arg on
+// PUC Lua 5.1, where an embedding application may run the program with no
+// global arg and a strict _G, in which reading a missing global raises.
+func TestBundle_ArgLineUnderStrictGlobals(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	project := luatest.Project{
+		"main.lua": "print((require(\"m\")))\n",
+		"m.lua":    "return \"m loaded\"\n",
+	}
+	host := "local program = arg[1]\narg = nil\n" + strictGlobals + "dofile(program)\n"
+	variants := map[string][]string{"suffix": {"--suffix", "-- a suffix that does nothing"}}
+	maps.Copy(variants, modes())
+
+	for name, flags := range variants {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			bundle := bundleProject(t, project, append([]string{"--entry", "main.lua"}, flags...)...)
+
+			luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+				t.Helper()
+
+				orig, bun := hostRuns(t, interp, host, project, bundle)
+				require.Equal(t, "m loaded\n", orig.Stdout, "the original\n%s", orig)
+				luatest.AssertSame(t, orig, bun)
+			})
+		})
+	}
+}

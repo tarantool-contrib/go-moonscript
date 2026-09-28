@@ -10,7 +10,7 @@ import (
 // following the lua-amalg pattern:
 //
 //	do
-//	local _ENV = _ENV
+//	local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
 //	local __luamerge_loader = function(...)
 //	if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 //	<the module's source, verbatim>
@@ -20,9 +20,11 @@ import (
 //
 // Why each piece is there:
 //
-//   - `local _ENV = _ENV` lives in the enclosing `do` block, not in the
-//     function, so that it is the loader's first upvalue, which Lua 5.2's
-//     `module` relies on.
+//   - The `_ENV` local lives in the enclosing `do` block, not in the function,
+//     so that it is the loader's first upvalue, which Lua 5.2's `module`
+//     relies on. On Lua 5.1, LuaJIT and Tarantool `_ENV` is an ordinary name,
+//     and reading it reads an undeclared global, which strict mode rejects:
+//     there the `and` stops before the read and the local is nil.
 //   - The body is the whole block of the function and sees no local of the
 //     wrapper: `local f = function` brings f into scope only after the
 //     function. A module's globals stay globals whatever their names, and
@@ -74,13 +76,17 @@ import (
 //
 // The "function" and "load" templates render the code of a module or of the
 // entry (a codeData) as a function in default mode and as a loaded chunk in
-// debug mode.
-const templateText = `{{define "function" -}}
+// debug mode; "env" is the `_ENV` local around a function. Like the rest of
+// the bundle's own code, they read no global that may not exist (loadstring
+// is gone from Lua 5.2 on), so the bundle works under a strict _G.
+const templateText = `{{define "env" -}}
+local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
+{{end}}{{define "function" -}}
 function(...)
 {{if .ArgFix}}if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 {{end}}{{indent .Source 0}}end
 {{- end}}{{define "load" -}}
-assert((loadstring or load)({{bracket .Source}}, {{q (chunkname .Path)}}))
+assert((rawget(_G, "loadstring") or load)({{bracket .Source}}, {{q (chunkname .Path)}}))
 {{- end}}{{if .Shebang}}{{.Shebang}}
 {{end}}-- Amalgamated by luamerge
 -- Entry: {{.EntryName}}
@@ -100,8 +106,7 @@ do
 end
 
 {{end}}{{range .Modules}}{{$primary := .PrimaryName}}do
-local _ENV = _ENV
-local __luamerge_loader = {{if $.Debug -}}
+{{template "env"}}local __luamerge_loader = {{if $.Debug -}}
 function(...) return {{template "load" .Code}}(...) end
 {{- else}}{{template "function" .Code}}{{end}}
 if package.{{$.RegTable}}[{{q $primary}}] == nil then package.{{$.RegTable}}[{{q $primary}}] = __luamerge_loader end
@@ -111,8 +116,7 @@ end
 end
 {{end}}{{end}}{{with .Entry}}{{if $.Suffix}}local __luamerge_main = {{if $.Debug -}}
 {{template "load" .}}{{else}}(function()
-local _ENV = _ENV
-return {{template "function" .}}
+{{template "env"}}return {{template "function" .}}
 end)(){{end}}
 local __luamerge_n, __luamerge_results = (function(...) return select("#", ...), { ... } end)(__luamerge_main(...))
 do

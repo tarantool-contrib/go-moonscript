@@ -125,5 +125,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   natively wins over the file on `package.path`, and LuaJIT's built-in
   `table.new`. A module is now registered only under a name whose slot is
   still empty, in `package.postload` with `--fallback` as well.
+- A bundle failed under strict mode, such as the README's own
+  `--prefix 'require("strict").on()'` on Tarantool: every module began with
+  `local _ENV = _ENV`, which reads an undeclared global on Lua 5.1, LuaJIT
+  and Tarantool, and `--debug` read the global `loadstring`, which Lua 5.2
+  and later do not have. The bundle's own code now reads no global that may
+  be missing.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

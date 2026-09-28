@@ -71,8 +71,8 @@ func TestCLI_Debug(t *testing.T) {
 	plain, _, _ := runCLI(t, base(dir)...)
 	dbg, _, code := runCLI(t, append(base(dir), "--debug")...)
 	assert.Equal(t, 0, code)
-	assert.NotContains(t, plain, "loadstring or load", "plain output should not use load()")
-	assert.Contains(t, dbg, "(loadstring or load)", "--debug should load() module bodies")
+	assert.NotContains(t, plain, "loadstring", "plain output should not use load()")
+	assert.Contains(t, dbg, `(rawget(_G, "loadstring") or load)`, "--debug should load() module bodies")
 	assert.Contains(t, dbg, "module.lua", "--debug chunk name should reference the source file")
 }
 
