@@ -22,7 +22,9 @@ var ErrNoEntry = errors.New("luamerge: entry not set")
 var ErrModuleNotFound = resolve.ErrModuleNotFound
 
 // UnresolvedError is returned by Bundle in strict mode when a required module
-// cannot be found. Recover it with errors.As, or test the cause with
+// cannot be found, unless it is required in protected mode
+// (`pcall(require, "x")`, `xpcall(require, h, "x")`), which stays a
+// WarnUnresolved warning. Recover it with errors.As, or test the cause with
 // errors.Is(err, ErrModuleNotFound).
 type UnresolvedError = graph.UnresolvedError
 
@@ -61,7 +63,8 @@ type Warning = graph.Warning
 type Result struct {
 	// Warnings collected while resolving the dependency graph. Non-fatal; the
 	// bundle is still produced. In strict mode an unresolved require is a hard
-	// error instead and Bundle returns it.
+	// error instead and Bundle returns it, unless the require is called in
+	// protected mode, by pcall or xpcall.
 	Warnings []Warning
 	// Files holds the absolute path of every source file embedded in the
 	// bundle: the entry first, then the modules in the order they were

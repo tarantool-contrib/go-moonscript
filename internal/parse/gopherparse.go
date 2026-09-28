@@ -243,15 +243,16 @@ func walkCall(w *requireWalker, call *ast.FuncCallExpr) {
 // `_G.require(...)`, `pcall(require, ...)` or `xpcall(require, handler, ...)`.
 // The call is static when the first argument require gets is a string literal
 // (require ignores the others) and dynamic otherwise, including when it gets
-// none. It returns the expression that stands for require in the call, or nil
-// when call does not call require.
+// none; it is protected when pcall or xpcall calls require. It returns the
+// expression that stands for require in the call, or nil when call does not
+// call require.
 func checkRequireCall(w *requireWalker, call *ast.FuncCallExpr) ast.Expr {
-	requireExpr, args := requireCallArgs(call)
+	requireExpr, args, protected := requireCallArgs(call)
 	if requireExpr == nil {
 		return nil
 	}
 
-	info := RequireInfo{Name: "", Line: call.Line(), Static: false, Indirect: ""}
+	info := RequireInfo{Name: "", Line: call.Line(), Static: false, Protected: protected, Indirect: ""}
 
 	if len(args) > 0 {
 		if str, ok := args[0].(*ast.StringExpr); ok {
@@ -264,26 +265,26 @@ func checkRequireCall(w *requireWalker, call *ast.FuncCallExpr) ast.Expr {
 	return requireExpr
 }
 
-// requireCallArgs returns the expression that stands for require in call and
-// the arguments require is called with, or nil and nil when call does not call
-// require.
-func requireCallArgs(call *ast.FuncCallExpr) (ast.Expr, []ast.Expr) {
+// requireCallArgs returns the expression that stands for require in call, the
+// arguments require is called with and whether pcall or xpcall calls it in
+// protected mode; or nil, nil and false when call does not call require.
+func requireCallArgs(call *ast.FuncCallExpr) (ast.Expr, []ast.Expr, bool) {
 	switch {
 	case isRequire(call.Func):
-		return call.Func, call.Args
+		return call.Func, call.Args, false
 	case callsGlobal(call, "pcall") && len(call.Args) > 0 && isRequire(call.Args[0]):
-		return call.Args[0], call.Args[1:]
+		return call.Args[0], call.Args[1:], true
 	case callsGlobal(call, "xpcall") && len(call.Args) > 0 && isRequire(call.Args[0]):
 		// The call xpcall(f, handler, ...) calls f(...). PUC Lua 5.1's xpcall
 		// passes f no arguments, so there the call fails natively; embedding
 		// the module changes nothing about that.
 		if len(call.Args) <= xpcallArgsStart {
-			return call.Args[0], nil
+			return call.Args[0], nil, true
 		}
 
-		return call.Args[0], call.Args[xpcallArgsStart:]
+		return call.Args[0], call.Args[xpcallArgsStart:], true
 	default:
-		return nil, nil
+		return nil, nil, false
 	}
 }
 
@@ -327,10 +328,11 @@ func callsGlobal(call *ast.FuncCallExpr, name string) bool {
 // than a call; how says what is done with it.
 func recordIndirect(w *requireWalker, ref ast.Expr, how string) {
 	w.requires = append(w.requires, RequireInfo{
-		Name:     "",
-		Line:     ref.Line(),
-		Static:   false,
-		Indirect: requireRef(ref) + " " + how,
+		Name:      "",
+		Line:      ref.Line(),
+		Static:    false,
+		Protected: false,
+		Indirect:  requireRef(ref) + " " + how,
 	})
 }
 

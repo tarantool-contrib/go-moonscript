@@ -21,14 +21,14 @@ func TestParseStaticRequire(t *testing.T) {
 			name:   "simple require",
 			source: `require("foo")`,
 			expected: []parse.RequireInfo{
-				{Name: "foo", Line: 1, Static: true, Indirect: ""},
+				{Name: "foo", Line: 1, Static: true, Protected: false, Indirect: ""},
 			},
 		},
 		{
 			name:   "require with dots",
 			source: `require("foo.bar")`,
 			expected: []parse.RequireInfo{
-				{Name: "foo.bar", Line: 1, Static: true, Indirect: ""},
+				{Name: "foo.bar", Line: 1, Static: true, Protected: false, Indirect: ""},
 			},
 		},
 		{
@@ -36,22 +36,22 @@ func TestParseStaticRequire(t *testing.T) {
 			source: `local a = require("a")
 local b = require("b")`,
 			expected: []parse.RequireInfo{
-				{Name: "a", Line: 1, Static: true, Indirect: ""},
-				{Name: "b", Line: 2, Static: true, Indirect: ""},
+				{Name: "a", Line: 1, Static: true, Protected: false, Indirect: ""},
+				{Name: "b", Line: 2, Static: true, Protected: false, Indirect: ""},
 			},
 		},
 		{
 			name:   "pcall require",
 			source: `pcall(require, "module")`,
 			expected: []parse.RequireInfo{
-				{Name: "module", Line: 1, Static: true, Indirect: ""},
+				{Name: "module", Line: 1, Static: true, Protected: true, Indirect: ""},
 			},
 		},
 		{
 			name:   "dynamic require",
 			source: `require(var)`,
 			expected: []parse.RequireInfo{
-				{Name: "", Line: 1, Static: false, Indirect: ""},
+				{Name: "", Line: 1, Static: false, Protected: false, Indirect: ""},
 			},
 		},
 		{
@@ -60,7 +60,7 @@ local b = require("b")`,
   require("inner")
 end`,
 			expected: []parse.RequireInfo{
-				{Name: "inner", Line: 2, Static: true, Indirect: ""},
+				{Name: "inner", Line: 2, Static: true, Protected: false, Indirect: ""},
 			},
 		},
 		{
@@ -78,13 +78,7 @@ end`,
 
 			got, err := parser.Parse([]byte(tt.source), "test.lua")
 			require.NoError(t, err, "Parse() error")
-			require.Len(t, got, len(tt.expected), "Parse() requires count")
-
-			for i := range got {
-				assert.Equal(t, tt.expected[i].Name, got[i].Name, "require %d: Name", i)
-				assert.Equal(t, tt.expected[i].Line, got[i].Line, "require %d: Line", i)
-				assert.Equal(t, tt.expected[i].Static, got[i].Static, "require %d: Static", i)
-			}
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
@@ -102,19 +96,27 @@ func testParse(t *testing.T, source string) []parse.RequireInfo {
 // testStatic is the RequireInfo of a require call with the literal name on
 // line.
 func testStatic(name string, line int) parse.RequireInfo {
-	return parse.RequireInfo{Name: name, Line: line, Static: true, Indirect: ""}
+	return parse.RequireInfo{Name: name, Line: line, Static: true, Protected: false, Indirect: ""}
 }
 
 // testDynamic is the RequireInfo of a require call on line whose module name
 // is not a literal.
 func testDynamic(line int) parse.RequireInfo {
-	return parse.RequireInfo{Name: "", Line: line, Static: false, Indirect: ""}
+	return parse.RequireInfo{Name: "", Line: line, Static: false, Protected: false, Indirect: ""}
+}
+
+// testProtected is info as a call of require in protected mode, through
+// pcall or xpcall.
+func testProtected(info parse.RequireInfo) parse.RequireInfo {
+	info.Protected = true
+
+	return info
 }
 
 // testIndirect is the RequireInfo of a use of require on line that is not a
 // call; use says how require is used.
 func testIndirect(use string, line int) parse.RequireInfo {
-	return parse.RequireInfo{Name: "", Line: line, Static: false, Indirect: use}
+	return parse.RequireInfo{Name: "", Line: line, Static: false, Protected: false, Indirect: use}
 }
 
 // TestParse_RequireAsReceiver: a require whose result is the receiver of a
@@ -208,22 +210,22 @@ func TestParse_IndirectRequire(t *testing.T) {
 		{
 			name:   "xpcall",
 			source: `print(select(2, xpcall(require, debug.traceback, "m3")))`,
-			want:   []parse.RequireInfo{testStatic("m3", 1)},
+			want:   []parse.RequireInfo{testProtected(testStatic("m3", 1))},
 		},
 		{
 			name:   "xpcall with extra arguments",
 			source: `xpcall(require, handler, "x", "ignored")`,
-			want:   []parse.RequireInfo{testStatic("x", 1)},
+			want:   []parse.RequireInfo{testProtected(testStatic("x", 1))},
 		},
 		{
 			name:   "pcall of _G.require",
 			source: `pcall(_G.require, "x")`,
-			want:   []parse.RequireInfo{testStatic("x", 1)},
+			want:   []parse.RequireInfo{testProtected(testStatic("x", 1))},
 		},
 		{
 			name:   "xpcall of _G.require",
 			source: `xpcall(_G.require, handler, "x")`,
-			want:   []parse.RequireInfo{testStatic("x", 1)},
+			want:   []parse.RequireInfo{testProtected(testStatic("x", 1))},
 		},
 		{
 			name:   "extra arguments are ignored",
@@ -243,7 +245,7 @@ func TestParse_IndirectRequire(t *testing.T) {
 		{
 			name:   "require cached among other globals",
 			source: "local pcall, require = pcall, require\npcall(require, \"x\")\n",
-			want:   []parse.RequireInfo{testStatic("x", 2)},
+			want:   []parse.RequireInfo{testProtected(testStatic("x", 2))},
 		},
 		{
 			name:   "global require assigned to itself",
@@ -260,12 +262,12 @@ func TestParse_IndirectRequire(t *testing.T) {
 		{
 			name:   "pcall with a variable",
 			source: "local name = \"m4\"\nprint(select(2, pcall(require, name)))\n",
-			want:   []parse.RequireInfo{testDynamic(2)},
+			want:   []parse.RequireInfo{testProtected(testDynamic(2))},
 		},
 		{
 			name:   "xpcall with a variable",
 			source: `xpcall(require, handler, name)`,
-			want:   []parse.RequireInfo{testDynamic(1)},
+			want:   []parse.RequireInfo{testProtected(testDynamic(1))},
 		},
 		{
 			name:   "_G.require with a variable",
@@ -275,17 +277,17 @@ func TestParse_IndirectRequire(t *testing.T) {
 		{
 			name:   "pcall without a module name",
 			source: `pcall(require)`,
-			want:   []parse.RequireInfo{testDynamic(1)},
+			want:   []parse.RequireInfo{testProtected(testDynamic(1))},
 		},
 		{
 			name:   "xpcall without a module name",
 			source: `xpcall(require, handler)`,
-			want:   []parse.RequireInfo{testDynamic(1)},
+			want:   []parse.RequireInfo{testProtected(testDynamic(1))},
 		},
 		{
 			name:   "xpcall without a handler",
 			source: `xpcall(require)`,
-			want:   []parse.RequireInfo{testDynamic(1)},
+			want:   []parse.RequireInfo{testProtected(testDynamic(1))},
 		},
 
 		// Uses of require that are not calls: indirect.
@@ -389,6 +391,59 @@ func TestParse_IndirectRequire(t *testing.T) {
 		{
 			name:   "global require rebound",
 			source: `require = function(name) end`,
+			want:   []parse.RequireInfo{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, testParse(t, tt.source))
+		})
+	}
+}
+
+// TestParse_ProtectedRequire: a require called in protected mode by pcall or
+// xpcall is marked, since the program survives the module's absence. Only
+// the forms in which pcall or xpcall itself calls require count: a require
+// called before pcall runs, or inside a function pcall calls, is not marked.
+func TestParse_ProtectedRequire(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		source string
+		want   []parse.RequireInfo
+	}{
+		{
+			name:   "pcall",
+			source: `local ok, cjson = pcall(require, "cjson")`,
+			want:   []parse.RequireInfo{testProtected(testStatic("cjson", 1))},
+		},
+		{
+			name:   "xpcall",
+			source: `local ok, cjson = xpcall(require, debug.traceback, "cjson")`,
+			want:   []parse.RequireInfo{testProtected(testStatic("cjson", 1))},
+		},
+		{
+			name:   "pcall in a condition",
+			source: "if not pcall(require, \"cjson\") then\n  print(\"fallback\")\nend\n",
+			want:   []parse.RequireInfo{testProtected(testStatic("cjson", 1))},
+		},
+		{
+			name:   "require called before pcall",
+			source: `pcall(require("cjson"))`,
+			want:   []parse.RequireInfo{testStatic("cjson", 1)},
+		},
+		{
+			name:   "require inside the function pcall calls",
+			source: `pcall(function() return require("cjson") end)`,
+			want:   []parse.RequireInfo{testStatic("cjson", 1)},
+		},
+		{
+			name:   "pcall of another function",
+			source: `pcall(dofile, "cjson")`,
 			want:   []parse.RequireInfo{},
 		},
 	}

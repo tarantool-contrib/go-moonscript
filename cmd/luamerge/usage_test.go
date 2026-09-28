@@ -158,7 +158,8 @@ func TestCLI_WarningPosition(t *testing.T) {
 			"require(name)\n" + // Dynamic.
 			"require(\"cjson\")\n" + // Skipped.
 			"require(\"missing\")\n" + // Unresolved.
-			"local r = require\n", // Indirect, where require is used other than by a call.
+			"local r = require\n" + // Indirect, where require is used other than by a call.
+			"local ok = pcall(require, \"optional\")\n", // Unresolved, in protected mode.
 	})
 	mainLua, err := filepath.EvalSymlinks(filepath.Join(dir, "main.lua"))
 	require.NoError(t, err)
@@ -198,6 +199,7 @@ func TestCLI_WarningPosition(t *testing.T) {
 		"warning: " + mainLua + ":4: unresolved require \"missing\": ",
 		"warning: include package \"nothere\" not found: ",
 		"warning: include package \"debug\" skipped: ",
+		"warning: " + mainLua + ":6: unresolved require \"optional\" in protected mode (pcall or xpcall): ",
 	} {
 		found := slices.ContainsFunc(warnings, func(warning string) bool { return strings.HasPrefix(warning, want) })
 		assert.True(t, found, "no warning starts with %q:\n%s", want, stderr)

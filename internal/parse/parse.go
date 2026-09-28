@@ -7,6 +7,11 @@ type RequireInfo struct {
 	Name   string // The literal module name, e.g. "foo.bar"; "" unless Static.
 	Line   int    // Source line number.
 	Static bool   // True if the first argument require gets is a string literal.
+	// Protected is true for a call of require in protected mode:
+	// `pcall(require, "x")` or `xpcall(require, handler, "x")`. Its caller
+	// gets false and the error instead of the error being raised, so the
+	// program is written to run on without the module.
+	Protected bool
 	// Indirect, when not empty, marks require aliased, stored or passed on as
 	// a value, so the calls made through it cannot be seen. It says how, e.g.
 	// `require aliased as local "r"`.

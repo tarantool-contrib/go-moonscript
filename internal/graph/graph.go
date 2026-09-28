@@ -25,8 +25,10 @@ const (
 	WarnDynamicRequire WarningKind = iota
 	// WarnSkipped is a require() excluded by a skip pattern.
 	WarnSkipped
-	// WarnUnresolved is a require() whose module could not be found (non-strict
-	// mode; strict mode returns an *UnresolvedError instead).
+	// WarnUnresolved is a require() whose module could not be found. Strict
+	// mode returns an *UnresolvedError instead, unless the require is called
+	// in protected mode (`pcall(require, "x")`, `xpcall(require, h, "x")`):
+	// the program is written to run on without that module.
 	WarnUnresolved
 	// WarnCModule is a require() that resolved to a C module (.so/.dll).
 	WarnCModule
@@ -73,7 +75,8 @@ type Warning struct {
 }
 
 // UnresolvedError is returned by Build (in strict mode) when a required module
-// cannot be located. It wraps resolve.ErrModuleNotFound, so both
+// cannot be located, unless it is required in protected mode (see
+// WarnUnresolved). It wraps resolve.ErrModuleNotFound, so both
 // errors.As(&UnresolvedError{}) and errors.Is(resolve.ErrModuleNotFound) work.
 type UnresolvedError struct {
 	Module string
@@ -197,14 +200,21 @@ type requireTarget struct {
 	Name string
 	File string // "" for --include packages.
 	Line int
+	// Protected is set for a require called in protected mode, by pcall or
+	// xpcall: the program runs on without the module, so not finding it is
+	// no error even in strict mode.
+	Protected bool
 }
 
 func unresolvedWarningMessage(target requireTarget, err error) string {
-	if target.File == "" {
+	switch {
+	case target.File == "":
 		return fmt.Sprintf("include package %q not found: %v", target.Name, err)
+	case target.Protected:
+		return fmt.Sprintf("unresolved require %q in protected mode (pcall or xpcall): %v", target.Name, err)
+	default:
+		return fmt.Sprintf("unresolved require %q: %v", target.Name, err)
 	}
-
-	return fmt.Sprintf("unresolved require %q: %v", target.Name, err)
 }
 
 func addModuleName(mod *Module, name string) {
@@ -234,8 +244,9 @@ func skipHeader(source []byte) []byte {
 }
 
 // resolveTarget resolves a single require()/--include target against the
-// graph: it records a warning (or returns an *UnresolvedError in strict mode)
-// when the target can't be used, dedupes against an already-known module, and
+// graph: it records a warning (or returns an *UnresolvedError in strict mode,
+// unless the require is protected) when the target can't be used, dedupes
+// against an already-known module, and
 // otherwise reads the source and returns a newly created module for the
 // caller to enqueue. created is false whenever mod is nil (the target
 // produced only a warning, or deduped into an existing module) and needs no
@@ -245,7 +256,7 @@ func resolveTarget(
 ) (*Module, bool, error) {
 	result, err := resolver.Resolve(target.Name)
 	if err != nil {
-		if cfg.Strict {
+		if cfg.Strict && !target.Protected {
 			return nil, false, &UnresolvedError{Module: target.Name, File: target.File, Line: target.Line, Err: err}
 		}
 
@@ -343,7 +354,7 @@ func processIncludePackages(
 			continue
 		}
 
-		target := requireTarget{Name: incName, File: "", Line: 0}
+		target := requireTarget{Name: incName, File: "", Line: 0, Protected: false}
 
 		newMod, created, err := resolveTarget(g, resolver, cfg, target)
 		if err != nil {
@@ -413,7 +424,7 @@ func processModuleRequires(
 			continue
 		}
 
-		target := requireTarget{Name: req.Name, File: mod.FilePath, Line: req.Line}
+		target := requireTarget{Name: req.Name, File: mod.FilePath, Line: req.Line, Protected: req.Protected}
 
 		newMod, created, err := resolveTarget(g, resolver, cfg, target)
 		if err != nil {

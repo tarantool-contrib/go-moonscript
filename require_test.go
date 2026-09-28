@@ -121,6 +121,62 @@ func TestBundle_StandardLibraryModules(t *testing.T) {
 	}
 }
 
+// TestBundle_ProtectedRequireIsOptional: a module required in protected mode,
+// `pcall(require, "cjson")`, is an optional dependency: the program is
+// written to run on without it. When the module is not found, that is a
+// warning even in strict mode, and the require is left to runtime.
+func TestBundle_ProtectedRequireIsOptional(t *testing.T) {
+	t.Parallel()
+
+	for name, call := range map[string]string{
+		"pcall":  `pcall(require, "cjson")`,
+		"xpcall": `xpcall(require, debug.traceback, "cjson")`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := testResolvedDir(t)
+			main := filepath.Join(dir, "main.lua")
+			require.NoError(t, os.WriteFile(main,
+				[]byte("local ok = "+call+"\nprint(ok and \"cjson\" or \"fallback\")\n"), 0o600))
+
+			res, out := testStrictBundle(t, dir)
+			require.Len(t, res.Warnings, 1)
+
+			w := res.Warnings[0]
+			assert.Equal(t, luamerge.WarnUnresolved, w.Kind)
+			assert.Equal(t, "cjson", w.Module)
+			assert.Equal(t, main, w.File)
+			assert.Equal(t, 1, w.Line)
+			assert.Contains(t, w.Message, "protected", "the warning says why strict mode lets it pass")
+			assert.NotContains(t, out, `["cjson"]`)
+		})
+	}
+}
+
+// TestBundle_UnprotectedRequireStaysStrict: a module the program also
+// requires without protection is not optional, so strict mode still fails
+// on it.
+func TestBundle_UnprotectedRequireStaysStrict(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"),
+		[]byte("local ok = pcall(require, \"cjson\")\nlocal cjson = require(\"cjson\")\n"), 0o600))
+
+	opts := luamerge.DefaultOptions()
+	opts.Entry = filepath.Join(dir, "main.lua")
+	opts.Root = dir
+	opts.Strict = true
+
+	_, err := luamerge.Bundle(opts, &bytes.Buffer{})
+
+	var ue *luamerge.UnresolvedError
+	require.ErrorAs(t, err, &ue)
+	assert.Equal(t, "cjson", ue.Module)
+	assert.Equal(t, 2, ue.Line, "the unprotected require")
+}
+
 // TestBundle_GlobalTableAndXpcallRequire: `_G.require("x")`,
 // `_ENV.require("x")` and `xpcall(require, handler, "x")` name their module
 // literally, so it is embedded.

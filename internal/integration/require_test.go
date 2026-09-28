@@ -184,3 +184,29 @@ print(load_all(require, { "m5" })[1])
 		})
 	}
 }
+
+// TestCLI_ProtectedRequireOfAMissingModule: the optional-dependency idiom
+// `pcall(require, "cjson")` runs fine without cjson, so --strict must not
+// fail on it: the require is reported and left to runtime, and the bundle
+// takes the fallback branch as the original does. PUC Lua 5.1's xpcall
+// passes no arguments to require, which fails there natively too.
+func TestCLI_ProtectedRequireOfAMissingModule(t *testing.T) {
+	t.Parallel()
+
+	spec := differential(luatest.Project{
+		"main.lua": "local ok = pcall(require, \"cjson\")\nprint(\"pcall: \" .. (ok and \"cjson\" or \"fallback\"))\n" +
+			"ok = xpcall(require, function() return \"handled\" end, \"cjson\")\n" +
+			"print(\"xpcall: \" .. (ok and \"cjson\" or \"fallback\"))\n",
+	}, "", testCLIBundler([]string{
+		`main\.lua:1: unresolved require "cjson" in protected mode \(pcall or xpcall\): `,
+		`main\.lua:3: unresolved require "cjson" in protected mode \(pcall or xpcall\): `,
+	}, "--entry", "main.lua", "--strict"))
+	spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+		t.Helper()
+
+		require.Equal(t, "pcall: fallback\nxpcall: fallback\n", orig.Stdout, "the original\n%s", orig)
+		luatest.AssertSame(t, orig, bundle)
+	}
+
+	luatest.Differential(t, spec)
+}

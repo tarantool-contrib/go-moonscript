@@ -123,7 +123,7 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 | `--search` | Additional search directories, relative to the working directory, not the root (comma-separated or repeated) | – |
 | `--skip` | Exclude packages (exact name, or `name.*` for prefix; comma-separated or repeated) | – |
 | `--include` | Force-include modules not reached from the entry (exact names; comma-separated or repeated) | – |
-| `--strict` | Treat unresolved static requires as errors | `false` |
+| `--strict` | Treat unresolved static requires as errors, except those in `pcall`/`xpcall` | `false` |
 | `--debug` | Load modules via `load(src, "@file")` so tracebacks keep the original `file:line` | `false` |
 | `--fallback` | Register modules in `package.postload` behind a searcher so on-disk modules win | `false` |
 | `--shebang` | Shebang written as the first line of the bundle (e.g. `#!/usr/bin/env lua`) | – |
@@ -322,7 +322,7 @@ luamerge --entry src/main.lua \
 luamerge --entry src/main.lua --strict --output /dev/null
 ```
 
-With `--strict`, an unresolved static `require()` is an error (non-zero exit) instead of a warning.
+With `--strict`, an unresolved static `require()` is an error (non-zero exit) instead of a warning. A `require` called in protected mode — `pcall(require, "cjson")` or `xpcall(require, handler, "cjson")`, the idiom of an optional dependency — stays a warning: the program is written to run on without that module, and the bundle leaves the require to runtime. Only these literal forms count; a `require` inside a function that `pcall` calls does not.
 
 ### Search additional directories
 

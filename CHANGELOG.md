@@ -262,5 +262,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   such a file. The standard library (`_G`, `coroutine`, `debug`, `io`,
   `math`, `os`, `package`, `string`, `table`) is now never resolved, embedded
   or reported; `--include` of one of these names is skipped with a warning.
+- The optional-dependency idiom `pcall(require, "cjson")` failed `--strict`
+  when the module was not in the project, although the program is written
+  to run on without it. A `require` called in protected mode, by `pcall` or
+  `xpcall`, that cannot be resolved is now a warning even with `--strict`,
+  and the bundle leaves it to runtime; an unprotected `require` of the same
+  module still fails the build.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
