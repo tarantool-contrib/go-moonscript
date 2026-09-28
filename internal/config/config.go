@@ -302,9 +302,9 @@ func (c *Config) ResolveRoot() error {
 		return errEntryNotSet
 	}
 
-	entry, err := realPath(c.Entry)
+	entry, err := realPath("entry", c.Entry)
 	if err != nil {
-		return fmt.Errorf("entry: %w", err)
+		return err
 	}
 
 	c.Entry = entry
@@ -315,9 +315,9 @@ func (c *Config) ResolveRoot() error {
 		return nil
 	}
 
-	root, err := realPath(c.Root)
+	root, err := realPath("root", c.Root)
 	if err != nil {
-		return fmt.Errorf("root: %w", err)
+		return err
 	}
 
 	c.Root = root
@@ -326,16 +326,15 @@ func (c *Config) ResolveRoot() error {
 }
 
 // realPath returns path made absolute, with every symbolic link in it
-// resolved. The file must exist.
-func realPath(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("absolute path: %w", err)
+// resolved; the file must exist. what names the path in an error.
+func realPath(what, path string) (string, error) {
+	resolved, err := filepath.Abs(path)
+	if err == nil {
+		resolved, err = filepath.EvalSymlinks(resolved)
 	}
 
-	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return "", fmt.Errorf("resolve symbolic links: %w", err)
+		return "", fmt.Errorf("%s: %w", what, err)
 	}
 
 	return resolved, nil

@@ -139,7 +139,6 @@ func run() int {
 
 	// CLI flags override the loaded config, but only when actually set — an
 	// unset flag must not clobber a value coming from the file or environment.
-
 	stringOverrides := []struct {
 		name string
 		val  string
