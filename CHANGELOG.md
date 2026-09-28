@@ -235,6 +235,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outside the root is named after its file.
 - A `--root` that does not exist is an error. The build used to go on and
   find no module under it.
+- `--package-name` overrides a `package_name` from `luamerge.yaml` or the
+  environment, and `Options.PackageName` set after `LoadOptions` is the one
+  `Bundle` uses. The configured name was applied to `strip_prefix` and
+  `package_prefix` while loading, so a later one was ignored.
 - A positional argument is an error, with exit status 2 like an unknown flag.
   Positional arguments were ignored, so `--minify false` minified (a boolean
   flag takes its value only after `=`: `--minify=false`), and

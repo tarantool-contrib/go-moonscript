@@ -135,7 +135,7 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 | `--suffix` | Lua code run after the entry, in a block of its own | – |
 | `--package-prefix` | Add a prefix to all module names in output (e.g. `mypkg` → `require("mypkg.module")`) | – |
 | `--strip-prefix` | Strip a prefix from module names during resolution (e.g. `tuple_diff` → file `lib/foo.lua`) | – |
-| `--package-name` | Convenience: sets both `--strip-prefix` and `--package-prefix` to this value | – |
+| `--package-name` | Convenience: `--strip-prefix` and `--package-prefix` take this value unless set themselves | – |
 | `--version` | Print version and exit | – |
 
 Boolean flags accept a bare form (`--debug`) or an explicit value after `=` (`--debug=false`). luamerge takes no positional arguments, so a value written apart, as in `--debug false`, is refused rather than read as `--debug` followed by a stray `false`; so is an entry given without `--entry`. Such a mistake exits with status 2, like an unknown flag.
@@ -362,7 +362,7 @@ Public API:
 
 - `luamerge.Options` — all bundling settings (entry, root, path, transforms, `Debug`, `Fallback`, `Shebang`, `ArgFix`, prefixes, skip/include, …). `Bundle` writes to the `io.Writer` you give it and ignores `Options.Output`.
 - `luamerge.DefaultOptions() Options` — defaults matching the CLI.
-- `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars. `""` means `luamerge.yaml` in the working directory, which may be absent; a file named explicitly must exist (a missing one is an error matching `fs.ErrNotExist`).
+- `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars. `""` means `luamerge.yaml` in the working directory, which may be absent; a file named explicitly must exist (a missing one is an error matching `fs.ErrNotExist`). The options come back as given, with the `package_name` convenience left to `Bundle`, so any field can still be changed.
 - `luamerge.Bundle(opts Options, w io.Writer) (*Result, error)` — runs the full pipeline; resolves the root and the `package_name` convenience itself.
 - `luamerge.Result{ Warnings []Warning; Files []string }` — non-fatal issues, and the absolute path of every source file embedded in the bundle (the entry first). Each `Warning` is machine-readable: `Kind` (`WarnDynamicRequire`, `WarnSkipped`, `WarnUnresolved`, `WarnCModule`, `WarnNonLua`, `WarnIndirectRequire`), `Module` (the require name), plus `File`/`Line`/`Message` for display.
 

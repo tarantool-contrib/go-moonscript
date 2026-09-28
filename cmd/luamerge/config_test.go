@@ -265,6 +265,51 @@ func TestCLI_MissingRoot(t *testing.T) {
 	assert.Empty(t, stdout)
 }
 
+// TestCLI_PackageNameOverride checks that --package-name overrides the
+// package_name of luamerge.yaml or the environment. The configured name used
+// to be applied to strip_prefix and package_prefix while loading, and the
+// flag's then filled nothing: the bundle kept the configured name.
+func TestCLI_PackageNameOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		yaml string   // luamerge.yaml; "" writes none.
+		env  []string // KEY=VALUE pairs.
+		args []string // Added to --entry main.lua.
+	}{
+		{"flag over config", "package_name: other\n", nil, []string{"--package-name", "lib"}},
+		{"flag over environment", "", []string{"LUAMERGE_PACKAGE_NAME=other"}, []string{"--package-name", "lib"}},
+		{"environment over config", "package_name: other\n", []string{"LUAMERGE_PACKAGE_NAME=lib"}, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange: modules named lib.* in a flat layout.
+			project := luatest.Project{
+				"main.lua": "print(require(\"lib.util\"))\n",
+				"util.lua": "return 1\n",
+			}
+			if tt.yaml != "" {
+				project["luamerge.yaml"] = tt.yaml
+			}
+
+			dir := luatest.WriteProject(t, project)
+
+			// Act.
+			args := append([]string{"--entry", "main.lua", "--strict"}, tt.args...)
+			result := luatest.RunCLI(t, dir, tt.env, args...)
+
+			// Assert: lib.util resolves under --strict only by stripping lib.
+			require.Equal(t, 0, result.ExitCode, result.Stderr)
+			assertEmbedded(t, result.Stdout, []string{"lib.util"}, nil)
+			assert.NotContains(t, result.Stdout, "other.")
+		})
+	}
+}
+
 // commentProject is a project whose entry starts with a comment, so whether
 // a configuration that turns on remove_comments was read shows in the bundle.
 // With a config file: build/luamerge.yaml does that.

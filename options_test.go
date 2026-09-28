@@ -1,6 +1,7 @@
 package luamerge_test
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,6 +37,39 @@ func TestLoadOptions_MissingDefaultFile(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, luamerge.DefaultOptions(), opts)
+}
+
+// TestLoadOptions_PackageNameOverride checks that Options.PackageName set
+// after LoadOptions is the one the bundle uses. LoadOptions used to apply the
+// file's package_name to StripPrefix and PackagePrefix, which Bundle then
+// kept, so the bundle went on using the file's name.
+func TestLoadOptions_PackageNameOverride(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: modules named lib.* in a flat layout.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.lua"), []byte("print(require(\"lib.util\"))\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "util.lua"), []byte("return 1\n"), 0o600))
+
+	path := filepath.Join(dir, "luamerge.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("package_name: other\n"), 0o600))
+
+	opts, err := luamerge.LoadOptions(path)
+	require.NoError(t, err)
+
+	opts.Entry = filepath.Join(dir, "main.lua")
+	opts.PackageName = "lib"
+	opts.Strict = true
+
+	// Act.
+	var buf bytes.Buffer
+
+	_, err = luamerge.Bundle(opts, &buf)
+
+	// Assert: lib.util resolves in strict mode only by stripping lib.
+	require.NoError(t, err)
+	assert.Contains(t, buf.String(), `package.preload["lib.util"]`)
+	assert.NotContains(t, buf.String(), "other.")
 }
 
 // TestLoadOptions_NamedFile checks that the file named is read.

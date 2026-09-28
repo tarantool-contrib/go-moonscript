@@ -83,7 +83,9 @@ func DefaultOptions() Options {
 // variables, layered over the defaults. An empty path means luamerge.yaml in
 // the working directory, which may be absent: then the defaults plus the
 // environment are returned. A file named explicitly must exist; a missing one
-// is an error matching fs.ErrNotExist.
+// is an error matching fs.ErrNotExist. The options are returned as given, with
+// the package_name convenience left to Bundle, so any field may still be
+// changed.
 func LoadOptions(path string) (Options, error) {
 	cfg, err := config.LoadConfig(path)
 	if err != nil {

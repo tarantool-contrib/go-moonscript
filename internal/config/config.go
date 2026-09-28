@@ -242,8 +242,6 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
 
-	cfg.ApplyPackageName()
-
 	return cfg, nil
 }
 
@@ -276,7 +274,9 @@ func fileCollector(ctx context.Context, configPath string, optional bool) (gocon
 
 // ApplyPackageName implements the package_name convenience: when PackageName is
 // set, it fills StripPrefix and PackagePrefix from it unless they are already
-// set. Idempotent.
+// set. Idempotent. The bundler applies it once every source (defaults, file,
+// environment, flags or the caller's own changes) has set the three fields;
+// LoadConfig leaves them as given, so a later PackageName is not ignored.
 func (c *Config) ApplyPackageName() {
 	if c.PackageName == "" {
 		return

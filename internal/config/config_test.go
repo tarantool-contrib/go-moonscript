@@ -615,54 +615,57 @@ func TestShouldSkip(t *testing.T) {
 	}
 }
 
-func TestPackageNameConvenience(t *testing.T) {
+// TestLoadConfig_KeepsPackageName checks that loading leaves package_name,
+// strip_prefix and package_prefix as given: the package_name convenience is
+// applied once, by the bundler, after every other source has had its say.
+// Applied at load time, it could not be overridden: a --package-name, or
+// Options.PackageName set after LoadOptions, was ignored.
+func TestLoadConfig_KeepsPackageName(t *testing.T) {
 	t.Parallel()
 
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "luamerge.yaml")
-
-	// Test 1: package_name sets both strip_prefix and package_prefix when not specified.
-	yamlContent := `entry: src/main.lua
-package_name: "mypkg"
-`
-	require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0600))
+	configPath := filepath.Join(t.TempDir(), "luamerge.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("package_name: mypkg\nstrip_prefix: custom\n"), 0o600))
 
 	cfg, err := config.LoadConfig(configPath)
+
 	require.NoError(t, err)
+	assert.Equal(t, "mypkg", cfg.PackageName)
+	assert.Equal(t, "custom", cfg.StripPrefix)
+	assert.Empty(t, cfg.PackagePrefix)
+}
 
-	assert.Equal(t, "mypkg", cfg.PackageName, "PackageName = %q, want %q", cfg.PackageName, "mypkg")
-	assert.Equal(t, "mypkg", cfg.StripPrefix, "StripPrefix = %q, want %q", cfg.StripPrefix, "mypkg")
-	assert.Equal(t, "mypkg", cfg.PackagePrefix, "PackagePrefix = %q, want %q", cfg.PackagePrefix, "mypkg")
+// TestApplyPackageName checks the package_name convenience: it fills
+// strip_prefix and package_prefix unless they are set.
+func TestApplyPackageName(t *testing.T) {
+	t.Parallel()
 
-	// Test 2: explicit strip_prefix overrides package_name default.
-	configPath2 := filepath.Join(tmpDir, "amalg2.yaml")
-	yamlContent2 := `entry: src/main.lua
-package_name: "mypkg"
-strip_prefix: "custom"
-`
-	require.NoError(t, os.WriteFile(configPath2, []byte(yamlContent2), 0600))
+	tests := []struct {
+		name                     string
+		packageName              string
+		stripPrefix, pkgPrefix   string // Before.
+		wantStrip, wantPkgPrefix string
+	}{
+		{"fills both", "mypkg", "", "", "mypkg", "mypkg"},
+		{"keeps strip_prefix", "mypkg", "custom", "", "custom", "mypkg"},
+		{"keeps package_prefix", "mypkg", "", "custom", "mypkg", "custom"},
+		{"no package_name", "", "", "", "", ""},
+	}
 
-	cfg2, err := config.LoadConfig(configPath2)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Equal(t, "mypkg", cfg2.PackageName, "PackageName = %q, want %q", cfg2.PackageName, "mypkg")
-	assert.Equal(t, "custom", cfg2.StripPrefix, "StripPrefix = %q, want %q", cfg2.StripPrefix, "custom")
-	assert.Equal(t, "mypkg", cfg2.PackagePrefix, "PackagePrefix = %q, want %q", cfg2.PackagePrefix, "mypkg")
+			cfg := config.Default()
+			cfg.PackageName = tt.packageName
+			cfg.StripPrefix = tt.stripPrefix
+			cfg.PackagePrefix = tt.pkgPrefix
 
-	// Test 3: explicit package_prefix overrides package_name default.
-	configPath3 := filepath.Join(tmpDir, "amalg3.yaml")
-	yamlContent3 := `entry: src/main.lua
-package_name: "mypkg"
-package_prefix: "custom"
-`
-	require.NoError(t, os.WriteFile(configPath3, []byte(yamlContent3), 0600))
+			cfg.ApplyPackageName()
 
-	cfg3, err := config.LoadConfig(configPath3)
-	require.NoError(t, err)
-
-	assert.Equal(t, "mypkg", cfg3.PackageName, "PackageName = %q, want %q", cfg3.PackageName, "mypkg")
-	assert.Equal(t, "mypkg", cfg3.StripPrefix, "StripPrefix = %q, want %q", cfg3.StripPrefix, "mypkg")
-	assert.Equal(t, "custom", cfg3.PackagePrefix, "PackagePrefix = %q, want %q", cfg3.PackagePrefix, "custom")
+			assert.Equal(t, tt.wantStrip, cfg.StripPrefix, "strip_prefix")
+			assert.Equal(t, tt.wantPkgPrefix, cfg.PackagePrefix, "package_prefix")
+		})
+	}
 }
 
 func TestIncludePackages(t *testing.T) {
