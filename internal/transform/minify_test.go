@@ -43,9 +43,10 @@ func TestMinifyTransformer(t *testing.T) {
 			output: "line1\nline2",
 		},
 		{
-			name:   "block comment",
+			// "ab" would be one name.
+			name:   "block comment between names",
 			input:  "a--[[comment]]b",
-			output: "ab",
+			output: "a b",
 		},
 		{
 			name:   "empty lines",

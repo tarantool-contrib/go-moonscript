@@ -4,186 +4,126 @@
 package transform
 
 import (
-	"bytes"
+	"fmt"
+
+	"github.com/tarantool/go-luamerge/internal/lex"
 )
-
-// commentPrefixLen is the length of the Lua line/block comment prefix "--".
-const commentPrefixLen = 2
-
-// closeBracketExtra is the number of bracket characters ("[" and "]")
-// surrounding the run of "=" signs in a long-bracket close pattern.
-const closeBracketExtra = 2
 
 type commentTransformer struct{}
 
+// Transform removes every comment and keeps every other byte. A comment
+// becomes the line breaks it contained, so each token stays on its line and a
+// --debug traceback keeps its line numbers; where the tokens on both sides of
+// a comment would otherwise run together, a space stays between them:
+// "local--[[c]]b" becomes "local b", not "localb". A header that the
+// interpreter skips when it loads a file (see lex.Header) is kept as it is.
 func (t *commentTransformer) Transform(source []byte) ([]byte, error) {
-	var out bytes.Buffer
-
-	i := 0
-	n := len(source)
-
-	for i < n {
-		if isCommentStart(source, i, n) {
-			i = skipComment(source, i, n, &out)
-			continue
-		}
-
-		if source[i] == '"' || source[i] == '\'' {
-			i = copyString(source, i, n, &out)
-			continue
-		}
-
-		if isLongBracketStart(source, i, n) {
-			i = copyLongBracket(source, i, n, &out)
-			continue
-		}
-
-		// Normal character.
-		out.WriteByte(source[i])
-		i++
+	tokens, err := lex.NewFile(source).Tokens()
+	if err != nil {
+		return nil, fmt.Errorf("remove comments: %w", err)
 	}
 
-	return out.Bytes(), nil
-}
+	pos := lex.Header(source)
+	out := newRebuilder(source[:pos], len(source))
 
-// isCommentStart reports whether source[i:] begins with the "--" comment prefix.
-func isCommentStart(source []byte, i, n int) bool {
-	return i+1 < n && source[i] == '-' && source[i+1] == '-'
-}
+	var prev []byte
 
-// skipComment consumes a line or block comment starting at source[i] (which
-// must satisfy isCommentStart) and returns the index following it. A
-// trailing newline of a line comment is preserved in out.
-func skipComment(source []byte, i, n int, out *bytes.Buffer) int {
-	i += commentPrefixLen
+	for _, tok := range tokens {
+		out.space(source[pos:tok.Start])
+		text := source[tok.Start:tok.End]
+		pos = tok.End
 
-	if i < n && source[i] == '[' {
-		if next, ok := skipBlockComment(source, i, n); ok {
-			return next
-		}
-	}
-
-	// Line comment, skip to end of line.
-	for i < n && source[i] != '\n' {
-		i++
-	}
-
-	// Keep the newline.
-	if i < n && source[i] == '\n' {
-		out.WriteByte('\n')
-
-		i++
-	}
-
-	return i
-}
-
-// skipBlockComment attempts to parse a long-bracket block comment starting
-// at source[i] == '['. It returns the index following the comment and true
-// on success; otherwise it returns false so the caller falls back to
-// treating the "--" as a line comment.
-func skipBlockComment(source []byte, i, n int) (int, bool) {
-	// Count equals signs.
-	equals := 0
-	j := i + 1
-
-	for j < n && source[j] == '=' {
-		equals++
-		j++
-	}
-
-	if j >= n || source[j] != '[' {
-		return 0, false
-	}
-
-	// Block comment start: --[=...[; build the matching close pattern.
-	closePattern := make([]byte, equals+closeBracketExtra)
-	closePattern[0] = ']'
-
-	for k := range equals {
-		closePattern[1+k] = '='
-	}
-
-	closePattern[equals+1] = ']'
-
-	// Search for close pattern.
-	pos := bytes.Index(source[j+1:], closePattern)
-	if pos == -1 {
-		// Unclosed block comment: the remainder of the source is a comment.
-		return n, true
-	}
-
-	return j + 1 + pos + len(closePattern), true
-}
-
-// copyString copies a quoted string literal starting at source[i], honoring
-// backslash escapes, and returns the index following the closing quote.
-func copyString(source []byte, i, n int, out *bytes.Buffer) int {
-	quote := source[i]
-	out.WriteByte(quote)
-
-	i++
-
-	for i < n {
-		if source[i] == '\\' && i+1 < n {
-			// Escape sequence, copy both characters.
-			out.WriteByte(source[i])
-			i++
-
-			out.WriteByte(source[i])
-			i++
+		if isComment(tok) {
+			out.drop(text)
 
 			continue
 		}
 
-		if source[i] == quote {
-			out.WriteByte(quote)
-
-			i++
-
-			break
-		}
-
-		out.WriteByte(source[i])
-		i++
+		out.token(prev, text)
+		prev = text
 	}
 
-	return i
+	out.space(source[pos:])
+
+	return out.bytes(), nil
 }
 
-// isLongBracketStart reports whether source[i:] begins a long bracket "[[".
-func isLongBracketStart(source []byte, i, n int) bool {
-	return i+1 < n && source[i] == '[' && source[i+1] == '['
+// isComment reports whether tok is a comment.
+func isComment(tok lex.Token) bool {
+	return tok.Kind == lex.Comment || tok.Kind == lex.LongComment
 }
 
-// copyLongBracket copies a long string [[ ... ]] (with support for nested
-// long brackets) starting at source[i], and returns the index following it.
-func copyLongBracket(source []byte, i, n int, out *bytes.Buffer) int {
-	out.WriteByte('[')
-	out.WriteByte('[')
+// isLineBreakByte reports whether c is "\n" or "\r".
+func isLineBreakByte(c byte) bool {
+	return c == '\n' || c == '\r'
+}
 
-	i += 2
-	depth := 0
+// rebuilder writes source with some of its bytes dropped, so that what
+// remains reads as it did. Dropping bytes can join what they kept apart, so
+// after a drop it separates, with a space:
+//
+//   - a line break from a line break of the other kind before it: "\r" and
+//     "\n" would read as one line break, "\r" and " \n" read as two;
+//   - a token from the token before it when the two would read as others
+//     (see lex.NeedsSeparator).
+type rebuilder struct {
+	out []byte
+	// cut is set when bytes were dropped after the last byte written.
+	cut bool
+	// afterToken is set when the last byte written ends a token.
+	afterToken bool
+}
 
-	for i < n {
-		if i+1 < n && source[i] == ']' && source[i+1] == ']' && depth == 0 {
-			out.WriteByte(']')
-			out.WriteByte(']')
+// newRebuilder returns a rebuilder whose output starts with head and has room
+// for size bytes.
+func newRebuilder(head []byte, size int) *rebuilder {
+	out := make([]byte, 0, size)
 
-			i += 2
+	return &rebuilder{out: append(out, head...), cut: false, afterToken: false}
+}
 
-			break
+// bytes returns what was written.
+func (r *rebuilder) bytes() []byte {
+	return r.out
+}
+
+// space writes white space.
+func (r *rebuilder) space(text []byte) {
+	for _, c := range text {
+		r.whiteSpace(c)
+	}
+}
+
+// drop leaves text out except for its line breaks.
+func (r *rebuilder) drop(text []byte) {
+	for _, c := range text {
+		if isLineBreakByte(c) {
+			r.whiteSpace(c)
+		} else {
+			r.cut = true
 		}
+	}
+}
 
-		if i+1 < n && source[i] == '[' && source[i+1] == '[' {
-			depth++
-		} else if i+1 < n && source[i] == ']' && source[i+1] == ']' && depth > 0 {
-			depth--
+// whiteSpace writes one byte of white space.
+func (r *rebuilder) whiteSpace(char byte) {
+	if r.cut && isLineBreakByte(char) && len(r.out) > 0 {
+		last := r.out[len(r.out)-1]
+		if isLineBreakByte(last) && last != char {
+			r.out = append(r.out, ' ')
 		}
-
-		out.WriteByte(source[i])
-		i++
 	}
 
-	return i
+	r.out = append(r.out, char)
+	r.cut, r.afterToken = false, false
+}
+
+// token writes the token text; prev is the token written before it, if any.
+func (r *rebuilder) token(prev, text []byte) {
+	if r.cut && r.afterToken && lex.NeedsSeparator(prev, text) {
+		r.out = append(r.out, ' ')
+	}
+
+	r.out = append(r.out, text...)
+	r.cut, r.afterToken = false, true
 }

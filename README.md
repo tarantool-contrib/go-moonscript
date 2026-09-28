@@ -126,7 +126,7 @@ A module reachable under several names is registered under each of them with the
 | `--fallback` | Register modules in `package.postload` behind a searcher so on-disk modules win | `false` |
 | `--shebang` | Shebang written as the first line of the bundle (e.g. `#!/usr/bin/env lua`) | – |
 | `--no-arg-fix` | Omit the `arg` line, which only acts on PUC Lua 5.1 (`LUA_COMPAT_VARARG`): there it restores the global `arg` inside module code | – |
-| `--remove-comments` | Strip Lua comments from output | `false` |
+| `--remove-comments` | Remove comments, keeping line numbers (see [Source transforms](#source-transforms)) | `false` |
 | `--remove-empty-lines` | Strip empty/whitespace-only lines | `false` |
 | `--minify` | Minify source (subsumes comment / empty-line / shebang removal) | `false` |
 | `--strip-shebang` | Remove shebang lines from input module sources | `false` |
@@ -140,6 +140,10 @@ A module reachable under several names is registered under each of them with the
 Boolean flags accept a bare form (`--debug`) or an explicit value (`--debug=false`).
 
 The output is written only once the build has succeeded: a failed build leaves an existing bundle untouched and creates no directories, and with `--output -` it prints nothing. A regular file must be writable; it is replaced atomically (the bundle is written to a temporary file in the same directory, which is then renamed over it) and keeps its permission bits, so a failed or interrupted write never leaves a truncated bundle. The replaced file is a new file: a hard link to the old bundle keeps the old contents. A symlink is written through to its target, and a device such as `/dev/null` is written to. An `--output` that is the same file as the entry, a bundled module or the config file is refused.
+
+## Source transforms
+
+`--remove-comments` reads each module with a lexer that knows the lexical grammar of Lua 5.1 to 5.5, LuaJIT and Tarantool (long brackets of any level, every string escape, the line breaks `\n`, `\r`, `\r\n` and `\n\r`) and removes every comment, changing nothing else: strings, numbers and names reach the bundle byte for byte. A removed comment keeps the line breaks it contained, so every line keeps its number and `--debug` tracebacks stay exact; where the tokens on both sides would otherwise run together (`local--[[c]]b`), a space stays between them.
 
 ## Configuration
 
@@ -228,7 +232,7 @@ lua: bundle.lua:142: attempt to call a nil value
 lua: src/lib/parser.lua:17: attempt to call a nil value
 ```
 
-In debug mode each module, and the entry, is embedded as a string and run through `load(src, "@path")` in the environment the bundle runs in, so the VM keeps the original chunk name and line numbers. A module is compiled only when it is first required. Keep it **off for releases**: it adds a runtime dependency on `load`/`loadstring`, defeats `luac` precompilation, and is meaningless alongside line-altering transforms like `--minify`.
+In debug mode each module, and the entry, is embedded as a string and run through `load(src, "@path")` in the environment the bundle runs in, so the VM keeps the original chunk name and line numbers. A module is compiled only when it is first required. Keep it **off for releases**: it adds a runtime dependency on `load`/`loadstring`, defeats `luac` precompilation, and its line numbers are meaningless alongside `--remove-empty-lines` and `--minify`, which move lines (`--remove-comments` keeps them).
 
 ### Ship a bundle but override a module locally
 

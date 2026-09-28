@@ -85,6 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a dynamic require, like `require(name)`. All of them used to be ignored
   silently. `require("x", …)` is the require of `"x"`, as in Lua, rather
   than a dynamic require.
+- `--remove-comments` reads the source with a lexer that knows Lua's
+  lexical grammar and changes nothing but the comments. It used to strip
+  `--` inside leveled long strings (`[=[ … ]=]`, which could then stop
+  loading), count a `[[` inside a long string as nesting, run a line
+  comment ended by a lone `\r` to the next `\n` (deleting the code in
+  between), and glue the tokens around a block comment: `local--[[c]]b`
+  became `localb`, `1--[[c]]..2` the malformed number `1..2`. A removed
+  comment now keeps its line breaks, so `--debug` tracebacks keep their
+  line numbers.
 - Release archives now include a `darwin_arm64` build for Apple Silicon
   Macs. GoReleaser's build matrix excluded that target under a comment
   claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.

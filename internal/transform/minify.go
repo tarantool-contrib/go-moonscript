@@ -87,6 +87,11 @@ func reduceWhitespace(source []byte) []byte {
 	return out
 }
 
+// isLongBracketStart reports whether source[i:] begins a long bracket "[[".
+func isLongBracketStart(source []byte, i, n int) bool {
+	return i+1 < n && source[i] == '[' && source[i+1] == '['
+}
+
 // copyLongBracketBytes copies a long string [[ ... ]] (with support for
 // nested long brackets) starting at source[i] into out, and returns the
 // updated out slice and the index following the copied bracket.
