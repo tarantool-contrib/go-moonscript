@@ -19,11 +19,6 @@ builds:
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: darwin
-        goarch: arm64
-        # macOS ARM64 requires CGO for some libraries, but we disable CGO
-        # Still, we can include it as it's common
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
     flags:

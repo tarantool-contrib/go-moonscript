@@ -67,5 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a dynamic require, like `require(name)`. All of them used to be ignored
   silently. `require("x", …)` is the require of `"x"`, as in Lua, rather
   than a dynamic require.
+- Release archives now include a `darwin_arm64` build for Apple Silicon
+  Macs. GoReleaser's build matrix excluded that target under a comment
+  claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
