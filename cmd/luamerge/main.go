@@ -59,9 +59,9 @@ func run() int {
 	pflag.StringVar(&output, "output", "", "Output file, '-' for stdout (empty = use config or default)")
 	pflag.StringVar(&root, "root", "", "Base directory for module resolution")
 	pflag.StringVar(&path, "path", "", "Lua path templates, semicolon-separated")
-	pflag.Var(&search, "search", "Additional search directory (repeatable)")
-	pflag.Var(&skip, "skip", "Skip package (pattern, repeatable)")
-	pflag.Var(&include, "include", "Include package (exact name, repeatable)")
+	pflag.Var(&search, "search", "Additional search directory (repeatable; replaces a configured list)")
+	pflag.Var(&skip, "skip", "Skip package (pattern, repeatable; replaces a configured list)")
+	pflag.Var(&include, "include", "Include package (exact name, repeatable; replaces a configured list)")
 	pflag.Var(&strict, "strict", "Treat unresolved requires as errors")
 	pflag.Var(&debug, "debug", "Load modules via load(src, '@file') so tracebacks keep original file:line")
 	pflag.Var(&fallback, "fallback",

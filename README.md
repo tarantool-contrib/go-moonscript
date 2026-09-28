@@ -140,6 +140,8 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 
 Boolean flags accept a bare form (`--debug`) or an explicit value (`--debug=false`).
 
+The list flags `--search`, `--skip` and `--include` are repeatable. Like every other flag they override the configuration, so a list given on the command line *replaces* the list from `luamerge.yaml` or the environment instead of adding to it: with `skip_packages: [cjson]` in `luamerge.yaml`, `--skip socket` skips only `socket`, and `--skip cjson --skip socket` skips both.
+
 The output is written only once the build has succeeded: a failed build leaves an existing bundle untouched and creates no directories, and with `--output -` it prints nothing. A regular file must be writable; it is replaced atomically (the bundle is written to a temporary file in the same directory, which is then renamed over it) and keeps its permission bits, so a failed or interrupted write never leaves a truncated bundle. The replaced file is a new file: a hard link to the old bundle keeps the old contents. A symlink is written through to its target, and a device such as `/dev/null` is written to. An `--output` that is the same file as the entry, a bundled module or the config file is refused.
 
 ## Source transforms
@@ -152,7 +154,7 @@ The transforms read each module with a lexer that knows the lexical grammar of L
 
 ## Configuration
 
-Settings are resolved with this precedence (later wins): **defaults → `luamerge.yaml` → `LUAMERGE_*` environment variables → CLI flags**.
+Settings are resolved with this precedence (later wins): **defaults → `luamerge.yaml` → `LUAMERGE_*` environment variables → CLI flags**. A later source replaces a setting as a whole, lists included: a list is never merged with the list of an earlier source.
 
 Defaults, the YAML file, and the environment are assembled and merged by the Tarantool ecosystem's [go-config](https://github.com/tarantool/go-config) library, and the merged result is validated against a JSON Schema (draft 2020-12) before use — an unknown key or a wrong-typed value in `luamerge.yaml` is reported as an error rather than being silently ignored. CLI flags are applied on top of the validated config.
 
