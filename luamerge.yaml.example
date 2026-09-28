@@ -27,7 +27,9 @@ search:
   - lib/
   - vendor/
 
-# Treat unresolved static requires as errors (default: false)
+# Treat unresolved static requires as errors (default: false). A require in
+# pcall or xpcall, such as pcall(require, "cjson"), stays a warning: the
+# program is written to run on without that module.
 strict: false
 
 # Load each module via load(src, "@file") so runtime tracebacks report the

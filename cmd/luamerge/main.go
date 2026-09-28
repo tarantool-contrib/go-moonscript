@@ -73,7 +73,8 @@ func run() int {
 	pflag.Var(&skip, "skip", "Skip packages (patterns, comma-separated or repeated; replaces a configured list)")
 	pflag.Var(&include, "include",
 		"Include packages (exact names, comma-separated or repeated; replaces a configured list)")
-	pflag.Var(&strict, "strict", "Treat unresolved requires as errors")
+	pflag.Var(&strict, "strict",
+		"Treat unresolved requires as errors; those in pcall or xpcall stay warnings")
 	pflag.Var(&debug, "debug", "Load modules via load(src, '@file') so tracebacks keep original file:line")
 	pflag.Var(&fallback, "fallback",
 		"Register modules in package.postload behind a searcher so on-disk modules take precedence")

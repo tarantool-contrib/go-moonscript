@@ -160,6 +160,17 @@ func TestCLI_Strict(t *testing.T) {
 	assert.Contains(t, stderr, "unresolved")
 }
 
+// TestCLI_StrictHelp: the help of --strict says which unresolved requires stay
+// warnings: those in pcall or xpcall, whose program runs on without the
+// module.
+func TestCLI_StrictHelp(t *testing.T) {
+	t.Parallel()
+
+	_, stderr, code := runCLI(t, "--help")
+	require.Equal(t, 0, code, stderr)
+	assert.Regexp(t, `(?m)^\s*--strict\s.*\berrors\b.*\bpcall\b.*\bxpcall\b.*\bwarnings\b`, stderr)
+}
+
 // TestCLI_WarningLines: a warning names the line of the require. A require on
 // line 3 after two blank lines used to be reported at line 1, twice.
 func TestCLI_WarningLines(t *testing.T) {
