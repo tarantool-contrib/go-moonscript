@@ -21,14 +21,20 @@ func TestParseStaticRequire(t *testing.T) {
 			name:   "simple require",
 			source: `require("foo")`,
 			expected: []parse.RequireInfo{
-				{Name: "foo", Line: 1, Static: true, Protected: false, Indirect: ""},
+				{
+					Name: "foo", Line: 1, Static: true, Literal: parse.Span{Start: 8, End: 13},
+					Protected: false, Indirect: "",
+				},
 			},
 		},
 		{
 			name:   "require with dots",
 			source: `require("foo.bar")`,
 			expected: []parse.RequireInfo{
-				{Name: "foo.bar", Line: 1, Static: true, Protected: false, Indirect: ""},
+				{
+					Name: "foo.bar", Line: 1, Static: true, Literal: parse.Span{Start: 8, End: 17},
+					Protected: false, Indirect: "",
+				},
 			},
 		},
 		{
@@ -36,22 +42,31 @@ func TestParseStaticRequire(t *testing.T) {
 			source: `local a = require("a")
 local b = require("b")`,
 			expected: []parse.RequireInfo{
-				{Name: "a", Line: 1, Static: true, Protected: false, Indirect: ""},
-				{Name: "b", Line: 2, Static: true, Protected: false, Indirect: ""},
+				{
+					Name: "a", Line: 1, Static: true, Literal: parse.Span{Start: 18, End: 21},
+					Protected: false, Indirect: "",
+				},
+				{
+					Name: "b", Line: 2, Static: true, Literal: parse.Span{Start: 41, End: 44},
+					Protected: false, Indirect: "",
+				},
 			},
 		},
 		{
 			name:   "pcall require",
 			source: `pcall(require, "module")`,
 			expected: []parse.RequireInfo{
-				{Name: "module", Line: 1, Static: true, Protected: true, Indirect: ""},
+				{
+					Name: "module", Line: 1, Static: true, Literal: parse.Span{Start: 15, End: 23},
+					Protected: true, Indirect: "",
+				},
 			},
 		},
 		{
 			name:   "dynamic require",
 			source: `require(var)`,
 			expected: []parse.RequireInfo{
-				{Name: "", Line: 1, Static: false, Protected: false, Indirect: ""},
+				{Name: "", Line: 1, Static: false, Literal: testNoLiteral(), Protected: false, Indirect: ""},
 			},
 		},
 		{
@@ -60,7 +75,10 @@ local b = require("b")`,
   require("inner")
 end`,
 			expected: []parse.RequireInfo{
-				{Name: "inner", Line: 2, Static: true, Protected: false, Indirect: ""},
+				{
+					Name: "inner", Line: 2, Static: true, Literal: parse.Span{Start: 23, End: 30},
+					Protected: false, Indirect: "",
+				},
 			},
 		},
 		{
@@ -84,8 +102,9 @@ end`,
 	}
 }
 
-// testParse parses source and returns what it found; the parser, not the
-// token scanner, must read the source.
+// testParse parses source and returns what it found, without the positions
+// of the literals (see testWithoutLiterals); the parser, not the token
+// scanner, must read the source.
 func testParse(t *testing.T, source string) []parse.RequireInfo {
 	t.Helper()
 
@@ -93,19 +112,43 @@ func testParse(t *testing.T, source string) []parse.RequireInfo {
 	require.NoError(t, err, "Parse(%q)", source)
 	require.Nil(t, found.Fallback, "the parser reads %q", source)
 
-	return found.Requires
+	return testWithoutLiterals(found.Requires)
+}
+
+// testWithoutLiterals returns requires with the positions of their literals
+// cleared. Most tests are about which requires are found, on which lines;
+// TestParse_ModuleNameLiterals is about where their literals are.
+func testWithoutLiterals(requires []parse.RequireInfo) []parse.RequireInfo {
+	cleared := make([]parse.RequireInfo, 0, len(requires))
+
+	for _, info := range requires {
+		info.Literal = testNoLiteral()
+		cleared = append(cleared, info)
+	}
+
+	return cleared
+}
+
+// testNoLiteral is the Literal of a use of require that names no module by a
+// literal, or whose literal is left out.
+func testNoLiteral() parse.Span {
+	return parse.Span{Start: 0, End: 0}
 }
 
 // testStatic is the RequireInfo of a require call with the literal name on
-// line.
+// line, without the position of the literal.
 func testStatic(name string, line int) parse.RequireInfo {
-	return parse.RequireInfo{Name: name, Line: line, Static: true, Protected: false, Indirect: ""}
+	return parse.RequireInfo{
+		Name: name, Line: line, Static: true, Literal: testNoLiteral(), Protected: false, Indirect: "",
+	}
 }
 
 // testDynamic is the RequireInfo of a require call on line whose module name
 // is not a literal.
 func testDynamic(line int) parse.RequireInfo {
-	return parse.RequireInfo{Name: "", Line: line, Static: false, Protected: false, Indirect: ""}
+	return parse.RequireInfo{
+		Name: "", Line: line, Static: false, Literal: testNoLiteral(), Protected: false, Indirect: "",
+	}
 }
 
 // testProtected is info as a call of require in protected mode, through
@@ -119,7 +162,9 @@ func testProtected(info parse.RequireInfo) parse.RequireInfo {
 // testIndirect is the RequireInfo of a use of require on line that is not a
 // call; use says how require is used.
 func testIndirect(use string, line int) parse.RequireInfo {
-	return parse.RequireInfo{Name: "", Line: line, Static: false, Protected: false, Indirect: use}
+	return parse.RequireInfo{
+		Name: "", Line: line, Static: false, Literal: testNoLiteral(), Protected: false, Indirect: use,
+	}
 }
 
 // TestParse_RequireAsReceiver: a require whose result is the receiver of a

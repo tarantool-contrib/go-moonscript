@@ -14,6 +14,8 @@ import (
 
 	"github.com/yuin/gopher-lua/ast"
 	"github.com/yuin/gopher-lua/parse"
+
+	"github.com/tarantool/go-luamerge/internal/lex"
 )
 
 // requireName is the name of Lua's global require function.
@@ -28,27 +30,33 @@ const xpcallArgsStart = 2
 // bundle missing a module must not be produced silently.
 var errUnsupportedNode = errors.New("the require walker does not handle")
 
+// errBadMark is the cause of the error for a string of the marked copy whose
+// mark names no string literal of the source (see markedCopy), which the copy
+// never writes.
+var errBadMark = errors.New("a string of the copy is marked with no literal of the source")
+
 type gopherParser struct{}
 
 // Parse reads source with the lexer, gives gopher-lua the copy of it written
-// in Lua 5.1 (see normalize) and walks the syntax tree for the uses of
-// require. When gopher-lua cannot read the copy, the token scanner finds them
-// instead (see scanRequires): a module must not fail the build because of
-// its syntax. Only a lexical error does, as no dialect reads such a file.
+// in Lua 5.1 (see normalize), each string literal marked with its token (see
+// markedCopy), and walks the syntax tree for the uses of require. When
+// gopher-lua cannot read the copy, the token scanner finds them instead (see
+// scanRequires): a module must not fail the build because of its syntax. Only
+// a lexical error does, as no dialect reads such a file.
 func (p *gopherParser) Parse(source []byte, filename string) (Result, error) {
 	tokens, err := significantTokens(source)
 	if err != nil {
 		return Result{}, fmt.Errorf("parsing lua source %q: %w", filename, err)
 	}
 
-	normalized := normalizeTokens(source, tokens)
+	normalized := markedCopy(source, tokens)
 
 	chunk, err := parse.Parse(bytes.NewReader(normalized), filename)
 	if err != nil {
 		return Result{Requires: scanRequires(source, tokens), Fallback: newFallback(err, normalized)}, nil
 	}
 
-	requires, err := findRequires(chunk)
+	requires, err := findRequires(chunk, tokens)
 	if err != nil {
 		return Result{}, err
 	}
@@ -57,10 +65,11 @@ func (p *gopherParser) Parse(source []byte, filename string) (Result, error) {
 }
 
 // newFallback describes err, the error gopher-lua reports for normalized,
-// the copy of a source, as the Fallback of the source. The copy has the lines
-// of the source, but not its columns or its tokens, so only the line and the
-// token gopher-lua read are kept. At the end of the copy gopher-lua names no
-// line: that is the line of the last token.
+// the marked copy of a source, as the Fallback of the source. The copy has
+// the lines of the source, but not its columns or its tokens, so only the
+// line and the token gopher-lua read are kept, a string without its mark. At
+// the end of the copy gopher-lua names no line: that is the line of the last
+// token.
 func newFallback(err error, normalized []byte) *Fallback {
 	var syntaxErr *parse.Error
 	if !errors.As(err, &syntaxErr) {
@@ -77,16 +86,22 @@ func newFallback(err error, normalized []byte) *Fallback {
 		return &Fallback{Line: bytes.Count(normalized, []byte("\n")) + 1, Reason: message + " at the end of the file"}
 	}
 
-	return &Fallback{Line: syntaxErr.Pos.Line, Reason: fmt.Sprintf("%s near %q", message, syntaxErr.Token)}
+	token, _, _ := cutMark(syntaxErr.Token)
+
+	return &Fallback{Line: syntaxErr.Pos.Line, Reason: fmt.Sprintf("%s near %q", message, token)}
 }
 
 // findRequires walks a parsed chunk and returns every use of require in it.
-// It fails on a node type the walker does not know.
-func findRequires(chunk []ast.Stmt) ([]RequireInfo, error) {
+// It fails on a node type the walker does not know. When the chunk was read
+// from the marked copy of a source (see markedCopy), tokens are the tokens of
+// the source without its comments, and the literal of each static call has
+// its position in the source; nil tokens leave every position unknown.
+func findRequires(chunk []ast.Stmt, tokens []lex.Token) ([]RequireInfo, error) {
 	walker := &requireWalker{
 		requires: []RequireInfo{},
 		err:      nil,
 		scopes:   nil,
+		tokens:   tokens,
 	}
 	walkBlock(walker, chunk)
 
@@ -103,6 +118,34 @@ type requireWalker struct {
 	err error
 	// scopes are the blocks the walk is in, the innermost last.
 	scopes []scope
+	// tokens are the tokens of the source whose marked copy the chunk was
+	// read from, or nil (see findRequires).
+	tokens []lex.Token
+}
+
+// literal returns the value of the string str and where the string literal
+// it was read from lies in the source; the zero Span when the chunk was not
+// read from a marked copy, or when str was read from a name: gopher-lua reads
+// `a.b` as `a["b"]`.
+func (w *requireWalker) literal(str *ast.StringExpr) (string, Span) {
+	if w.tokens == nil {
+		return str.Value, Span{Start: 0, End: 0}
+	}
+
+	value, index, marked := cutMark(str.Value)
+	if !marked {
+		return value, Span{Start: 0, End: 0}
+	}
+
+	if index >= len(w.tokens) || w.tokens[index].Kind != lex.String && w.tokens[index].Kind != lex.LongString {
+		if w.err == nil {
+			w.err = fmt.Errorf("line %d: %w: %q", str.Line(), errBadMark, str.Value)
+		}
+
+		return value, Span{Start: 0, End: 0}
+	}
+
+	return value, Span{Start: w.tokens[index].Start, End: w.tokens[index].End}
 }
 
 // scope is what a block declares about the name require. A local named
@@ -410,11 +453,15 @@ func checkRequireCall(w *requireWalker, call *ast.FuncCallExpr) ast.Expr {
 		return nil
 	}
 
-	info := RequireInfo{Name: "", Line: call.Line(), Static: false, Protected: protected, Indirect: ""}
+	info := RequireInfo{
+		Name: "", Line: call.Line(), Static: false, Literal: Span{Start: 0, End: 0}, Protected: protected,
+		Indirect: "",
+	}
 
 	if len(args) > 0 {
 		if str, ok := args[0].(*ast.StringExpr); ok {
-			info.Name, info.Static = str.Value, true
+			info.Name, info.Literal = w.literal(str)
+			info.Static = true
 		}
 	}
 
@@ -461,9 +508,12 @@ func requireRef(w *requireWalker, expr ast.Expr) string {
 		table, isIdent := expr.Object.(*ast.IdentExpr)
 		key, isString := expr.Key.(*ast.StringExpr)
 
-		if isIdent && isString && key.Value == requireName &&
-			(table.Value == "_G" || table.Value == "_ENV") {
-			return table.Value + "." + key.Value
+		if !isIdent || !isString || table.Value != "_G" && table.Value != "_ENV" {
+			return ""
+		}
+
+		if name, _ := w.literal(key); name == requireName {
+			return table.Value + "." + name
 		}
 	}
 
@@ -490,6 +540,7 @@ func recordIndirect(w *requireWalker, ref ast.Expr, how string) {
 		Name:      "",
 		Line:      ref.Line(),
 		Static:    false,
+		Literal:   Span{Start: 0, End: 0},
 		Protected: false,
 		Indirect:  requireRef(w, ref) + " " + how,
 	})

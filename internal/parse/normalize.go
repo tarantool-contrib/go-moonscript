@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -58,6 +59,9 @@ type normalizer struct {
 	out []byte
 	// line is the line the end of out is on.
 	line int
+	// mark, when set, marks every string literal of the copy with the index
+	// of its token (see markedCopy).
+	mark bool
 }
 
 // edit is how the copy writes a token other than by its kind alone.
@@ -137,12 +141,30 @@ func significantTokens(src []byte) ([]lex.Token, error) {
 // normalizeTokens returns the copy of src (see normalize) whose tokens,
 // without comments, are tokens.
 func normalizeTokens(src []byte, tokens []lex.Token) []byte {
+	return copySource(src, tokens, false)
+}
+
+// markedCopy returns the copy of src (see normalize) whose tokens, without
+// comments, are tokens, with the value of every string literal followed by
+// the mark of the index of its token in tokens (see markValue). gopher-lua
+// gives a node of its syntax tree a line but no column, so the mark is how
+// the walker finds the literal of a require in src, where a line may hold
+// several of the same text. The mark changes the value of a string only, and
+// the walker takes it off (see cutMark).
+func markedCopy(src []byte, tokens []lex.Token) []byte {
+	return copySource(src, tokens, true)
+}
+
+// copySource returns the copy of src whose tokens, without comments, are
+// tokens, marked when mark is set (see markedCopy).
+func copySource(src []byte, tokens []lex.Token, mark bool) []byte {
 	n := &normalizer{
 		src:    src,
 		tokens: tokens,
 		edits:  make([]edit, len(tokens)),
 		out:    make([]byte, 0, len(src)),
 		line:   1,
+		mark:   mark,
 	}
 
 	for i := range n.tokens {
@@ -154,6 +176,40 @@ func normalizeTokens(src []byte, tokens []lex.Token) []byte {
 	}
 
 	return n.out
+}
+
+// markSeparator starts the mark a marked copy puts after the value of a
+// string literal: a NUL byte, which no name of the copy has, and the decimal
+// index of the literal's token.
+const markSeparator = '\x00'
+
+// markValue returns value, the value of the string literal whose token is at
+// index, followed by the mark of index.
+func markValue(value []byte, index int) []byte {
+	marked := append(bytes.Clone(value), markSeparator)
+
+	return append(marked, strconv.Itoa(index)...)
+}
+
+// cutMark returns the value and the token index of value, a string of a
+// marked copy; ok is false when value has no mark. A string literal of the
+// copy has one, while a name that gopher-lua reads as a string has none: `a.b`
+// is `a["b"]` to it. A mark is the last separator in the string and decimal
+// digits alone, so a value that has a separator of its own keeps it.
+func cutMark(value string) (string, int, bool) {
+	sep := strings.LastIndexByte(value, markSeparator)
+	if sep < 0 {
+		return value, 0, false
+	}
+
+	digits := value[sep+1:]
+
+	index, err := strconv.Atoi(digits)
+	if err != nil || index < 0 || strconv.Itoa(index) != digits {
+		return value, 0, false
+	}
+
+	return value[:sep], index, true
 }
 
 // plan records the edits that the token at i and the tokens after it need
@@ -356,7 +412,12 @@ func (n *normalizer) emit(i int, tok lex.Token) {
 
 	if !edit.drop {
 		text := edit.text
-		if text == nil {
+
+		switch {
+		case text != nil:
+		case n.mark && (tok.Kind == lex.String || tok.Kind == lex.LongString):
+			text = quote(markValue(stringValue(n.text(i), tok.Kind), i))
+		default:
 			text = n.copyOf(tok.Kind, n.text(i))
 		}
 

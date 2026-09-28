@@ -41,6 +41,14 @@ func TestParse_TokenScanFallback(t *testing.T) {
 			want:     []parse.RequireInfo{testStatic("a", 2)},
 			fallback: parse.Fallback{Line: 2, Reason: "syntax error at the end of the file"},
 		},
+		{
+			// The parser reads string literals marked with their token; the
+			// reason names the string as it is in the source.
+			name:     "syntax error at a string",
+			source:   "local a = require(\"a\")\nlocal x = 1 \"b\"\n",
+			want:     []parse.RequireInfo{testStatic("a", 1)},
+			fallback: parse.Fallback{Line: 2, Reason: `syntax error near "b"`},
+		},
 	}
 
 	for _, tt := range tests {
@@ -51,7 +59,7 @@ func TestParse_TokenScanFallback(t *testing.T) {
 			require.NoError(t, err, "a file the parser cannot read is scanned")
 			require.NotNil(t, found.Fallback, "the parser does not read the file")
 			assert.Equal(t, tt.fallback, *found.Fallback)
-			assert.Equal(t, tt.want, found.Requires)
+			assert.Equal(t, tt.want, testWithoutLiterals(found.Requires))
 		})
 	}
 }
@@ -66,14 +74,15 @@ func TestParse_LexicalError(t *testing.T) {
 	assert.Contains(t, err.Error(), "line 2")
 }
 
-// testScan returns what the token scanner finds in source.
+// testScan returns what the token scanner finds in source, without the
+// positions of the literals (see testWithoutLiterals).
 func testScan(t *testing.T, source string) []parse.RequireInfo {
 	t.Helper()
 
 	found, err := parse.ScanRequiresForTest([]byte(source))
 	require.NoError(t, err, "scan %q", source)
 
-	return found
+	return testWithoutLiterals(found)
 }
 
 // TestScanRequires_Calls: the token scanner finds the calls of require the

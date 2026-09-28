@@ -55,11 +55,15 @@ func (s *scanner) scan(i int) {
 	switch {
 	case ref == "", s.isTarget(i, end):
 	case s.startsArgs(end):
-		name, static := s.callName(end)
-		s.record(RequireInfo{Name: name, Line: s.tokens[i].Line, Static: static, Protected: false, Indirect: ""})
+		name, literal := s.callName(end)
+		s.record(RequireInfo{
+			Name: name, Line: s.tokens[i].Line, Static: literal >= 0, Literal: s.span(literal), Protected: false,
+			Indirect: "",
+		})
 	case !s.isCopy(i):
 		s.record(RequireInfo{
-			Name: "", Line: s.tokens[i].Line, Static: false, Protected: false, Indirect: ref + " used as a value",
+			Name: "", Line: s.tokens[i].Line, Static: false, Literal: Span{Start: 0, End: 0}, Protected: false,
+			Indirect: ref + " used as a value",
 		})
 	}
 }
@@ -117,14 +121,11 @@ func (s *scanner) protectedCall(i int) bool {
 		args = s.argEnd(args + 1)
 	}
 
-	var (
-		name   string
-		static bool
-	)
+	name, literal := "", -1
 
 	switch {
 	case s.isSymbol(args, ","):
-		name, static = s.literalArg(args + 1)
+		name, literal = s.literalArg(args + 1)
 	case s.isSymbol(args, ")"):
 		// require gets no argument.
 	default:
@@ -132,7 +133,10 @@ func (s *scanner) protectedCall(i int) bool {
 		return false
 	}
 
-	s.record(RequireInfo{Name: name, Line: s.tokens[i].Line, Static: static, Protected: true, Indirect: ""})
+	s.record(RequireInfo{
+		Name: name, Line: s.tokens[i].Line, Static: literal >= 0, Literal: s.span(literal), Protected: true,
+		Indirect: "",
+	})
 
 	for k := first; k < end; k++ {
 		s.used[k] = true
@@ -150,23 +154,25 @@ func (s *scanner) startsArgs(i int) bool {
 }
 
 // callName returns the value of the string literal a call whose arguments
-// start at i gets first, and whether there is one.
-func (s *scanner) callName(i int) (string, bool) {
+// start at i gets first and the index of its token; "" and -1 when there is
+// none.
+func (s *scanner) callName(i int) (string, int) {
 	if value, ok := s.stringAt(i); ok {
-		return value, true
+		return value, i
 	}
 
 	if s.isSymbol(i, "(") {
 		return s.literalArg(i + 1)
 	}
 
-	return "", false
+	return "", -1
 }
 
-// literalArg returns the value of the argument that starts at i when it is a
-// string literal, in parentheses or not, and whether it is one: the literal
-// must be followed by the end of the argument, "," or ")".
-func (s *scanner) literalArg(i int) (string, bool) {
+// literalArg returns the value of the argument that starts at i and the
+// index of its token when it is a string literal, in parentheses or not; ""
+// and -1 when it is not. The literal must be followed by the end of the
+// argument, "," or ")".
+func (s *scanner) literalArg(i int) (string, int) {
 	depth := 0
 	for s.isSymbol(i, "(") {
 		depth++
@@ -175,22 +181,34 @@ func (s *scanner) literalArg(i int) (string, bool) {
 
 	value, ok := s.stringAt(i)
 	if !ok {
-		return "", false
+		return "", -1
 	}
+
+	literal := i
 
 	for i++; depth > 0; depth-- {
 		if !s.isSymbol(i, ")") {
-			return "", false
+			return "", -1
 		}
 
 		i++
 	}
 
 	if !s.isSymbol(i, ",") && !s.isSymbol(i, ")") {
-		return "", false
+		return "", -1
 	}
 
-	return value, true
+	return value, literal
+}
+
+// span returns where the token at i lies in the source; the zero Span for an
+// i of -1, no token.
+func (s *scanner) span(i int) Span {
+	if i < 0 {
+		return Span{Start: 0, End: 0}
+	}
+
+	return Span{Start: s.tokens[i].Start, End: s.tokens[i].End}
 }
 
 // argEnd returns the index of the "," or ")" that ends the argument that

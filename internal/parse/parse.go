@@ -1,5 +1,11 @@
 package parse
 
+// Span is where a token lies in a source: source[Start:End].
+type Span struct {
+	Start int
+	End   int
+}
+
 // RequireInfo is one use of require found in a Lua source file. Most are calls:
 // static ones name their module, dynamic ones (Static false) compute it. When
 // Indirect is set it is a use of require that is not a call.
@@ -7,6 +13,10 @@ type RequireInfo struct {
 	Name   string // The literal module name, e.g. "foo.bar"; "" unless Static.
 	Line   int    // Source line number.
 	Static bool   // True if the first argument require gets is a string literal.
+	// Literal is where the string literal that names the module of a static
+	// call lies in the source, such as `"x"` in `require(("x"), y)`: the
+	// literal require gets first. It is the zero Span otherwise.
+	Literal Span
 	// Protected is true for a call of require in protected mode:
 	// `pcall(require, "x")` or `xpcall(require, handler, "x")`. Its caller
 	// gets false and the error instead of the error being raised, so the

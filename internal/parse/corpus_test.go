@@ -99,7 +99,16 @@ func TestNormalize_Lua51SourceReadsTheSame(t *testing.T) {
 		found, err := parse.New().Parse(src, file)
 		require.NoError(t, err, "parse %s", file)
 		assert.Nil(t, found.Fallback, "the parser reads %s", file)
-		assert.Equal(t, wantRequires, found.Requires, "requires of %s", file)
+		assert.Equal(t, wantRequires, testWithoutLiterals(found.Requires), "requires of %s", file)
+
+		// The literal of a static call is where Parse says: a string literal
+		// whose value is the module name.
+		for _, call := range found.Requires {
+			if call.Static {
+				value, ok := parse.LiteralValueForTest(src[call.Literal.Start:call.Literal.End])
+				assert.True(t, ok && value == call.Name, "%s: the literal of %+v", file, call)
+			}
+		}
 
 		compared++
 	}
@@ -111,7 +120,8 @@ func TestNormalize_Lua51SourceReadsTheSame(t *testing.T) {
 
 // TestScanRequires_FindsTheParsersCalls: over the corpus, the token scanner,
 // which reads a file the parser cannot, finds every call of require the
-// parser finds, with the same module name on the same line.
+// parser finds, with the same module name on the same line, named by the
+// same literal.
 func TestScanRequires_FindsTheParsersCalls(t *testing.T) {
 	t.Parallel()
 
