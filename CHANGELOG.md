@@ -79,5 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   search-directory-name prefix stripping applies only when that lookup finds
   nothing, and one module name registered for two different files is an
   error.
+- A module name written as a path follows Lua's rules too: every `.` in it
+  becomes a `/`, so `require("./foo")`, `require("../foo")` and
+  `require(".foo")` all embed `foo.lua` and `require("a/b.c")` embeds
+  `a/b/c.lua`, as they load natively. Such names used to be taken as they
+  were: `../foo` pulled in a file from outside the project, `.foo` embedded
+  `.foo.lua`, and `a/b.c` was not found.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

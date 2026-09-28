@@ -362,7 +362,7 @@ Implementation packages live under `internal/` and are intentionally not importa
 
 A `require()` name is resolved the way Lua's own `require` finds a Lua module, with `package.searchpath`, as if the program ran from `root`:
 
-1. Dots become the directory separator (`foo.bar` → `foo/bar`). A name written as a path, one that contains a `/` or starts with a `.`, is used as it is.
+1. Every `.` in the name becomes the directory separator (`foo.bar` → `foo/bar`), in a name written as a path too, as in Lua: `a/b.c` is `a/b/c`, and `./foo`, `../foo` and `.foo` all name `foo`. So a name alone never reaches outside `root` or a search directory.
 2. The result replaces the `?` of every template in `--path` (`?.lua`, then `?/init.lua`, …), relative to `root` and then relative to each `--search` directory, in order. For `--search lib` that is the `package.path` `./?.lua;./?/init.lua;lib/?.lua;lib/?/init.lua`.
 3. The first readable file wins.
 

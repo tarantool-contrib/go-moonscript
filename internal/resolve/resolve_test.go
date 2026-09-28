@@ -80,6 +80,8 @@ func TestResolver(t *testing.T) {
 func TestNormalizeRequireName(t *testing.T) {
 	t.Parallel()
 
+	// As in package.searchpath, every "." becomes a separator, in a name
+	// written as a path too: no ".." survives.
 	tests := []struct {
 		input    string
 		expected string
@@ -87,9 +89,12 @@ func TestNormalizeRequireName(t *testing.T) {
 		{"foo", "foo"},
 		{"foo.bar", "foo/bar"},
 		{"foo.bar.baz", "foo/bar/baz"},
-		{"./foo", "./foo"},
+		{"./foo", "//foo"},
 		{"foo/bar", "foo/bar"},
-		{"../foo", "../foo"},
+		{"../foo", "///foo"},
+		{".foo", "/foo"},
+		{"a/b.c", "a/b/c"},
+		{"foo.", "foo/"},
 	}
 
 	for _, tt := range tests {
@@ -97,7 +102,7 @@ func TestNormalizeRequireName(t *testing.T) {
 			t.Parallel()
 
 			got := resolve.NormalizeRequireName(tt.input)
-			assert.Equal(t, tt.expected, got)
+			assert.Equal(t, filepath.FromSlash(tt.expected), got)
 		})
 	}
 }
@@ -240,6 +245,35 @@ func TestResolve_ExtensionsOnlyWhenNativeLookupFails(t *testing.T) {
 			assert.Equal(t, tt.require, result.ModName)
 		})
 	}
+}
+
+// TestResolve_PathStyleNamesStayInside checks that a name written as a path
+// cannot reach outside the root or a search directory: as in
+// package.searchpath, every "." becomes a separator, so "../foo" names foo in
+// each location searched, never the foo.lua next to the project.
+func TestResolve_PathStyleNamesStayInside(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	testWriteFiles(t, tmpDir, "foo.lua", "outside.lua", "proj/foo.lua", "proj/lib/x.lua")
+
+	root := filepath.Join(tmpDir, "proj")
+	resolver := resolve.New(root, []string{filepath.Join(root, "lib")}, "?.lua;?/init.lua")
+
+	for name, want := range map[string]string{
+		"../foo":    "proj/foo.lua",
+		"../../foo": "proj/foo.lua",
+		"./foo":     "proj/foo.lua",
+		".foo":      "proj/foo.lua",
+		"../x":      "proj/lib/x.lua",
+	} {
+		result, err := resolver.Resolve(name)
+		require.NoError(t, err, "Resolve(%q)", name)
+		assert.Equal(t, filepath.Join(tmpDir, filepath.FromSlash(want)), result.FilePath, "Resolve(%q)", name)
+	}
+
+	result, err := resolver.Resolve("../outside")
+	require.ErrorIs(t, err, resolve.ErrModuleNotFound, "Resolve(\"../outside\") = %v", result)
 }
 
 // TestResolve_NotFound checks the error for a name found nowhere: it wraps

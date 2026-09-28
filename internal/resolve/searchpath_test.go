@@ -104,16 +104,18 @@ func oracleLayouts() []oracleLayout {
 	}
 }
 
-// oracleNames are the require names every layout is asked about: plain and
-// dotted names, names with trailing and doubled dots, and names that exist in
-// no layout. A name with ";" is left out on purpose: Lua 5.4 splits the
-// substituted path on it and Lua 5.2 does not.
+// oracleNames are the require names every layout is asked about: plain,
+// dotted and path-style names, names with leading, trailing and doubled dots,
+// and names that exist in no layout. A name with ";" is left out on purpose:
+// Lua 5.4 splits the substituted path on it and Lua 5.2 does not.
 func oracleNames() []string {
 	return []string{
 		"util", "sub.util", "sub.x", "x", "d", "sub.sub.d", "foo", "m", "t", "k", "s", "i", "init", "sub",
 		"a.b.c", "a.b", "x.init", "m.init", "i.init", "deep.e", "k.k",
 		"dup", "only", "v", "p.q", "pkg", "pkg2", "lib.util", "lib.only", "lib.p.q", "vendor.v", "lib.nope",
-		"util.", "sub.", "t.", "x.", "sub..util",
+		"./foo", "../foo", ".foo", "./util", "../util", "../outside", "sub/util", "sub/x", "./sub/x", "a/b.c",
+		"a/b/c", "./sub/../foo", ".hidden.m", "p/q", "../../foo",
+		"util.", "sub.", "t.", "x.", "sub..util", ".util", "..util",
 		"foo-bar", "weird", "noread", "missing", "sub.missing", "",
 	}
 }

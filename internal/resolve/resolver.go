@@ -68,12 +68,13 @@ func splitTemplates(path string) []string {
 }
 
 // Resolve locates the Lua source file for the module name like Lua's
-// package.searchpath: the name in path form (see NormalizeRequireName) is
-// substituted for every "?" of each template, and the first file that can be
-// read wins, trying all templates relative to the root and then relative to
-// each search directory, in order. Where the name is required from plays no
-// part: Lua resolves every name against package.path, relative to the working
-// directory, so a name means the same file wherever it is required.
+// package.searchpath: the name with every "." replaced by the directory
+// separator (see NormalizeRequireName) is substituted for every "?" of each
+// template, and the first file that can be read wins, trying all templates
+// relative to the root and then relative to each search directory, in order.
+// Where the name is required from plays no part: Lua resolves every name
+// against package.path, relative to the working directory, so a name means
+// the same file wherever it is required.
 //
 // Only when that lookup finds nothing anywhere are the name extensions tried
 // (see extensionNames). Whenever Lua itself would load a file, Resolve returns
@@ -162,10 +163,6 @@ func (r *Resolver) files(loc, name string) []string {
 // read as an underscore); then, at a search directory, name and the stripped
 // name without the directory's own name.
 func (r *Resolver) extensionNames(name, loc string) []string {
-	if isPathStyle(name) {
-		return nil
-	}
-
 	var names []string
 
 	if r.StripPrefix != "" && strings.HasPrefix(name, r.StripPrefix+".") {
@@ -192,20 +189,13 @@ func (r *Resolver) extensionNames(name, loc string) []string {
 	return names
 }
 
-// NormalizeRequireName converts a dotted require() module name into its
-// path representation, leaving already-path-like names untouched.
+// NormalizeRequireName converts a require() module name into its path
+// representation the way package.searchpath does: every "." becomes the
+// directory separator, in a name written as a path too. So "./foo", "../foo"
+// and ".foo" all name foo relative to the location searched, "a/b.c" names
+// a/b/c, and no name can climb out of that location with "..".
 func NormalizeRequireName(name string) string {
-	if isPathStyle(name) {
-		return name
-	}
-
 	return strings.ReplaceAll(name, ".", string(filepath.Separator))
-}
-
-// isPathStyle reports whether name is written as a path: it contains a "/"
-// or starts with ".".
-func isPathStyle(name string) bool {
-	return strings.Contains(name, "/") || strings.HasPrefix(name, ".")
 }
 
 // readable reports whether path can be opened for reading, which is Lua's own
