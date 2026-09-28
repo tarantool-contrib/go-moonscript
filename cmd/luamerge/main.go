@@ -4,8 +4,10 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,13 +18,14 @@ import (
 )
 
 // version, commit, and date are injected at build time via -ldflags
-// (see .goreleaser.yml), so they must remain package-level vars.
+// (see .goreleaser.yml), so they must remain package-level vars. Left empty,
+// they are taken from the build information (see versionLine).
 //
 //nolint:gochecknoglobals // build-time metadata injected via -ldflags
 var (
-	version = "dev"
-	commit  = "unknown"
-	date    = "unknown"
+	version = ""
+	commit  = ""
+	date    = ""
 )
 
 // exitUsage is the exit status of a mistake on the command line, the one
@@ -112,7 +115,8 @@ func run() int {
 	}
 
 	if showVersion {
-		_, _ = fmt.Fprintf(os.Stdout, "luamerge version %s (commit %s, built on %s)\n", version, commit, date)
+		_, _ = fmt.Fprintln(os.Stdout, versionLine(version, commit, date, ownBuildInfo()))
+
 		return 0
 	}
 
@@ -247,6 +251,60 @@ func warningText(w luamerge.Warning) string {
 	default:
 		return fmt.Sprintf("%s:%d: %s", w.File, w.Line, w.Message)
 	}
+}
+
+// ownBuildInfo returns the build information of the running binary, or nil
+// when it has none.
+func ownBuildInfo() *debug.BuildInfo {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return nil
+	}
+
+	return info
+}
+
+// versionLine is what --version prints. GoReleaser sets version, commit and
+// the build date with -ldflags. Whatever it did not set is taken from info,
+// the build information the Go toolchain records in a binary (nil if there
+// is none): the module version, which go install module@version records,
+// and for a build in a git checkout the commit's revision and time. What is
+// known of neither is left out.
+func versionLine(version, commit, date string, info *debug.BuildInfo) string {
+	dateLabel := "built on"
+
+	if info != nil {
+		if version == "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+
+		for _, setting := range info.Settings {
+			switch {
+			case setting.Key == "vcs.revision" && commit == "":
+				commit = setting.Value
+			case setting.Key == "vcs.time" && date == "":
+				date = setting.Value
+				dateLabel = "committed on"
+			}
+		}
+	}
+
+	var details []string
+
+	if commit != "" {
+		details = append(details, "commit "+commit)
+	}
+
+	if date != "" {
+		details = append(details, dateLabel+" "+date)
+	}
+
+	line := "luamerge version " + cmp.Or(version, "dev")
+	if len(details) > 0 {
+		line += " (" + strings.Join(details, ", ") + ")"
+	}
+
+	return line
 }
 
 // unexpectedArgument describes the first positional argument of args, the

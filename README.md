@@ -136,7 +136,7 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 | `--package-prefix` | Add a prefix to all module names in output (e.g. `mypkg` → `require("mypkg.module")`) | – |
 | `--strip-prefix` | Strip a prefix from module names during resolution (e.g. `tuple_diff` → file `lib/foo.lua`) | – |
 | `--package-name` | Convenience: `--strip-prefix` and `--package-prefix` take this value unless set themselves | – |
-| `--version` | Print version and exit | – |
+| `--version` | Print version and exit: a release's own, or the module version and commit the Go toolchain recorded (`go install`, `go build`) | – |
 
 Boolean flags accept a bare form (`--debug`) or an explicit value after `=` (`--debug=false`). luamerge takes no positional arguments, so a value written apart, as in `--debug false`, is refused rather than read as `--debug` followed by a stray `false`; so is an entry given without `--entry`. Such a mistake exits with status 2, like an unknown flag.
 

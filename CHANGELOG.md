@@ -246,6 +246,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "missing": …`, where the message used to repeat it (`… at line 4`), and a
   warning without a file, about an `--include` package, shows none instead
   of `:0:`. `Warning.Message` no longer contains the line.
+- `luamerge --version` of a binary built with `go install` or `go build`
+  reports the module version and, for a build in a git checkout, the commit
+  and its time, from the build information the Go toolchain records. It
+  reported `version dev (commit unknown, built on unknown)`. Release
+  binaries report what GoReleaser sets, as before.
 - A positional argument is an error, with exit status 2 like an unknown flag.
   Positional arguments were ignored, so `--minify false` minified (a boolean
   flag takes its value only after `=`: `--minify=false`), and
