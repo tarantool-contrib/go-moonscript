@@ -3,9 +3,12 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"syscall"
@@ -13,6 +16,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tarantool/go-luamerge/internal/luatest"
 )
 
 // Guards for the way the CLI puts the bundle on disk that need POSIX file
@@ -89,8 +94,9 @@ func TestCLI_OutputMode(t *testing.T) {
 }
 
 // TestCLI_ReadOnlyOutputRefused checks that a build does not replace an output
-// file that is not writable, as os.Create did not: a bundle someone made
-// read-only is not replaced behind their back.
+// file that is not writable, as os.Create did not. The rename that replaces
+// the file needs only the directory to be writable, so the file is checked on
+// its own: a bundle someone made read-only is not replaced behind their back.
 func TestCLI_ReadOnlyOutputRefused(t *testing.T) {
 	t.Parallel()
 
@@ -224,4 +230,49 @@ func TestCLI_OutputRefusesInputThroughSymlink(t *testing.T) {
 	dest, err := os.Readlink(link)
 	require.NoError(t, err, "the output path must still be a symlink")
 	assert.Equal(t, module, dest)
+}
+
+// TestCLI_FailedWriteKeepsPreviousOutput checks that when writing the bundle
+// itself fails, the previous bundle survives untouched and no partial file is
+// left behind. A zero file-size limit makes every write fail with EFBIG, as a
+// full disk would; an in-place write would have truncated the old file by
+// then. Go ignores SIGXFSZ, so the CLI sees the error instead of being killed.
+func TestCLI_FailedWriteKeepsPreviousOutput(t *testing.T) {
+	t.Parallel()
+
+	// Arrange.
+	dir := writeProject(t)
+	outDir := t.TempDir()
+	out := filepath.Join(outDir, "bundle.lua")
+
+	const previous = "-- previous build\n"
+
+	require.NoError(t, os.WriteFile(out, []byte(previous), 0o600))
+
+	// $0 is the CLI and "$@" its arguments, so the limit binds the CLI alone.
+	// The shell wrapper rules out luatest.RunCLI (which also captures output in
+	// files the limit would refuse), so do what it does: run from an empty
+	// directory with only PATH and HOME in the environment.
+	script := `ulimit -f 0 && exec "$0" "$@"`
+	args := slices.Concat([]string{"-c", script, luatest.CLIPath(t)}, entryArgs(dir), []string{"--output", out})
+
+	// #nosec G204 -- the shell and its script are fixed; the CLI is the binary luatest built.
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", args...)
+	cmd.Dir = t.TempDir()
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+
+	var stderr bytes.Buffer // A pipe: the size limit would also truncate a file.
+
+	cmd.Stderr = &stderr
+
+	// Act.
+	err := cmd.Run()
+
+	// Assert.
+	exitErr, ok := errors.AsType[*exec.ExitError](err)
+	require.True(t, ok, "the write must fail: %v", err)
+	assert.Equal(t, 1, exitErr.ExitCode(), "exit code (-1 is a signal): %s", stderr.String())
+	assert.Contains(t, stderr.String(), "write output")
+	assert.Equal(t, previous, readFile(t, out), "the previous bundle was modified by a failed write")
+	assert.Equal(t, []string{"bundle.lua"}, dirNames(t, outDir), "a failed write left files behind")
 }

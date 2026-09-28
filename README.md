@@ -138,7 +138,7 @@ A module reachable under several names (aliases) gets one real loader on its pri
 
 Boolean flags accept a bare form (`--debug`) or an explicit value (`--debug=false`).
 
-The output is written only once the build has succeeded: a failed build leaves an existing bundle untouched and creates no directories, and with `--output -` it prints nothing. The file is written in place and keeps its permission bits; a read-only file is refused, a symlink is written through to its target, and a device such as `/dev/null` is written to. An `--output` that is the same file as the entry, a bundled module or the config file is refused.
+The output is written only once the build has succeeded: a failed build leaves an existing bundle untouched and creates no directories, and with `--output -` it prints nothing. A regular file must be writable; it is replaced atomically (the bundle is written to a temporary file in the same directory, which is then renamed over it) and keeps its permission bits, so a failed or interrupted write never leaves a truncated bundle. The replaced file is a new file: a hard link to the old bundle keeps the old contents. A symlink is written through to its target, and a device such as `/dev/null` is written to. An `--output` that is the same file as the entry, a bundled module or the config file is refused.
 
 ## Configuration
 

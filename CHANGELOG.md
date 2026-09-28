@@ -48,5 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the build has succeeded, so a failed build no longer leaves an empty file
   that `make` takes for up to date, creates no directories and prints nothing
   with `--output -`.
+- The CLI replaces the output file atomically: the bundle is written to a
+  temporary file in the same directory and renamed over the old one only once
+  complete, so a failed or interrupted write (a full disk, a file-size limit)
+  no longer leaves a truncated bundle. The file keeps its permission bits, and
+  a read-only file is still refused.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
