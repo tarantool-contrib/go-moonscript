@@ -5,13 +5,46 @@ on:
     tags:
       - 'v*'
 
+# Least privilege: the workflow default is read-only, and only the job that
+# publishes (release) elevates to contents/packages write.
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+env:
+  # Keep in sync with .github/workflows/testing.yaml.
+  LUATEST_INTERPRETERS: lua5.1,lua5.2,lua5.3,lua5.4,luajit
 
 jobs:
-  release:
+  test:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: install Lua interpreters
+        run: |
+          interpreters="${LUATEST_INTERPRETERS//,/ }"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $interpreters
+          for lua in $interpreters; do
+            printf '%s: ' "$lua"
+            "$lua" -e 'print((jit and jit.version) or _VERSION)'
+          done
+
+      - name: run tests
+        run: make test
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -42,7 +75,7 @@ jobs:
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: "v2.13.3"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

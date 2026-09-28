@@ -51,6 +51,13 @@ cd go-luamerge
 go install ./cmd/luamerge
 ```
 
+The Docker image is built by the release workflow via GoReleaser, which
+stages each platform's binary into its own build context before running
+`docker buildx build`; `Dockerfile` cannot be built directly with
+`docker build .`. To build it locally, use
+`goreleaser release --snapshot --clean` (requires a `docker buildx` builder
+that supports multi-platform output).
+
 ## Quick start
 
 Given:

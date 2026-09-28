@@ -1,5 +1,12 @@
 # Dockerfile for luamerge (multi‑platform)
-# GoReleaser will place the built binary in $TARGETPLATFORM/ directory
+#
+# This only builds inside GoReleaser's own build context: GoReleaser stages
+# each target's binary at $TARGETPLATFORM/luamerge next to this file before
+# running `docker buildx build`, so a plain `docker build .` fails with "not
+# found" on that COPY. Build images locally with
+# `goreleaser release --snapshot --clean` (needs a docker buildx builder that
+# supports multi-platform output). .dockerignore does not apply to that
+# staged context.
 
 FROM scratch
 
