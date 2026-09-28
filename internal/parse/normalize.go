@@ -23,6 +23,7 @@ const keywords = " and break do else elseif end false for function goto if in lo
 const (
 	keywordEnd      = "end"
 	keywordFunction = "function"
+	keywordLocal    = "local"
 )
 
 // numeralRe matches the numeral at the start of the text of a Number token as
@@ -97,7 +98,9 @@ type edit struct {
 //   - a "break" before the end of its block, which Lua 5.2 allows, becomes
 //     "do break end";
 //   - a name with bytes beyond ASCII (LuaJIT) becomes an ASCII name, and
-//     goto where it names a variable (Lua 5.1, LuaJIT) another name.
+//     goto where it names a variable (Lua 5.1, LuaJIT) another name;
+//   - the syntax of LuaJIT 2.1 builds of 2026 becomes the Lua 5.1 syntax
+//     with the same calls (see planLuaJIT and planContinue).
 //
 // src is read the way the interpreter reads a file it loads (see
 // significantTokens). The error is a lexical error, of source no dialect
@@ -157,7 +160,7 @@ func normalizeTokens(src []byte, tokens []lex.Token) []byte {
 // because of what the token at i is.
 func (n *normalizer) plan(i int) {
 	switch n.name(i) {
-	case "local":
+	case keywordLocal:
 		if n.name(i+1) != keywordFunction {
 			n.dropAttrib(i + 1)
 			n.nameList(n.attribEnd(i + 1))
@@ -174,7 +177,11 @@ func (n *normalizer) plan(i int) {
 		if !n.endsBlock(i + 1) {
 			n.edits[i].text = []byte("do break end")
 		}
+	case "continue":
+		n.planContinue(i)
 	}
+
+	n.planLuaJIT(i)
 }
 
 // endsBlock reports whether the block ends at i, after the semicolons there:
@@ -223,7 +230,7 @@ func (n *normalizer) planGlobal(i int) {
 		// block, then assigns them: local a, b = _ENV.a, _ENV.b [a, b = x, y].
 		n.drop(i+1, start)
 		names, end := n.nameList(start)
-		n.edits[i].text = []byte("local")
+		n.edits[i].text = []byte(keywordLocal)
 		n.edits[end-1].after = n.globalValues(names, n.isSymbol(end, "="))
 	}
 }
@@ -466,7 +473,7 @@ func (n *normalizer) text(i int) []byte {
 
 // isKind reports whether there is a token at i and it is of kind.
 func (n *normalizer) isKind(i int, kind lex.Kind) bool {
-	return i < len(n.tokens) && n.tokens[i].Kind == kind
+	return i >= 0 && i < len(n.tokens) && n.tokens[i].Kind == kind
 }
 
 // name returns the text of the token at i when it is a Name, "" otherwise.

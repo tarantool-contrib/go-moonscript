@@ -23,15 +23,20 @@
 //     Lua built with LUA_UCID).
 //   - The operators of every dialect are tokens: "//", "&", "|", "~", "<<" and
 //     ">>" (Lua 5.3+) and "::" (Lua 5.2+, LuaJIT) as well as those of Lua 5.1.
+//     LuaJIT 2.1 builds of 2026 add operators of their own: "!=", "!", "&&",
+//     "||", "?" and ":" of a conditional expression, "??", "~>>", and
+//     compound assignments such as "+=". The lexer reads each as the tokens
+//     it is made of, "!" and "?" as tokens of kind Invalid.
 //   - A line break is "\n", "\r", "\r\n" or "\n\r", each one line.
 //
 // The union is also the most cautious answer to where tokens meet: two
-// tokens the lexer reads as separate are separate in every dialect. It is not
-// always the finest one. Lua 5.1 ends a numeral with an exponent or a hex
-// prefix before ".." (1e5..x is 1e5 .. x there), and Lua 5.2 and 5.3 end a
-// numeral before a letter that cannot continue it (3then is 3 then, and
-// 0x10then is 0x10 then); every other dialect rejects both, and the lexer
-// reads each as one numeral.
+// tokens the lexer reads as separate are separate in every dialect, but for
+// the operators of those LuaJIT builds, which no other dialect reads with
+// nothing between their tokens. It is not always the finest one. Lua 5.1
+// ends a numeral with an exponent or a hex prefix before ".." (1e5..x is
+// 1e5 .. x there), and Lua 5.2 and 5.3 end a numeral before a letter that
+// cannot continue it (3then is 3 then, and 0x10then is 0x10 then); every
+// other dialect rejects both, and the lexer reads each as one numeral.
 //
 // Like Lua's own lexer this one leaves grammar to a parser: a byte that
 // starts no token is a token of kind Invalid, and which names are reserved
@@ -70,8 +75,9 @@ const (
 	// Symbol is an operator or punctuation: + - * / // % ^ # & ~ | << >>
 	// == ~= <= >= < > = ( ) { } [ ] :: ; : , . .. ...
 	Symbol
-	// Invalid is a byte that starts no token in any dialect, such as "$" or
-	// "!". Lua reads it as a token of its own and its parser rejects it.
+	// Invalid is a byte that starts no token in any dialect, such as "$",
+	// or "!" or "?", which only LuaJIT 2.1 builds of 2026 read. Lua reads it
+	// as a token of its own and its parser rejects it.
 	Invalid
 )
 

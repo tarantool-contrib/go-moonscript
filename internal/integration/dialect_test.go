@@ -51,6 +51,21 @@ func pucLuaOnly(minors ...int) dialects {
 	}
 }
 
+// luaJITFrom is LuaJIT 2.1 from the build stamped stamp on: its version is
+// "LuaJIT 2.1.<stamp>". Tarantool is not.
+func luaJITFrom(stamp int) dialects {
+	return func(interp luatest.Interpreter) bool {
+		build, found := strings.CutPrefix(interp.Version, "LuaJIT 2.1.")
+		if !found {
+			return false
+		}
+
+		n, err := strconv.Atoi(build)
+
+		return err == nil && n >= stamp
+	}
+}
+
 // luaJIT is LuaJIT and Tarantool, which is built on it.
 func luaJIT(interp luatest.Interpreter) bool {
 	return strings.HasPrefix(interp.Version, "LuaJIT ") || strings.HasPrefix(interp.Version, "Tarantool ")
@@ -122,10 +137,10 @@ func TestCLI_ModuleNameEscapes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			spec := cliCase(luatest.Project{
+			spec := differential(luatest.Project{
 				"main.lua":         "print((require(" + tt.literal + ")))\n",
 				tt.module + ".lua": "return \"" + tt.module + "\"\n",
-			}, "--strict")
+			}, "", testCLIBundler(nil, "--entry", "main.lua", "--strict"))
 			spec.Check = checkWhereItRuns(tt.readers, tt.module+"\n")
 
 			luatest.Differential(t, spec)
@@ -259,13 +274,33 @@ func dialectRequireCases() []dialectCase {
 			stdout:  "n\n",
 			readers: pucLuaOnly(2, 3),
 		},
+		{
+			// Read since the LuaJIT 2.1 builds of 2026, whose jit.* modules
+			// use it; older builds and Tarantool reject it.
+			name: "LuaJIT extensions",
+			module: "local n = require(\"n\")\n" +
+				"local a = 1 != 2 and !false\n" +
+				"local b = (a && true || false) ? \"yes\" : \"no\"\n" +
+				"local c = nil ?? require(\"n\")\n" +
+				"local s = n\n" +
+				"s ..= c\n" +
+				"local x = 5\n" +
+				"x += 1 x -= 2 x *= 3 x %= 7 x &= 7 x |= 8 x <<= 1 x >>= 1 x ~= 1\n" +
+				"for i = 1, 3 do\n  if i == 2 then continue end\n  x += i\nend\n" +
+				"local y = -16 ~>> 2\n" +
+				"y ~>>= 1\n" +
+				"return b .. s .. x .. y\n",
+			stdout:  "yesnn16-2\n",
+			readers: luaJITFrom(1788856981),
+		},
 	}
 }
 
-// TestCLI_DialectSyntax: a module in the syntax of any dialect bundles, its
-// requires are found, and on each interpreter that runs it the bundle behaves
-// like the original. The bundler used to read every module as Lua 5.1 and
-// fail the whole build on anything newer.
+// TestCLI_DialectSyntax: a module in the syntax of any dialect bundles, the
+// parser reads it and finds its requires, so the CLI has no warning, and on
+// each interpreter that runs it the bundle behaves like the original. The
+// bundler used to read every module as Lua 5.1 and fail the whole build on
+// anything newer.
 func TestCLI_DialectSyntax(t *testing.T) {
 	t.Parallel()
 
@@ -273,11 +308,11 @@ func TestCLI_DialectSyntax(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			spec := cliCase(luatest.Project{
+			spec := differential(luatest.Project{
 				"main.lua": "print((require(\"m\")))\n",
 				"m.lua":    tt.module,
 				"n.lua":    "return \"n\"\n",
-			}, "--strict")
+			}, "", testCLIBundler(nil, "--entry", "main.lua", "--strict"))
 			spec.Check = checkWhereItRuns(tt.readers, tt.stdout)
 
 			luatest.Differential(t, spec)

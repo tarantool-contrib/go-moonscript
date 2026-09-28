@@ -200,21 +200,12 @@ func (s *scanner) argEnd(i int) int {
 	depth := 0
 
 	for ; i < len(s.tokens); i++ {
-		switch {
-		case depth == 0 && (s.isSymbol(i, ",") || s.isSymbol(i, ")")):
+		if depth == 0 && (s.isSymbol(i, ",") || s.isSymbol(i, ")")) {
 			return i
-		case s.isSymbol(i, "(") || s.isSymbol(i, "[") || s.isSymbol(i, "{"):
-			depth++
-		case s.isSymbol(i, ")") || s.isSymbol(i, "]") || s.isSymbol(i, "}"):
-			depth--
-		default:
-			switch s.name(i) {
-			case keywordFunction, "if", "do", "repeat":
-				depth++
-			case keywordEnd, "until":
-				depth--
-			}
 		}
+
+		tok := s.tokens[i]
+		depth += nesting(tok.Kind, string(s.src[tok.Start:tok.End]))
 	}
 
 	return i
@@ -253,7 +244,7 @@ func (s *scanner) inNameList(i int) bool {
 	}
 
 	switch {
-	case s.name(j) == "local", s.name(j) == "global", s.name(j) == "for":
+	case s.name(j) == keywordLocal, s.name(j) == "global", s.name(j) == "for":
 		return true
 	case s.isSymbol(j, "("):
 		return s.isFunctionHeader(j - 1)

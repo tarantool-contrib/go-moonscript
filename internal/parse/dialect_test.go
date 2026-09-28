@@ -176,3 +176,71 @@ func TestParse_DialectSyntax(t *testing.T) {
 		})
 	}
 }
+
+// TestParse_LuaJITExtensions: LuaJIT 2.1 builds of 2026 read syntax of their
+// own, which LuaJIT's own jit.* modules use: "!=" and "!", "&&" and "||", the
+// conditional expression `c ? a : b`, "??", compound assignments such as
+// `x += 1` (and `x ~= 1` for exclusive or), and a continue statement. The
+// requires next to them are found on their lines.
+func TestParse_LuaJITExtensions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		source string
+		want   []parse.RequireInfo
+	}{
+		{
+			name:   "not-equal and not",
+			source: "if require(\"a\") != nil and !require(\"b\") then end\n",
+			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 1)},
+		},
+		{
+			name:   "logical operators and nil coalescing",
+			source: "local v = require(\"a\") && x || require(\"b\") ?? require(\"c\")\n",
+			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 1), testStatic("c", 1)},
+		},
+		{
+			name: "conditional expressions",
+			source: "local v = c ? require(\"a\") : require(\"b\")\n" +
+				"local w = c ? (t:m()) : t:f(require(\"d\"))\n" +
+				"local u = c ? x ? 1 : 2 : require(\"e\")\n" +
+				"local f = c ? function() return t:m(require(\"g\")) end : nil\n",
+			want: []parse.RequireInfo{
+				testStatic("a", 1), testStatic("b", 1), testStatic("d", 2), testStatic("e", 3), testStatic("g", 4),
+			},
+		},
+		{
+			name: "compound assignments",
+			source: "x += require(\"a\")\ns ..= require(\"b\")\n" +
+				"x -= 1 x *= 2 x /= 3 x %= 4 x &= 5 x |= 6 x <<= 1 x >>= 1 t.x += 1 t[1] += 1\n" +
+				"x ~= require(\"c\")\n" +
+				"if x ~= require(\"d\") then end\n",
+			want: []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2), testStatic("c", 4), testStatic("d", 5)},
+		},
+		{
+			name:   "exclusive or assigned at the start of the file",
+			source: "x ~= require(\"a\")\nt.x ~= require(\"b\")\n",
+			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2)},
+		},
+		{
+			name:   "arithmetic shift",
+			source: "local x = (op << 16) ~>> 16 + require(\"a\")\nx ~>>= require(\"b\")\n",
+			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2)},
+		},
+		{
+			name: "continue",
+			source: "for i = 1, 2 do\n  if i == 1 then continue end\n  require(\"a\")\nend\n" +
+				"::continue::\ngoto continue\nlocal continue = require(\"b\")\nt.continue = continue\n",
+			want: []parse.RequireInfo{testStatic("a", 3), testStatic("b", 7)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.want, testParse(t, tt.source))
+		})
+	}
+}

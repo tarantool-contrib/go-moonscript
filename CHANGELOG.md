@@ -308,7 +308,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   floats, the 64-bit integer, imaginary and binary numerals of LuaJIT and
   Tarantool (`1ULL`, `0x10LL`, `2i`, `0b101`), a statement after `break`,
   names beyond ASCII, and `goto` used as a name. Every module was parsed as
-  Lua 5.1, so any of these failed the whole build with a syntax error.
+  Lua 5.1, so any of these failed the whole build with a syntax error. So
+  does the syntax that LuaJIT 2.1 builds of 2026 add, which LuaJIT's own
+  `jit.*` modules use: `!=` and `!`, `&&` and `||`, `c ? a : b`, `??`,
+  `~>>`, compound assignments such as `x += 1`, and `continue`.
 - A local named `require` that is a function of its own — a local function,
   a local whose value is a function, a parameter or a loop variable — hides
   the global `require` for the rest of its scope, as in Lua, so the calls
