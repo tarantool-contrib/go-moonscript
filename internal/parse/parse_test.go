@@ -282,6 +282,11 @@ func TestParse_IndirectRequire(t *testing.T) {
 			source: `xpcall(require, handler)`,
 			want:   []parse.RequireInfo{testDynamic(1)},
 		},
+		{
+			name:   "xpcall without a handler",
+			source: `xpcall(require)`,
+			want:   []parse.RequireInfo{testDynamic(1)},
+		},
 
 		// Uses of require that are not calls: indirect.
 		{
@@ -339,6 +344,16 @@ func TestParse_IndirectRequire(t *testing.T) {
 			source: "setup(\n  require\n)\n",
 			want:   []parse.RequireInfo{testIndirect(`require used as a value`, 2)},
 		},
+		{
+			name:   "surplus value of an assignment",
+			source: `a = 1, require`,
+			want:   []parse.RequireInfo{testIndirect(`require used as a value`, 1)},
+		},
+		{
+			name:   "surplus value of a local declaration",
+			source: `local a = 1, require`,
+			want:   []parse.RequireInfo{testIndirect(`require used as a value`, 1)},
+		},
 
 		// Not the global require at all.
 		{
@@ -349,6 +364,16 @@ func TestParse_IndirectRequire(t *testing.T) {
 		{
 			name:   "field named require",
 			source: `M.require("x")`,
+			want:   []parse.RequireInfo{},
+		},
+		{
+			name:   "field named require of a nested table",
+			source: `M.loader.require("x")`,
+			want:   []parse.RequireInfo{},
+		},
+		{
+			name:   "pcall and xpcall without arguments",
+			source: "pcall()\nxpcall()\n",
 			want:   []parse.RequireInfo{},
 		},
 		{
