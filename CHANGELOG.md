@@ -202,6 +202,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `require("mylib")` on Lua 5.1, LuaJIT and Tarantool.
 - With `--fallback`, a `main.lua` in the working directory no longer replaces
   the bundle's entry.
+- With `--fallback`, the error for a module found nowhere has no line holding
+  only a tab on Lua 5.4 and later. The bundle's searcher started its part of
+  the message with a line break and a tab, as Lua 5.1 to 5.3, LuaJIT and
+  Tarantool expect of a searcher, while Lua 5.4 and later put them in front
+  of every searcher's part themselves. It now starts it with them only where
+  they are expected.
 - A bundle built with `--suffix` failed to load with a syntax error: the
   suffix was emitted after the final `return`. The suffix now runs after the
   entry, and the bundle still returns every value the entry returns.

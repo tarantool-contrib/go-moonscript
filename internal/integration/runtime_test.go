@@ -640,6 +640,48 @@ func TestBundle_FallbackKeepsRegisteredLoaders(t *testing.T) {
 	})
 }
 
+// TestBundle_FallbackReportsAMissingModule: with --fallback, the error for a
+// module found nowhere is the interpreter's own plus a line for the bundle's
+// searcher. Lua 5.1 to 5.3, LuaJIT and Tarantool expect a searcher to start
+// its message with "\n\t", while Lua 5.4 and later put "\n\t" in front of
+// each searcher's message themselves: the searcher started its message with
+// them everywhere, which on Lua 5.4 and later left a line holding only a tab.
+//
+// The program prints the message itself: Tarantool cuts an uncaught error's
+// message short, and here it lists the files it tried in every directory up
+// to the root of the file system. The searcher lines are looked at as
+// printed, since NormalizeStderr drops them.
+func TestBundle_FallbackReportsAMissingModule(t *testing.T) {
+	t.Parallel()
+
+	spec := cliCase(luatest.Project{
+		"main.lua": "print((require(\"m\")))\n" +
+			"local _, err = pcall(require, \"missing\")\n" +
+			"io.stderr:write(err, \"\\n\")\n" +
+			"os.exit(1)\n",
+		"m.lua": "return \"m\"\n",
+	}, "--fallback")
+	spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+		t.Helper()
+
+		require.Equal(t, 1, orig.ExitCode, "the original\n%s", orig)
+		require.Contains(t, orig.Message(), "module 'missing' not found", "the original\n%s", orig)
+		luatest.AssertSame(t, orig, bundle)
+
+		for _, r := range []luatest.Result{orig, bundle} {
+			for i, line := range strings.Split(strings.TrimSuffix(r.Stderr, "\n"), "\n") {
+				assert.NotEmpty(t, strings.TrimSpace(line), "line %d of the message is blank\n%s", i+1, r)
+			}
+		}
+
+		lines := strings.Split(bundle.Stderr, "\n")
+		assert.Contains(t, lines, "\tno field package.postload['missing']",
+			"the searcher's message is a line of its own\n%s", bundle)
+	}
+
+	luatest.Differential(t, spec)
+}
+
 // strictGlobals makes reading or assigning an undeclared global raise, as
 // strict modes such as Tarantool's `strict` or Lua's etc/strict.lua do.
 const strictGlobals = "setmetatable(_G, {\n" +

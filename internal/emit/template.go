@@ -84,6 +84,13 @@ import (
 // appended last, so an on-disk copy on package.path takes precedence and the
 // embedded module is used only as a fallback.
 //
+// For a module it does not have, that searcher returns a line for require's
+// "module 'x' not found:" message, as every searcher does. Lua 5.1 to 5.3,
+// LuaJIT and Tarantool join the searchers' messages as they are, so each
+// starts with "\n\t"; Lua 5.4 and later put "\n\t" in front of each message
+// themselves, and one that starts with "\n\t" too leaves a line holding only
+// a tab. The bundle picks the start once, when it loads, by _VERSION.
+//
 // A name that some runtime has a built-in module of (a module's
 // BuiltinNames) is served, outside fallback mode, by a wrapper the module
 // puts around the interpreter's first searcher. Natively, where the runtime
@@ -138,10 +145,11 @@ __luamerge_load({{bracket .Source}}, {{q .Chunk}})
 do
   local postload = package.postload
   local searchers = package.searchers or package.loaders
+  local sep = (_VERSION == "Lua 5.1" or _VERSION == "Lua 5.2" or _VERSION == "Lua 5.3") and "\n\t" or ""
   searchers[#searchers+1] = function(mod)
     local loader = postload[mod]
     if loader == nil then
-      return "\n\tno field package.postload['" .. mod .. "']"
+      return sep .. "no field package.postload['" .. mod .. "']"
     end
     return loader
   end

@@ -510,15 +510,18 @@ package.postload = package.postload or {}
 do
   local postload = package.postload
   local searchers = package.searchers or package.loaders
+  local sep = (_VERSION == "Lua 5.1" or _VERSION == "Lua 5.2" or _VERSION == "Lua 5.3") and "\n\t" or ""
   searchers[#searchers+1] = function(mod)
     local loader = postload[mod]
     if loader == nil then
-      return "\n\tno field package.postload['" .. mod .. "']"
+      return sep .. "no field package.postload['" .. mod .. "']"
     end
     return loader
   end
 end
 ```
+
+For a module it does not have, the searcher adds a line to `require`'s "module 'x' not found:" message. Lua 5.4 and later start each searcher's line themselves, while Lua 5.1 to 5.3, LuaJIT and Tarantool expect the searcher to start it with `"\n\t"`, so `sep` holds that on those only.
 
 A module required by the name of a runtime's built-in module wraps the interpreter's first searcher for that name, right after its loader, and its other names stay in `package.preload` (with `--fallback`, every name goes to `package.postload` as above):
 
