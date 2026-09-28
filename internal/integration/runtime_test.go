@@ -807,3 +807,83 @@ func TestBundle_ModulesInheritTheEnvironment(t *testing.T) {
 		}
 	})
 }
+
+// TestBundle_EachNameIsAnInstance: natively two require names that find the
+// same file are two modules: package.loaded caches each name, so the file
+// runs once per name and each run sees its own name in `...`.
+func TestBundle_EachNameIsAnInstance(t *testing.T) {
+	t.Parallel()
+
+	main := "local a = require(\"%s\")\nlocal b = require(\"%s\")\n" +
+		"print(\"runs=\" .. RUNS, \"same=\" .. tostring(a == b), a.name, b.name)\n"
+	counter := "RUNS = (RUNS or 0) + 1\nreturn { name = (...) }\n"
+
+	for name, tt := range map[string]struct{ first, second, file string }{
+		"path-style name": {first: "counter", second: "./counter", file: "counter.lua"},
+		"init module":     {first: "counter", second: "counter.init", file: "counter/init.lua"},
+	} {
+		for mode, flags := range modes() {
+			t.Run(name+"/"+mode, func(t *testing.T) {
+				t.Parallel()
+
+				spec := cliCase(luatest.Project{
+					"main.lua": fmt.Sprintf(main, tt.first, tt.second),
+					tt.file:    counter,
+				}, flags...)
+				spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+					t.Helper()
+
+					want := fmt.Sprintf("runs=2\tsame=false\t%s\t%s\n", tt.first, tt.second)
+					require.Equal(t, want, orig.Stdout, "the original\n%s", orig)
+					luatest.AssertSame(t, orig, bundle)
+				}
+
+				luatest.Differential(t, spec)
+			})
+		}
+	}
+}
+
+// TestBundle_PackagePrefixSharesTheInstance: a name --package-prefix
+// generates is no module of its own: it loads the module under the name it
+// was generated from, so both give the same instance.
+func TestBundle_PackagePrefixSharesTheInstance(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	bundle := bundleProject(t, luatest.Project{
+		"main.lua": "local a = require(\"x\")\nlocal b = require(\"p.x\")\n" +
+			"print(\"runs=\" .. RUNS, \"same=\" .. tostring(a == b), a.name)\n",
+		"x.lua": "RUNS = (RUNS or 0) + 1\nreturn { name = (...) }\n",
+	}, "--entry", "main.lua", "--package-prefix", "p")
+
+	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+		t.Helper()
+
+		r := luatest.RunBundle(t, interp, bundle, runOptions())
+		assert.Equal(t, 0, r.ExitCode, "%s", r)
+		assert.Equal(t, "runs=1\tsame=true\tx\n", r.Stdout, "%s", r)
+	})
+}
+
+// TestBundle_PackagePrefixKeepsRealModules: a name --package-prefix
+// generates may be the name of a real module of the project; the real
+// module keeps it, whichever of the two comes first in the bundle.
+func TestBundle_PackagePrefixKeepsRealModules(t *testing.T) {
+	t.Parallel()
+
+	for name, prefix := range map[string]string{"the real module first": "p", "the generated name first": "z"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Modules are emitted sorted by name: "p.x" sorts before "x", "x"
+			// before "z.x".
+			luatest.Differential(t, cliCase(luatest.Project{
+				"main.lua":        fmt.Sprintf("print((require(\"x\")), (require(\"%s.x\")))\n", prefix),
+				"x.lua":           "return \"X\"\n",
+				prefix + "/x.lua": "return \"PREFIXED X\"\n",
+			}, "--package-prefix", prefix))
+		})
+	}
+}

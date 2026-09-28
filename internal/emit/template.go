@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+
+	"github.com/tarantool/go-luamerge/internal/graph"
 )
 
 // templateText renders the bundle. Each module becomes a loader function,
@@ -44,6 +46,10 @@ import (
 //   - A loader is registered only where the slot is still empty. Natively a
 //     loader the embedding application put in package.preload wins over the
 //     file on package.path, and LuaJIT's own table.new lives there too.
+//   - The same loader is registered under every name the project requires
+//     the module by. Natively each name is a module of its own: require
+//     caches the names apart, so the body runs once per name and sees its
+//     own name in `...`.
 //
 // In debug mode the bundle embeds each body as a string and the loader
 // loads it as a chunk of its own, named after its file, with
@@ -54,8 +60,10 @@ import (
 // chunk. Natively require loads a module in the global environment, which
 // makes a difference only for a bundle loaded in an environment of its own.
 //
-// Aliases delegate to the primary name so the body executes exactly once
-// regardless of how it's required.
+// The names --package-prefix generates (aliases) are no source's require
+// names: each loads the name it was generated from, so both give the same
+// instance. They are registered after every module, so a module of the
+// project keeps its name when an alias would have the same one.
 //
 // The loader leaves package.loaded to require, which runs it: a module that
 // raises while loading is not cached, and a require cycle fails as it does
@@ -129,16 +137,16 @@ do
 end
 end
 
-{{end}}{{range .Modules}}{{$primary := .PrimaryName}}do
+{{end}}{{range .Modules}}do
 {{if not $.Debug}}{{template "env"}}{{end}}local __luamerge_loader = {{if $.Debug -}}
 function(...) return {{template "load" .Code}}(...) end
 {{- else}}{{template "function" .Code}}{{end}}
-if package.{{$.RegTable}}[{{q $primary}}] == nil then package.{{$.RegTable}}[{{q $primary}}] = __luamerge_loader end
+{{range .Names}}if package.{{$.RegTable}}[{{q .}}] == nil then package.{{$.RegTable}}[{{q .}}] = __luamerge_loader end
+{{end}}end
+{{end}}{{range .Aliases}}if package.{{$.RegTable}}[{{q .Name}}] == nil then
+  package.{{$.RegTable}}[{{q .Name}}] = function(...) return require({{q .Target}}) end
 end
-{{range .AliasNames}}if package.{{$.RegTable}}[{{q .}}] == nil then
-  package.{{$.RegTable}}[{{q .}}] = function(...) return require({{q $primary}}) end
-end
-{{end}}{{end}}{{with .Entry}}{{if $.Suffix}}local __luamerge_main = {{if $.Debug -}}
+{{end}}{{with .Entry}}{{if $.Suffix}}local __luamerge_main = {{if $.Debug -}}
 {{template "load" .}}{{else}}(function()
 {{template "env"}}return {{template "function" .}}
 end)(){{end}}
@@ -243,11 +251,14 @@ type templateData struct {
 	EntryName string
 	Entry     codeData
 	Modules   []moduleData
-	Prefix    string
-	Suffix    string
-	Shebang   string
-	Debug     bool
-	Fallback  bool
+	// Aliases are the names --package-prefix generated, registered after
+	// every module.
+	Aliases  []graph.Alias
+	Prefix   string
+	Suffix   string
+	Shebang  string
+	Debug    bool
+	Fallback bool
 	// RegTable is the package field loaders are registered in: "preload"
 	// normally, "postload" in fallback mode.
 	RegTable string
@@ -264,8 +275,9 @@ type codeData struct {
 	ArgFix bool
 }
 
+// moduleData is a module: its code and the names it is registered under,
+// every one with the same loader.
 type moduleData struct {
-	PrimaryName string
-	AliasNames  []string
-	Code        codeData
+	Names []string
+	Code  codeData
 }

@@ -16,7 +16,7 @@ import (
 // newModule is a module of the graph at path with source, registered under
 // names.
 func newModule(path, source string, names ...string) *graph.Module {
-	return &graph.Module{ID: 0, FilePath: path, Names: names, Source: []byte(source), Requires: nil}
+	return &graph.Module{ID: 0, FilePath: path, Names: names, Aliases: nil, Source: []byte(source), Requires: nil}
 }
 
 // newGraph is the graph of entry and modules, the entry first, as
@@ -118,20 +118,45 @@ func TestEmit_RegistersEveryModule(t *testing.T) {
 	assertRuns(t, bundle, "a\nb\n")
 }
 
-func TestEmit_ModuleWithAliases(t *testing.T) {
+func TestEmit_RegistersEveryName(t *testing.T) {
 	t.Parallel()
 
+	// Two names of one file are two modules, as natively: the body runs once
+	// per name and sees its own name.
 	g := newGraph(
-		newModule("/test/main.lua", "print(require(\"foo\") == require(\"foo.bar\"), COUNT)\n"),
-		newModule("/test/foo.lua", "COUNT = (COUNT or 0) + 1\nreturn {}\n", "foo", "foo.bar"),
+		newModule("/test/main.lua", "local a, b = require(\"foo\"), require(\"foo.bar\")\n"+
+			"print(a == b, COUNT, a.name, b.name)\n"),
+		newModule("/test/foo.lua", "COUNT = (COUNT or 0) + 1\nreturn { name = (...) }\n", "foo", "foo.bar"),
+	)
+
+	for name, debug := range map[string]bool{"default": false, "debug": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := defaults()
+			opts.Debug = debug
+
+			assertRuns(t, emitBundle(t, g, opts), "false\t2\tfoo\tfoo.bar\n")
+		})
+	}
+}
+
+func TestEmit_AliasSharesTheInstance(t *testing.T) {
+	t.Parallel()
+
+	// A name --package-prefix generated loads the name it was generated from.
+	foo := newModule("/test/foo.lua", "COUNT = (COUNT or 0) + 1\nreturn { name = (...) }\n", "foo")
+	foo.Aliases = []graph.Alias{{Name: "pkg.foo", Target: "foo"}}
+	g := newGraph(
+		newModule("/test/main.lua", "local a, b = require(\"foo\"), require(\"pkg.foo\")\n"+
+			"print(a == b, COUNT, a.name)\n"),
+		foo,
 	)
 
 	bundle := emitBundle(t, g, defaults())
 
-	// The primary name carries the real loader; aliases delegate to it.
-	assert.Contains(t, bundle, "package.preload[\"foo\"] = __luamerge_loader")
-	assert.Contains(t, bundle, "package.preload[\"foo.bar\"] = function(...) return require(\"foo\") end")
-	assertRuns(t, bundle, "true\t1\n")
+	assert.Contains(t, bundle, "package.preload[\"pkg.foo\"] = function(...) return require(\"foo\") end")
+	assertRuns(t, bundle, "true\t1\tfoo\n")
 }
 
 func TestEmit_Suffix(t *testing.T) {
