@@ -641,7 +641,7 @@ print(load_all(require, { "m5" })[1])
 			Module: "",
 			File:   mainPath,
 			Line:   1,
-			Message: `require aliased as local "r" at line 1, ` +
+			Message: `require aliased as local "r", ` +
 				"cannot resolve the modules loaded through it",
 		},
 		{
@@ -649,14 +649,14 @@ print(load_all(require, { "m5" })[1])
 			Module:  "",
 			File:    mainPath,
 			Line:    4,
-			Message: "dynamic require at line 4, cannot resolve",
+			Message: "dynamic require, cannot resolve",
 		},
 		{
 			Kind:   graph.WarnIndirectRequire,
 			Module: "",
 			File:   mainPath,
 			Line:   5,
-			Message: "require used as a value at line 5, " +
+			Message: "require used as a value, " +
 				"cannot resolve the modules loaded through it",
 		},
 	}, g.Warnings)

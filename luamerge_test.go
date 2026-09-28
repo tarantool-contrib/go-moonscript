@@ -202,11 +202,12 @@ func TestBundle_WarningLines(t *testing.T) {
 				Module:  "",
 				File:    entry,
 				Line:    3,
-				Message: "dynamic require at line 3, cannot resolve",
+				Message: "dynamic require, cannot resolve",
 			}, res.Warnings[0])
 			assert.Equal(t, luamerge.WarnUnresolved, res.Warnings[1].Kind)
 			assert.Equal(t, 4, res.Warnings[1].Line, "the line of the unresolved require")
-			assert.Contains(t, res.Warnings[1].Message, "at line 4:")
+			assert.True(t, strings.HasPrefix(res.Warnings[1].Message, `unresolved require "nope": `),
+				"the message: %s", res.Warnings[1].Message)
 
 			var ue *luamerge.UnresolvedError
 			require.ErrorAs(t, strictErr, &ue)

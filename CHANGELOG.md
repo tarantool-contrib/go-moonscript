@@ -242,6 +242,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--output ''` means the output set in `luamerge.yaml` or the environment,
   or stdout by default, as the flag's help says. The build used to fail,
   renaming its temporary file to a file named `''`.
+- A warning shows its position once: `main.lua:4: unresolved require
+  "missing": …`, where the message used to repeat it (`… at line 4`), and a
+  warning without a file, about an `--include` package, shows none instead
+  of `:0:`. `Warning.Message` no longer contains the line.
 - A positional argument is an error, with exit status 2 like an unknown flag.
   Positional arguments were ignored, so `--minify false` minified (a boolean
   flag takes its value only after `=`: `--minify=false`), and

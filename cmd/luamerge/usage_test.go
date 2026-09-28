@@ -2,11 +2,15 @@ package main
 
 import (
 	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tarantool/go-luamerge"
 	"github.com/tarantool/go-luamerge/internal/luatest"
 )
 
@@ -134,6 +138,90 @@ func TestCLI_EmptyOutput(t *testing.T) {
 
 			assert.Contains(t, bundle, entryHeader("main"))
 		})
+	}
+}
+
+// warningPosition matches the position a warning line starts with.
+var warningPosition = regexp.MustCompile(`^warning: (.+?):(\d+): `)
+
+// TestCLI_WarningPosition checks how warnings are printed: a warning with a
+// file starts with its file:line, which its message does not repeat, and one
+// without a file has no position at all. They used to read
+// "main.lua:4: unresolved require "missing" at line 4" and, for --include,
+// "warning: :0: include package ...".
+func TestCLI_WarningPosition(t *testing.T) {
+	t.Parallel()
+
+	// Arrange: one of each warning a source file can cause.
+	dir := luatest.WriteProject(t, luatest.Project{
+		"main.lua": "local name = \"x\"\n" +
+			"require(name)\n" + // Dynamic.
+			"require(\"cjson\")\n" + // Skipped.
+			"require(\"missing\")\n" + // Unresolved.
+			"local r = require\n", // Indirect, where require is used other than by a call.
+	})
+	mainLua, err := filepath.EvalSymlinks(filepath.Join(dir, "main.lua"))
+	require.NoError(t, err)
+
+	// Act.
+	_, stderr, code := runCLIIn(t, dir, "--entry", "main.lua", "--skip", "cjson", "--include", "nothere")
+
+	// Assert.
+	require.Equal(t, 0, code, stderr)
+
+	var warnings []string
+
+	for line := range strings.Lines(stderr) {
+		if strings.HasPrefix(line, "warning: ") {
+			warnings = append(warnings, strings.TrimSuffix(line, "\n"))
+		}
+	}
+
+	require.GreaterOrEqual(t, len(warnings), 4, "%s", stderr)
+
+	for _, warning := range warnings {
+		match := warningPosition.FindStringSubmatch(warning)
+		if match == nil {
+			assert.NotRegexp(t, `^warning: :`, warning, "an empty position")
+
+			continue
+		}
+
+		assert.NotEqual(t, "0", match[2], "line 0: %s", warning)
+		assert.NotContains(t, warning[len(match[0]):], "line "+match[2], "the line is repeated: %s", warning)
+	}
+
+	for _, want := range []string{
+		"warning: " + mainLua + ":2: dynamic require, cannot resolve",
+		"warning: " + mainLua + ":3: skipped package \"cjson\"",
+		"warning: " + mainLua + ":4: unresolved require \"missing\": ",
+		"warning: include package \"nothere\" not found: ",
+	} {
+		found := slices.ContainsFunc(warnings, func(warning string) bool { return strings.HasPrefix(warning, want) })
+		assert.True(t, found, "no warning starts with %q:\n%s", want, stderr)
+	}
+}
+
+// TestWarningText checks the position printed with a warning: none without
+// a file, the file alone without a line.
+func TestWarningText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		file string
+		line int
+		want string
+	}{
+		{"/p/main.lua", 4, "/p/main.lua:4: message"},
+		{"/p/main.lua", 0, "/p/main.lua: message"},
+		{"", 0, "message"},
+	}
+
+	for _, tt := range tests {
+		w := luamerge.Warning{
+			Kind: luamerge.WarnUnresolved, Module: "m", File: tt.file, Line: tt.line, Message: "message",
+		}
+		assert.Equal(t, tt.want, warningText(w))
 	}
 }
 

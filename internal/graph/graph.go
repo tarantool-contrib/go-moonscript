@@ -67,7 +67,8 @@ type Warning struct {
 	File   string // file containing the require ("" for --include packages).
 	Line   int
 	// Message is a human-readable description; Kind/Module are the machine-
-	// readable form.
+	// readable form. It does not repeat File and Line, which a caller prints
+	// alongside.
 	Message string
 }
 
@@ -203,7 +204,7 @@ func unresolvedWarningMessage(target requireTarget, err error) string {
 		return fmt.Sprintf("include package %q not found: %v", target.Name, err)
 	}
 
-	return fmt.Sprintf("unresolved require %q at line %d: %v", target.Name, target.Line, err)
+	return fmt.Sprintf("unresolved require %q: %v", target.Name, err)
 }
 
 func addModuleName(mod *Module, name string) {
@@ -358,13 +359,11 @@ func processModuleRequires(
 	for _, req := range requires {
 		if req.Indirect != "" {
 			g.Warnings = append(g.Warnings, Warning{
-				Kind:   WarnIndirectRequire,
-				Module: "",
-				File:   mod.FilePath,
-				Line:   req.Line,
-				Message: fmt.Sprintf(
-					"%s at line %d, cannot resolve the modules loaded through it", req.Indirect, req.Line,
-				),
+				Kind:    WarnIndirectRequire,
+				Module:  "",
+				File:    mod.FilePath,
+				Line:    req.Line,
+				Message: req.Indirect + ", cannot resolve the modules loaded through it",
 			})
 
 			continue
@@ -376,7 +375,7 @@ func processModuleRequires(
 				Module:  req.Name,
 				File:    mod.FilePath,
 				Line:    req.Line,
-				Message: fmt.Sprintf("dynamic require at line %d, cannot resolve", req.Line),
+				Message: "dynamic require, cannot resolve",
 			})
 
 			continue
@@ -388,7 +387,7 @@ func processModuleRequires(
 				Module:  req.Name,
 				File:    mod.FilePath,
 				Line:    req.Line,
-				Message: fmt.Sprintf("skipped package %q at line %d", req.Name, req.Line),
+				Message: fmt.Sprintf("skipped package %q", req.Name),
 			})
 
 			continue

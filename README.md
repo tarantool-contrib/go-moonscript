@@ -360,6 +360,11 @@ func build() error {
 		return err
 	}
 	for _, w := range res.Warnings {
+		if w.File == "" { // About a module of Options.IncludePackages.
+			fmt.Printf("warning: %s\n", w.Message)
+			continue
+		}
+		// The message does not repeat the position.
 		fmt.Printf("warning: %s:%d: %s\n", w.File, w.Line, w.Message)
 	}
 	// buf now holds the bundle.

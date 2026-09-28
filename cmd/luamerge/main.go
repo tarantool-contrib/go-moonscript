@@ -229,10 +229,24 @@ func run() int {
 	}
 
 	for _, w := range res.Warnings {
-		_, _ = fmt.Fprintf(os.Stderr, "warning: %s:%d: %s\n", w.File, w.Line, w.Message)
+		_, _ = fmt.Fprintf(os.Stderr, "warning: %s\n", warningText(w))
 	}
 
 	return 0
+}
+
+// warningText is w as the CLI prints it: its position, when it has one, then
+// its message, which does not repeat the position. A warning about an
+// --include package has no file.
+func warningText(w luamerge.Warning) string {
+	switch {
+	case w.File == "":
+		return w.Message
+	case w.Line <= 0:
+		return w.File + ": " + w.Message
+	default:
+		return fmt.Sprintf("%s:%d: %s", w.File, w.Line, w.Message)
+	}
 }
 
 // unexpectedArgument describes the first positional argument of args, the

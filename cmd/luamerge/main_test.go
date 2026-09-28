@@ -171,7 +171,7 @@ func TestCLI_WarningLines(t *testing.T) {
 
 	_, stderr, code := runCLIIn(t, dir, "--entry", "main.lua", "--output", "-")
 	require.Equal(t, 0, code, stderr)
-	assert.Regexp(t, `^warning: \S*main\.lua:3: dynamic require at line 3, cannot resolve\n$`, stderr)
+	assert.Regexp(t, `^warning: \S*main\.lua:3: dynamic require, cannot resolve\n$`, stderr)
 }
 
 func TestCLI_RemoveComments(t *testing.T) {
