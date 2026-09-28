@@ -3,6 +3,9 @@
 # override both. A list given on the command line or in the environment is
 # comma-separated (--skip cjson,socket, LUAMERGE_SKIP_PACKAGES=cjson,socket)
 # and replaces the list here; lists in this file are YAML lists.
+#
+# Relative paths (entry, output, root, search) are taken from the working
+# directory luamerge runs in, not from the directory of this file.
 
 # Entry Lua file (required)
 entry: src/main.lua
@@ -10,14 +13,16 @@ entry: src/main.lua
 # Output file, "-" for stdout
 output: dist/bundle.lua
 
-# Base directory for module resolution (defaults to entry file directory)
+# Base directory for module resolution (defaults to entry file directory).
+# Module names are paths relative to it; it must exist.
 root: src/
 
 # Lua path templates, semicolon-separated
 # ? is replaced with the module name (dots become path separators)
 path: "?.lua;?/init.lua"
 
-# Additional search directories (searched after root)
+# Additional search directories (searched after root), relative to the working
+# directory like every path here, not to the root
 search:
   - lib/
   - vendor/

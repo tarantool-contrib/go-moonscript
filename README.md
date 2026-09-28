@@ -120,7 +120,7 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 | `--output` | Output file, `-` for stdout | `-` |
 | `--root` | Base directory for module resolution; module names are paths relative to it. Must exist | directory of entry file |
 | `--path` | Lua path templates, semicolon-separated | `?.lua;?/init.lua` |
-| `--search` | Additional search directories (comma-separated or repeated) | – |
+| `--search` | Additional search directories, relative to the working directory, not the root (comma-separated or repeated) | – |
 | `--skip` | Exclude packages (exact name, or `name.*` for prefix; comma-separated or repeated) | – |
 | `--include` | Force-include modules not reached from the entry (exact names; comma-separated or repeated) | – |
 | `--strict` | Treat unresolved static requires as errors | `false` |
@@ -163,6 +163,7 @@ Defaults, the YAML file, and the environment are assembled and merged by the Tar
 The file is `luamerge.yaml` in the working directory, or the one named with `--config`. The default file is optional; a file named with `--config` must exist, so a typo in its name is an error rather than a build without its settings. An empty file, or one with only comments, holds no settings: `--config /dev/null` builds from the defaults, the environment and the flags alone, whatever `luamerge.yaml` says.
 
 ```yaml
+# Relative paths are taken from the working directory, not from this file's.
 entry: src/main.lua
 output: dist/bundle.lua
 root: src/
@@ -222,6 +223,14 @@ Where the flag's name differs from the key:
 Every other variable is named after its flag as well as its key: `LUAMERGE_ENTRY`, `LUAMERGE_OUTPUT`, `LUAMERGE_ROOT`, `LUAMERGE_PATH`, `LUAMERGE_SEARCH`, `LUAMERGE_STRICT`, `LUAMERGE_DEBUG`, `LUAMERGE_FALLBACK`, `LUAMERGE_SHEBANG`, `LUAMERGE_PREFIX`, `LUAMERGE_SUFFIX`, `LUAMERGE_PACKAGE_PREFIX`, `LUAMERGE_PACKAGE_NAME`, `LUAMERGE_STRIP_PREFIX`. A `LUAMERGE_*` variable that names no setting, such as `LUAMERGE_MINIFY` or `LUAMERGE_SKIP`, is an error rather than being ignored.
 
 A boolean takes `true` or `false` (or `1`, `0`). A list is comma-separated, as on the command line: `LUAMERGE_SEARCH=lib,vendor`, `LUAMERGE_SKIP_PACKAGES='cjson,xlog.*'`. Spaces around an item and empty items are dropped, so an empty value is the empty list and clears a list set in `luamerge.yaml`. A list in `luamerge.yaml` is a YAML list and is never split: a directory whose name contains a comma can only be listed there.
+
+### Paths
+
+A relative path is taken from the working directory luamerge runs in, wherever it is given: a flag, a `LUAMERGE_*` variable or the config file. It is **not** taken from the config file's directory: `--config build/luamerge.yaml` with `entry: src/main.lua` bundles `./src/main.lua`, not `./build/src/main.lua`. The same holds for `root`, `output` and every `search` directory; in particular a relative `--search lib` (or `search: [lib]`) is `./lib`, not a directory under the root.
+
+The entry and the root are made absolute and their symbolic links resolved before any module name is computed, since a module's name is its path relative to the root: `--root src`, `--root "$PWD/src"` and a root reached through a symbolic link name the modules alike. Both must exist.
+
+At runtime the bundle looks nothing up for the modules it embeds. What it leaves to `require` (skipped, unresolved and dynamic requires, C modules, and with `--fallback` any on-disk copy meant to win) is found through `package.path` and `package.cpath`, whose `./?.lua`-style templates are relative to the program's working directory. Those lookups assume that the program runs from the root, where the templates resolve a module name to the file luamerge would have taken.
 
 ## Examples
 

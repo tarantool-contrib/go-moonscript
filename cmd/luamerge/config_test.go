@@ -310,6 +310,38 @@ func TestCLI_PackageNameOverride(t *testing.T) {
 	}
 }
 
+// TestCLI_ConfigPathsFromWorkingDirectory checks that relative paths in a
+// config file are taken from the working directory, not from the file's
+// directory: entry, root and search of build/luamerge.yaml name ./src and
+// ./lib. Decoys under build/ would be bundled were the paths taken from
+// there.
+func TestCLI_ConfigPathsFromWorkingDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := luatest.WriteProject(t, luatest.Project{
+		"src/main.lua": "print(require(\"a\"), require(\"b\"))\n",
+		"src/a.lua":    "return \"a from src\"\n",
+		"lib/b.lua":    "return \"b from lib\"\n",
+		// Decoys.
+		"build/src/main.lua": "print(\"DECOY_ENTRY\")\n",
+		"build/src/a.lua":    "return \"DECOY_A\"\n",
+		"build/lib/b.lua":    "return \"DECOY_B\"\n",
+		"build/luamerge.yaml": "entry: src/main.lua\nroot: src\nsearch: [lib]\nstrict: true\n" +
+			"output: out/bundle.lua\n",
+	})
+
+	stdout, stderr, code := runCLIIn(t, dir, "--config", "build/luamerge.yaml")
+
+	require.Equal(t, 0, code, stderr)
+	assert.Empty(t, stdout)
+	assert.NoFileExists(t, filepath.Join(dir, "build", "out", "bundle.lua"))
+
+	bundle := readFile(t, filepath.Join(dir, "out", "bundle.lua"))
+	assert.Contains(t, bundle, "a from src")
+	assert.Contains(t, bundle, "b from lib")
+	assert.NotContains(t, bundle, "DECOY")
+}
+
 // commentProject is a project whose entry starts with a comment, so whether
 // a configuration that turns on remove_comments was read shows in the bundle.
 // With a config file: build/luamerge.yaml does that.

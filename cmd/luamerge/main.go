@@ -65,8 +65,8 @@ func run() int {
 	pflag.StringVar(&output, "output", "", "Output file, '-' for stdout (empty = use config or default)")
 	pflag.StringVar(&root, "root", "", "Base directory for module resolution")
 	pflag.StringVar(&path, "path", "", "Lua path templates, semicolon-separated")
-	pflag.Var(&search, "search",
-		"Additional search directories (comma-separated or repeated; replaces a configured list)")
+	pflag.Var(&search, "search", "Additional search directories, relative to the working directory, not the root "+
+		"(comma-separated or repeated; replaces a configured list)")
 	pflag.Var(&skip, "skip", "Skip packages (patterns, comma-separated or repeated; replaces a configured list)")
 	pflag.Var(&include, "include",
 		"Include packages (exact names, comma-separated or repeated; replaces a configured list)")
