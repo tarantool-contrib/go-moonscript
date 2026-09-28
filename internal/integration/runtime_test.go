@@ -640,6 +640,83 @@ func TestBundle_FallbackKeepsRegisteredLoaders(t *testing.T) {
 	})
 }
 
+// loaderDataOutputs is what the program of TestBundle_LoaderData prints on
+// the interpreter of version, for the module required by name, natively and
+// from a bundle whose loader data on Lua 5.4 and later is data.
+func loaderDataOutputs(version, name, data string) (string, string) {
+	lines := func(args, results string) string {
+		return "module gets\t" + args + "\nrequire returns\t" + results + "\n"
+	}
+	file := "./" + name + ".lua"
+
+	switch {
+	case version == "Lua 5.2" || version == "Lua 5.3":
+		// The loader data is the module's second argument.
+		return lines("2\t"+name+"\t"+file, "1\tM"), lines("2\t"+name+"\tnil", "1\tM")
+	case strings.HasPrefix(version, "Lua 5.") && version != "Lua 5.1":
+		// Lua 5.4 and later return it from require too.
+		return lines("2\t"+name+"\t"+file, "2\tM\t"+file), lines("2\t"+name+"\t"+data, "2\tM\t"+data)
+	default:
+		// Lua 5.1, LuaJIT and Tarantool give a module its name only.
+		return lines("1\t"+name, "1\tM"), lines("1\t"+name, "1\tM")
+	}
+}
+
+// TestBundle_LoaderData pins the loader data of an embedded module, as the
+// README's Limitations describe it. Natively, Lua 5.2 and later pass a module
+// the path of its file as its second argument, and Lua 5.4 and later return
+// it from require as well. A bundle has no file per module: an embedded
+// module gets what package.preload gives natively, ":preload:" on Lua 5.4
+// and later and nil on Lua 5.2 and 5.3, or nil on both with --fallback,
+// whose searcher gives no loader data, and under the name of a runtime's
+// built-in module, which the bundle serves from its wrapper around the first
+// searcher. Everything else agrees.
+func TestBundle_LoaderData(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		flags []string
+		// name is the name the module is required by, and of its file.
+		name string
+		// data is the bundle's loader data on Lua 5.4 and later.
+		data string
+	}{
+		"default":  {flags: nil, name: "m", data: ":preload:"},
+		"debug":    {flags: []string{"--debug"}, name: "m", data: ":preload:"},
+		"fallback": {flags: []string{"--fallback"}, name: "m", data: "nil"},
+		// Tarantool's own csv, which require loads there instead, is not
+		// this test's business.
+		"built-in name": {flags: nil, name: "csv", data: "nil"},
+	}
+
+	for variant, tt := range tests {
+		t.Run(variant, func(t *testing.T) {
+			t.Parallel()
+
+			spec := cliCase(luatest.Project{
+				"main.lua": "local function show(...) print(\"require returns\", select(\"#\", ...), ...) end\n" +
+					"show(require(\"" + tt.name + "\"))\n",
+				tt.name + ".lua": "print(\"module gets\", select(\"#\", ...), ...)\nreturn \"M\"\n",
+			}, tt.flags...)
+			spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+				t.Helper()
+
+				if tt.name == "csv" && strings.HasPrefix(orig.Interp.Version, "Tarantool") {
+					t.Skip("Tarantool has a csv module of its own")
+				}
+
+				native, embedded := loaderDataOutputs(orig.Interp.Version, tt.name, tt.data)
+				require.Equal(t, native, orig.Stdout, "the original\n%s", orig)
+				assert.Equal(t, embedded, bundle.Stdout, "the bundle\n%s", bundle)
+				luatest.AssertSameExitCode(t, orig, bundle)
+				luatest.AssertSameStderr(t, orig, bundle)
+			}
+
+			luatest.Differential(t, spec)
+		})
+	}
+}
+
 // TestBundle_FallbackReportsAMissingModule: with --fallback, the error for a
 // module found nowhere is the interpreter's own plus a line for the bundle's
 // searcher. Lua 5.1 to 5.3, LuaJIT and Tarantool expect a searcher to start
