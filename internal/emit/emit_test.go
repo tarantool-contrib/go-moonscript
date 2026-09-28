@@ -35,10 +35,12 @@ func newGraph(entry *graph.Module, modules ...*graph.Module) *graph.Graph {
 	return &graph.Graph{Modules: all, ByPath: byPath, Entry: entry, EntryName: "main", Warnings: nil}
 }
 
-// defaults are the emit options with everything off, for a project in /test.
+// defaults are the emit options with everything off, for a project in /test
+// with no search directory.
 func defaults() emit.Options {
 	return emit.Options{
-		Root: "/test", Prefix: "", Suffix: "", Debug: false, Fallback: false, Shebang: "", NoArgFix: false,
+		Root: "/test", SearchDirs: nil, Prefix: "", Suffix: "", Debug: false, Fallback: false, Shebang: "",
+		NoArgFix: false,
 	}
 }
 
@@ -300,19 +302,28 @@ func TestEmit_Debug(t *testing.T) {
 	assertRuns(t, bundle, "module m\tx\n", "x")
 }
 
-// TestEmit_RefusesARelativeRoot: every chunk name of a debug bundle is a
-// path from the root, which a relative root has none of.
-func TestEmit_RefusesARelativeRoot(t *testing.T) {
+// TestEmit_RefusesRelativeDirectories: the chunk names of a debug bundle are
+// paths from the root, found by comparing the files' absolute paths with
+// the root and the search directories, which a relative one cannot be
+// compared with.
+func TestEmit_RefusesRelativeDirectories(t *testing.T) {
 	t.Parallel()
 
 	g := newGraph(newModule("/test/main.lua", "print(1)\n"))
 
-	for _, root := range []string{"", "test"} {
+	for name, tt := range map[string]struct {
+		root       string
+		searchDirs []string
+	}{
+		"no root":                     {root: "", searchDirs: nil},
+		"a relative root":             {root: "test", searchDirs: nil},
+		"a relative search directory": {root: "/test", searchDirs: []string{"/vendor", "lib"}},
+	} {
 		opts := defaults()
-		opts.Root = root
+		opts.Root, opts.SearchDirs = tt.root, tt.searchDirs
 
 		var buf bytes.Buffer
-		assert.Error(t, emit.Emit(&buf, g, nil, opts), "root %q", root)
+		assert.Error(t, emit.Emit(&buf, g, nil, opts), name)
 	}
 }
 

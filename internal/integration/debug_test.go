@@ -278,28 +278,66 @@ func TestDebugBundle_SearchDirectoryThroughALink(t *testing.T) {
 // different directories build the same --debug bundle, which holds neither
 // directory. The chunk names were the absolute paths of the files, so each
 // checkout built a bundle of its own, and every bundle disclosed where it was
-// built.
+// built. A module installed outside the project, which only an absolute
+// template of --path reaches, is named by its absolute path: its path from
+// the root climbed out of the checkout, so it depended on how deep the
+// checkout lay, and the second checkout lies deeper than the first.
 func TestDebugBundle_SameForEveryCheckout(t *testing.T) {
 	t.Parallel()
 
 	project := luatest.Project{
-		"src/main.lua":      "require(\"m\")\nrequire(\"lib.utils\")\nrequire(\"pkg\")\nrequire(\"v\")\n",
+		"src/main.lua": "require(\"m\")\nrequire(\"lib.utils\")\nrequire(\"pkg\")\nrequire(\"v\")\n" +
+			"require(\"installed\")\n",
 		"src/m.lua":         "return \"m\"\n",
 		"src/lib/utils.lua": "return \"utils\"\n",
 		"src/pkg/init.lua":  "return \"pkg\"\n",
 		"vendor/v.lua":      "return \"v\"\n",
 	}
-	bundler := luatest.CLI("--entry", "src/main.lua", "--search", "vendor", "--debug")
-	dirs := []string{luatest.WriteProject(t, project), luatest.WriteProject(t, project)}
-	require.NotEqual(t, dirs[0], dirs[1])
+	deeper := make(luatest.Project, len(project))
+
+	for path, source := range project {
+		deeper["one/more/"+path] = source
+	}
+
+	system := luatest.WriteProject(t, luatest.Project{"installed.lua": "return \"installed\"\n"})
+	bundler := luatest.CLI("--entry", "src/main.lua", "--search", "vendor",
+		"--path", "?.lua;?/init.lua;"+filepath.Join(system, "?.lua"), "--debug")
+	dirs := []string{luatest.WriteProject(t, project), filepath.Join(luatest.WriteProject(t, deeper), "one", "more")}
 
 	bundles := []string{string(bundler(t, dirs[0])), string(bundler(t, dirs[1]))}
 
 	assert.Equal(t, bundles[0], bundles[1], "two checkouts build the same bundle")
+	assert.Contains(t, bundles[0], "\"@"+filepath.ToSlash(filepath.Join(system, "installed.lua"))+"\"",
+		"a module only an absolute template reaches is named by its absolute path")
 
 	for i, bundle := range bundles {
 		for _, dir := range dirs {
 			assert.NotContains(t, bundle, dir, "bundle %d holds a checkout's directory", i)
 		}
 	}
+}
+
+// TestDebugBundle_InstalledModuleName: a module installed outside the
+// project, which only an absolute template of --path reaches, has the chunk
+// name the same template in LUA_PATH gives it natively: its absolute path.
+// The module prints its own chunk name, which, unlike the position in an
+// error message, Lua does not cut short. It was a path from the root that
+// climbed out of the checkout to the module.
+func TestDebugBundle_InstalledModuleName(t *testing.T) {
+	t.Parallel()
+
+	system := luatest.WriteProject(t, luatest.Project{"installed.lua": "print(debug.getinfo(1, \"S\").source)\n"})
+	template := filepath.Join(system, "?.lua")
+
+	spec := cliCase(luatest.Project{"main.lua": "require(\"installed\")\n"},
+		"--path", "?.lua;?/init.lua;"+template, "--debug")
+	spec.Options.LuaPath = "./?.lua;./?/init.lua;" + template
+	spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+		t.Helper()
+
+		require.Equal(t, "@"+filepath.Join(system, "installed.lua")+"\n", orig.Stdout, "the original\n%s", orig)
+		luatest.AssertSame(t, orig, bundle)
+	}
+
+	luatest.Differential(t, spec)
 }

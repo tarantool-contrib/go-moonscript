@@ -22,26 +22,33 @@ var errNoEntry = errors.New("the graph has no entry")
 // name to register it under.
 var errNoName = errors.New("the module has no name")
 
-// errRootNotAbsolute is returned by Emit when Options.Root is not an
-// absolute path.
-var errRootNotAbsolute = errors.New("the root is not an absolute path")
+// errNotAbsolute is the cause Emit wraps when Options.Root or a directory of
+// Options.SearchDirs is not an absolute path.
+var errNotAbsolute = errors.New("not an absolute path")
 
 // Options controls how the bundle is rendered.
 type Options struct {
 	// Root is the directory the program is meant to run from, the project
-	// root, as an absolute path; Emit requires it. In debug mode every chunk
-	// is named after its file's path relative to it.
+	// root, as an absolute path; Emit requires it. In debug mode a chunk is
+	// named after its file's path relative to it (see SearchDirs).
 	Root string
+	// SearchDirs are the directories modules are searched in besides Root,
+	// as absolute paths with their symbolic links resolved, as Root's are.
+	// In debug mode a module in one of them, outside Root, is named after
+	// its path relative to Root, and a module outside all of them, which
+	// only an absolute template of the search path reaches, after its
+	// absolute path (see moduleChunkName).
+	SearchDirs []string
 	// Prefix is Lua code run before the modules are registered, in a block of
 	// its own.
 	Prefix string
 	// Suffix is Lua code run after the entry, in a block of its own.
 	Suffix string
 	// Debug emits each module, and the entry, via load(source, "@path"), path
-	// relative to Root as the interpreter names the file when the program
-	// runs from there, so runtime errors report the file name and line
-	// numbers the original program reports instead of offsets into the
-	// bundle. The source is embedded verbatim (no reindentation).
+	// as the interpreter names the file when the program runs from Root, so
+	// runtime errors report the file name and line numbers the original
+	// program reports instead of offsets into the bundle. The source is
+	// embedded verbatim (no reindentation).
 	Debug bool
 	// Fallback registers modules in package.postload behind an appended
 	// searcher instead of package.preload, so an on-disk copy on package.path
@@ -78,9 +85,16 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 		return errNoEntry
 	}
 
-	// A relative root would leave every chunk name its absolute path.
+	// A relative root or search directory would leave the chunk names of the
+	// files in it their absolute paths.
 	if !filepath.IsAbs(opts.Root) {
-		return fmt.Errorf("%w: %q", errRootNotAbsolute, opts.Root)
+		return fmt.Errorf("root %q: %w", opts.Root, errNotAbsolute)
+	}
+
+	for _, dir := range opts.SearchDirs {
+		if !filepath.IsAbs(dir) {
+			return fmt.Errorf("search directory %q: %w", dir, errNotAbsolute)
+		}
 	}
 
 	prefix, suffix := opts.Prefix, opts.Suffix
@@ -133,7 +147,7 @@ func Emit(w io.Writer, g *graph.Graph, transforms []transform.Transformer, opts 
 			names, builtinNames = splitBuiltinNames(mod)
 		}
 
-		chunk := moduleChunkName(opts.Root, mod.FilePath)
+		chunk := moduleChunkName(opts.Root, opts.SearchDirs, mod.FilePath)
 		data := moduleData{
 			Names:        names,
 			BuiltinNames: builtinNames,

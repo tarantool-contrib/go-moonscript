@@ -97,13 +97,14 @@ func Bundle(opts Options, w io.Writer) (*Result, error) {
 	transforms := transform.BuildPipeline(cfg.Transform)
 
 	emitOpts := emit.Options{
-		Root:     cfg.Root,
-		Prefix:   cfg.Prefix,
-		Suffix:   cfg.Suffix,
-		Shebang:  cfg.Shebang,
-		Debug:    cfg.Debug,
-		Fallback: cfg.Fallback,
-		NoArgFix: !cfg.ArgFix,
+		Root:       cfg.Root,
+		SearchDirs: cfg.Search,
+		Prefix:     cfg.Prefix,
+		Suffix:     cfg.Suffix,
+		Shebang:    cfg.Shebang,
+		Debug:      cfg.Debug,
+		Fallback:   cfg.Fallback,
+		NoArgFix:   !cfg.ArgFix,
 	}
 
 	err = emit.Emit(w, g, transforms, emitOpts)

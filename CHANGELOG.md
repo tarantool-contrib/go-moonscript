@@ -165,11 +165,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `--debug` bundle names each file the way the interpreter names it when
   the program runs from the root: the entry as its command line does
   (`main.lua`), a module as `require` does through `./?.lua`
-  (`./lib/utils.lua`), and a file outside the root by its path from the
-  root (`../vendor/json.lua`), so an error reports the `file:line` the
-  original program reports. The files were named by their absolute paths on
-  the machine that built the bundle, so every checkout of a project built a
-  different bundle, and each disclosed where it was built.
+  (`./lib/utils.lua`), a module in a search directory outside the root by
+  its path from the root (`../vendor/json.lua`), and a module only an
+  absolute `--path` template reaches, such as one installed in the system,
+  by its absolute path, as that template names it. So an error reports the
+  `file:line` the original program reports, and every checkout of a project
+  builds the same bundle. The files were named by their absolute paths on
+  the machine that built the bundle, so every checkout built a different
+  bundle, and each disclosed where it was built.
 - A control character followed by a digit, in a module name or, with
   `--debug`, in a file name, reaches the bundle as it is. The bundle wrote
   the character as a decimal escape without leading zeros, which took the

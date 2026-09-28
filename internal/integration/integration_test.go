@@ -72,10 +72,12 @@ func bundler(opts emit.Options, tweak func(cfg *config.Config)) luatest.Bundler 
 }
 
 // emitOptions are the emit options of these tests: everything off except
-// what debug and fallback say. bundler sets the root.
+// what debug and fallback say. bundler sets the root; there is no search
+// directory, as bundler's resolver has none.
 func emitOptions(debug, fallback bool) emit.Options {
 	return emit.Options{
-		Root: "", Prefix: "", Suffix: "", Debug: debug, Fallback: fallback, Shebang: "", NoArgFix: false,
+		Root: "", SearchDirs: nil, Prefix: "", Suffix: "", Debug: debug, Fallback: fallback, Shebang: "",
+		NoArgFix: false,
 	}
 }
 

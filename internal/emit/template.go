@@ -3,6 +3,7 @@ package emit
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -54,9 +55,9 @@ import (
 //
 // In debug mode the bundle embeds each body as a string and the loader
 // loads it as a chunk of its own with __luamerge_load, named after its
-// file's path relative to the root as the interpreter names the file when
-// the program runs from there (see entryChunkName and moduleChunkName), so
-// errors report the file and line the original program reports. The chunk
+// file's path as the interpreter names the file when the program runs from
+// the root (see entryChunkName and moduleChunkName), so errors report the
+// file and line the original program reports. The chunk
 // gets the environment the bundle itself runs in (load's env argument on
 // Lua 5.2 and later, setfenv on Lua 5.1, LuaJIT and Tarantool): the one the
 // modules of a default-mode bundle inherit as closures of the bundle's
@@ -284,45 +285,71 @@ func luaLongBracket(source string) string {
 }
 
 // entryChunkName is the chunk name the code of the entry at path is loaded
-// under in debug mode: the path from root, which is how the command line
-// names the script when the program runs from root, as in `lua main.lua`:
-// "@main.lua", "@src/main.lua", "@../app/main.lua" (see fromRoot). The
-// leading "@" tells Lua to report the rest as a file name in error messages
-// and tracebacks.
+// under in debug mode: its path from root, wherever it lies, which is how the
+// command line names the script when the program runs from root, as in
+// `lua main.lua`: "@main.lua", "@src/main.lua", "@../app/main.lua". The
+// entry is a file of the project, as the root is a directory of it, so the
+// path is the same in every checkout. The leading "@" tells Lua to report
+// the rest as a file name in error messages and tracebacks.
 func entryChunkName(root, path string) string {
-	rel, _ := fromRoot(root, path)
+	rel, ok := fromDir(root, path)
+	if !ok {
+		return "@" + path
+	}
 
 	return "@" + rel
 }
 
 // moduleChunkName is the chunk name the code of the module at path is loaded
 // under in debug mode: the name require gives the file when the program runs
-// from root and finds it through package.path, where the interpreters' own
-// templates are "./?.lua" and "./?/init.lua": "@./m.lua", "@./lib/utils.lua",
-// "@./pkg/init.lua". A file outside root, found in a search directory or
-// through an absolute template, is named by its path from root, as a
-// "../vendor/?.lua" template names it: "@../vendor/json.lua" (see fromRoot).
-func moduleChunkName(root, path string) string {
-	rel, inside := fromRoot(root, path)
-	if inside {
+// from root and finds it through package.path.
+//
+//   - A file inside root is named "./" and its path from root, as the
+//     interpreters' own templates "./?.lua" and "./?/init.lua" name it:
+//     "@./m.lua", "@./lib/utils.lua", "@./pkg/init.lua".
+//   - A file inside one of searchDirs, outside root, is named by its path
+//     from root, as a "../vendor/?.lua" template names it:
+//     "@../vendor/json.lua". A search directory is a directory of the
+//     project, as the root is, so the path is the same in every checkout.
+//   - Any other file, which only an absolute template of the search path
+//     reaches, such as a module installed in the system, is named by its
+//     absolute path, as that template names it: the same on every checkout,
+//     where a path from root would climb out of the checkout to it.
+func moduleChunkName(root string, searchDirs []string, path string) string {
+	rel, ok := fromDir(root, path)
+	if !ok {
+		return "@" + path
+	}
+
+	if within(root, path) {
 		return "@./" + rel
 	}
 
-	return "@" + rel
-}
-
-// fromRoot is path relative to root with forward slashes, whatever the
-// system's separator, and whether it lies inside root: a bundle names no
-// directory of the machine that built it, so every checkout of a project
-// builds the same bundle. A path that has no relative form, on another
-// volume than root, is returned as it is: nothing else leads to the file.
-func fromRoot(root, path string) (string, bool) {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return path, false
+	if slices.ContainsFunc(searchDirs, func(dir string) bool { return within(dir, path) }) {
+		return "@" + rel
 	}
 
-	return filepath.ToSlash(rel), filepath.IsLocal(rel)
+	return "@" + path
+}
+
+// fromDir is path relative to dir with forward slashes, whatever the
+// system's separator, so that a bundle names no directory of the machine
+// that built it, and whether there is one: a path on another volume than dir
+// has none, and then only its own spelling leads to the file.
+func fromDir(dir, path string) (string, bool) {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return "", false
+	}
+
+	return filepath.ToSlash(rel), true
+}
+
+// within reports whether path lies inside dir.
+func within(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+
+	return err == nil && filepath.IsLocal(rel)
 }
 
 //nolint:gochecknoglobals // parsed once at init, read-only for the rest of the run
