@@ -332,7 +332,7 @@ Public API:
 - `luamerge.DefaultOptions() Options` — defaults matching the CLI.
 - `luamerge.LoadOptions(path string) (Options, error)` — load from a YAML file plus `LUAMERGE_*` env vars (a missing file is not an error).
 - `luamerge.Bundle(opts Options, w io.Writer) (*Result, error)` — runs the full pipeline; resolves the root and the `package_name` convenience itself.
-- `luamerge.Result{ Warnings []Warning }` — non-fatal issues. Each `Warning` is machine-readable: `Kind` (`WarnDynamicRequire`, `WarnSkipped`, `WarnUnresolved`, `WarnCModule`, `WarnNonLua`), `Module` (the require name), plus `File`/`Line`/`Message` for display.
+- `luamerge.Result{ Warnings []Warning; Files []string }` — non-fatal issues, and the absolute path of every source file embedded in the bundle (the entry first). Each `Warning` is machine-readable: `Kind` (`WarnDynamicRequire`, `WarnSkipped`, `WarnUnresolved`, `WarnCModule`, `WarnNonLua`), `Module` (the require name), plus `File`/`Line`/`Message` for display.
 
 Errors are classifiable rather than string-matched:
 

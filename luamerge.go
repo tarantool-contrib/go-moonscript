@@ -58,6 +58,13 @@ type Result struct {
 	// bundle is still produced. In strict mode an unresolved require is a hard
 	// error instead and Bundle returns it.
 	Warnings []Warning
+	// Files holds the absolute path of every source file embedded in the
+	// bundle: the entry first, then the modules in the order they were
+	// discovered. A caller writing the bundle to disk can use it to refuse an
+	// output path that is one of the inputs, or to record the bundle's
+	// dependencies. Modules left to be required at runtime (skipped,
+	// unresolved, dynamic, C or other non-Lua modules) are not listed.
+	Files []string
 }
 
 // DefaultOptions returns Options populated with the same defaults the CLI uses
@@ -119,5 +126,11 @@ func Bundle(opts Options, w io.Writer) (*Result, error) {
 		return nil, fmt.Errorf("luamerge: emit: %w", err)
 	}
 
-	return &Result{Warnings: g.Warnings}, nil
+	// g.Modules starts with the entry and grows in discovery order.
+	files := make([]string, len(g.Modules))
+	for i, mod := range g.Modules {
+		files[i] = mod.FilePath
+	}
+
+	return &Result{Warnings: g.Warnings, Files: files}, nil
 }

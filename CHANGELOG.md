@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment) by the Tarantool ecosystem's `go-config` library and validated
   against a JSON Schema, so an unknown key or a wrong-typed value in
   `luamerge.yaml` is reported as an error rather than silently ignored.
+- `Result.Files` lists the absolute path of every source file embedded in the
+  bundle, the entry first, so a caller can refuse an output path that is one of
+  the inputs or record the bundle's dependencies.
 
 ### Changed
 

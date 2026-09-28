@@ -57,6 +57,44 @@ func TestBundle(t *testing.T) {
 	assert.Contains(t, out, `return require("main")`)
 }
 
+// TestBundle_Files checks that Result.Files lists every embedded source file
+// as an absolute path, the entry first, and nothing that was left to runtime.
+//
+//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+func TestBundle_Files(t *testing.T) {
+	// Arrange.
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "lib"), 0o750))
+
+	for name, src := range map[string]string{
+		"main.lua":      "require(\"lib.a\")\nrequire(\"b\")\nrequire(\"nope\")\nrequire(\"skipped\")\n",
+		"lib/a.lua":     "return require(\"b\")\n",
+		"b.lua":         "return 1\n",
+		"skipped.lua":   "return 2\n",
+		"unrelated.lua": "return 3\n",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(src), 0o600))
+	}
+
+	// A relative entry still yields absolute paths.
+	t.Chdir(dir)
+
+	opts := luamerge.DefaultOptions()
+	opts.Entry = "main.lua"
+	opts.SkipPackages = []string{"skipped"}
+
+	// Act.
+	res, err := luamerge.Bundle(opts, &bytes.Buffer{})
+
+	// Assert.
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		filepath.Join(dir, "main.lua"),
+		filepath.Join(dir, "lib", "a.lua"),
+		filepath.Join(dir, "b.lua"),
+	}, res.Files)
+}
+
 func TestBundleOptionsThread(t *testing.T) {
 	t.Parallel()
 
