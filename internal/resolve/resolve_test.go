@@ -385,6 +385,51 @@ func TestResolve_EmptyTemplateEntryUsesDefault(t *testing.T) {
 	}, strings.Split(list, "\n  "))
 }
 
+// TestResolve_TemplatesAreTrimmed checks that the spaces around a template of
+// --path are dropped, so "lib/?.lua ; ?.lua" names lib/?.lua and ?.lua, and
+// that an entry of spaces alone is an empty one, which stands for the default
+// templates. (package.searchpath would look for a file whose name starts with
+// the space.)
+func TestResolve_TemplatesAreTrimmed(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	testWriteFiles(t, root, "lib/m.lua", "n/init.lua")
+
+	resolver := resolve.New(root, nil, " lib/?.lua ;  ")
+
+	for name, want := range map[string]string{"m": "lib/m.lua", "n": "n/init.lua"} {
+		result, err := resolver.Resolve(name)
+
+		require.NoError(t, err, "Resolve(%q)", name)
+		assert.Equal(t, filepath.Join(root, filepath.FromSlash(want)), result.FilePath, "Resolve(%q)", name)
+	}
+}
+
+// TestResolve_SearchDirectoryNameAfterAnotherExtension checks that at a
+// search directory the directory's own name is also stripped from a name
+// that another extension already shortened: the strip prefix, or the name of
+// a root with a hyphen. So with the strip prefix mylib, require("mylib.vendor.
+// json") finds json.lua in the search directory vendor, as require("vendor.
+// json") does.
+func TestResolve_SearchDirectoryNameAfterAnotherExtension(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	testWriteFiles(t, tmpDir, "my-app/main.lua", "deps/vendor/json.lua")
+
+	root := filepath.Join(tmpDir, "my-app")
+	vendor := filepath.Join(tmpDir, "deps", "vendor")
+	resolver := resolve.NewWithPrefix(root, []string{vendor}, "?.lua;?/init.lua", "mylib")
+
+	for _, name := range []string{"vendor.json", "mylib.vendor.json", "my_app.vendor.json"} {
+		result, err := resolver.Resolve(name)
+
+		require.NoError(t, err, "Resolve(%q)", name)
+		assert.Equal(t, filepath.Join(vendor, "json.lua"), result.FilePath, "Resolve(%q)", name)
+	}
+}
+
 // TestResolve_RootPrefixStripRequiresHyphen checks that the automatic
 // root-name strip documented under "Prefix stripping" applies only when the
 // root directory's name contains a hyphen: a plain root name such as "myapp"
