@@ -1,4 +1,4 @@
-# Dockerfile for luamerge (multi‑platform)
+# Dockerfile for luamerge (multi-platform)
 #
 # This only builds inside GoReleaser's own build context: GoReleaser stages
 # each target's binary at $TARGETPLATFORM/luamerge next to this file before
