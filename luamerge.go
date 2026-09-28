@@ -60,12 +60,12 @@ type Result struct {
 	Warnings []Warning
 	// Files holds the absolute path of every source file embedded in the
 	// bundle: the entry first, then the modules in the order they were
-	// discovered. The symbolic links in the entry's path and in the root are
-	// resolved, as module names are computed from them. A caller writing the
-	// bundle to disk can use it to refuse an output path that is one of the
-	// inputs, or to record the bundle's dependencies. Modules left to be
-	// required at runtime (skipped, unresolved, dynamic, C or other non-Lua
-	// modules) are not listed.
+	// discovered. The symbolic links in the entry's path, in the root and in
+	// the search directories are resolved, as the names in the bundle are
+	// computed from these paths. A caller writing the bundle to disk can use
+	// it to refuse an output path that is one of the inputs, or to record the
+	// bundle's dependencies. Modules left to be required at runtime (skipped,
+	// unresolved, dynamic, C or other non-Lua modules) are not listed.
 	Files []string
 }
 

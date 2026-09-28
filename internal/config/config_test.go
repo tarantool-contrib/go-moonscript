@@ -459,8 +459,63 @@ func TestResolveRoot_Spellings(t *testing.T) {
 	}
 }
 
-// TestResolveRoot_Missing checks that an entry or a root that does not exist
-// is an error, rather than a build under a root nothing can be found in.
+// TestResolveRoot_SearchSpellings checks that however a search directory is
+// spelled, relative, absolute, through a symbolic link or from a working
+// directory reached through one, ResolveRoot turns it into the same absolute
+// path without links, as it does the root. A module's path is its search
+// directory's joined with the file's, so a directory spelled through a link
+// gave its modules paths through the link, and chunk names from the root
+// that climbed out to the link. The list the caller passed is left as it
+// was.
+//
+//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+func TestResolveRoot_SearchSpellings(t *testing.T) {
+	dir := canonicalTempDir(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src"), 0o750))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "vendor"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "src", "main.lua"), nil, 0o600))
+	require.NoError(t, os.Symlink("vendor", filepath.Join(dir, "vlink")))
+	require.NoError(t, os.Symlink(".", filepath.Join(dir, "link")))
+
+	want := []string{filepath.Join(dir, "vendor"), filepath.Join(dir, "src")}
+
+	tests := []struct {
+		name   string
+		search string
+		// wd is the working directory, relative to dir.
+		wd string
+	}{
+		{name: "relative", search: "vendor", wd: "."},
+		{name: "unclean", search: "./src/../vendor/", wd: "."},
+		{name: "absolute", search: filepath.Join(dir, "vendor"), wd: "."},
+		{name: "through a link", search: "vlink", wd: "."},
+		{name: "under a link", search: filepath.Join("link", "vendor"), wd: "."},
+		{name: "absolute through a link", search: filepath.Join(dir, "link", "vlink"), wd: "."},
+		{name: "from a working directory through a link", search: "vendor", wd: "link"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Also sets PWD, which os.Getwd prefers: the spelling of the
+			// working directory through the link, as a shell keeps it.
+			t.Chdir(filepath.Join(dir, tt.wd))
+
+			search := []string{tt.search, "src"}
+			cfg := config.Default()
+			cfg.Entry = filepath.Join("src", "main.lua")
+			cfg.Search = search
+
+			require.NoError(t, cfg.ResolveRoot())
+
+			assert.Equal(t, want, cfg.Search, "search")
+			assert.Equal(t, []string{tt.search, "src"}, search, "the caller's list is left as it was")
+		})
+	}
+}
+
+// TestResolveRoot_Missing checks that an entry, a root or a search directory
+// that does not exist is an error, rather than a build under a root or with
+// a search directory nothing can be found in.
 func TestResolveRoot_Missing(t *testing.T) {
 	t.Parallel()
 
@@ -469,12 +524,14 @@ func TestResolveRoot_Missing(t *testing.T) {
 	require.NoError(t, os.WriteFile(entry, nil, 0o600))
 
 	tests := []struct {
-		name  string
-		entry string
-		root  string
+		name   string
+		entry  string
+		root   string
+		search []string
 	}{
-		{"entry", filepath.Join(dir, "missing.lua"), ""},
-		{"root", entry, filepath.Join(dir, "src")},
+		{"entry", filepath.Join(dir, "missing.lua"), "", nil},
+		{"root", entry, filepath.Join(dir, "src"), nil},
+		{"search", entry, "", []string{dir, filepath.Join(dir, "lib")}},
 	}
 
 	for _, tt := range tests {
@@ -484,6 +541,7 @@ func TestResolveRoot_Missing(t *testing.T) {
 			cfg := config.Default()
 			cfg.Entry = tt.entry
 			cfg.Root = tt.root
+			cfg.Search = tt.search
 
 			err := cfg.ResolveRoot()
 

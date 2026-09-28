@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -223,6 +224,52 @@ func TestDebugBundle_ErrorNamesTheSourcePosition(t *testing.T) {
 				assert.Equal(t, origLine, bundleLine,
 					"the first line of the error\n=== original: %s=== bundle: %s", orig, bun)
 			})
+		})
+	}
+}
+
+// TestDebugBundle_SearchDirectoryThroughALink: a search directory reached
+// through a symbolic link, its own or the working directory's, names its
+// modules as its resolved spelling does. The links stayed in the modules'
+// paths, so their chunk names climbed out of the root to them:
+// `../vlink/v.lua` for `--search vlink`, and for `--search vendor` run from a
+// link to the project, a path to the working directory as the shell spells
+// it (in PWD, which the Go runtime prefers).
+func TestDebugBundle_SearchDirectoryThroughALink(t *testing.T) {
+	t.Parallel()
+
+	dir, err := filepath.EvalSymlinks(luatest.WriteProject(t, luatest.Project{
+		"src/main.lua": "print(require(\"v\"))\n",
+		"vendor/v.lua": "return \"v\"\n",
+	}))
+	require.NoError(t, err)
+	require.NoError(t, os.Symlink("vendor", filepath.Join(dir, "vlink")))
+
+	link := filepath.Join(t.TempDir(), "project")
+	require.NoError(t, os.Symlink(dir, link))
+
+	bundle := func(t *testing.T, wd, search string) string {
+		t.Helper()
+
+		r := luatest.RunCLI(t, wd, []string{"PWD=" + wd}, "--entry", "src/main.lua", "--search", search, "--debug")
+		require.Equal(t, 0, r.ExitCode, "luamerge in %s with --search %s\n%s", wd, search, r.Stderr)
+
+		return r.Stdout
+	}
+
+	want := bundle(t, dir, "vendor")
+	require.Contains(t, want, "\"@../vendor/v.lua\"", "the module's chunk name")
+
+	tests := map[string]struct{ wd, search string }{
+		"search directory through a link":  {wd: dir, search: "vlink"},
+		"working directory through a link": {wd: link, search: "vendor"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, want, bundle(t, tt.wd, tt.search))
 		})
 	}
 }

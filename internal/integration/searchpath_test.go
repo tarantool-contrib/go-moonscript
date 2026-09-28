@@ -1,10 +1,12 @@
 package integration_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/tarantool/go-luamerge/internal/luatest"
 )
@@ -59,4 +61,26 @@ func TestResolve_PathStyleNames(t *testing.T) {
 		opts := luatest.RunOptions{LuaPath: "", Env: nil, Timeout: 0}
 		luatest.AssertSame(t, luatest.Run(t, interp, app, opts, "main.lua"), luatest.RunBundle(t, interp, bundle, opts))
 	})
+}
+
+// TestResolve_SearchDirectoryNameThroughALink checks the name of a search
+// directory reached through a symbolic link, where the name is stripped as a
+// prefix: it is the name of the directory the link leads to, as the root's
+// is. With --search vlink, a link to vendor, "vendor.x" is x in vendor and
+// "vlink.x" is not stripped.
+func TestResolve_SearchDirectoryNameThroughALink(t *testing.T) {
+	t.Parallel()
+
+	dir := luatest.WriteProject(t, luatest.Project{
+		"src/main.lua": "require(\"vendor.x\")\nrequire(\"vlink.x\")\n",
+		"vendor/x.lua": "return 1\n",
+	})
+	require.NoError(t, os.Symlink("vendor", filepath.Join(dir, "vlink")))
+
+	r := luatest.RunCLI(t, dir, nil, "--entry", "src/main.lua", "--search", "vlink")
+	require.Equal(t, 0, r.ExitCode, "%s", r.Stderr)
+
+	assert.Contains(t, r.Stdout, `package.preload["vendor.x"]`, "vendor.x is x in the search directory")
+	assert.NotContains(t, r.Stdout, `package.preload["vlink.x"]`, "vlink.x is not stripped")
+	assert.Contains(t, r.Stderr, `unresolved require "vlink.x"`)
 }

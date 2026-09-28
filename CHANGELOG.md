@@ -272,6 +272,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outside the root is named after its file.
 - A `--root` that does not exist is an error. The build used to go on and
   find no module under it.
+- A search directory is made absolute and its symbolic links resolved, like
+  the root and the entry, so its modules have the same paths however it is
+  spelled: through a symbolic link, or relative to a working directory
+  reached through one, as a shell keeps it in `PWD`. A `--debug` bundle named
+  such modules by a path through the link, which climbed out of the root
+  (`../../../home/me/link/vendor/json.lua`), and `Result.Files` listed them
+  so. A search directory that does not exist is an error, as a root that does
+  not exist is. Where the name of a search directory reached through a link
+  is stripped as a prefix, it is the name of the directory the link leads
+  to, as the root's name always was: `--search vlink`, a link to `vendor`,
+  strips `vendor.`, where it stripped `vlink.`.
 - `--package-name` overrides a `package_name` from `luamerge.yaml` or the
   environment, and `Options.PackageName` set after `LoadOptions` is the one
   `Bundle` uses. The configured name was applied to `strip_prefix` and

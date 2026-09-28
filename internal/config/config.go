@@ -291,12 +291,17 @@ func (c *Config) ApplyPackageName() {
 	}
 }
 
-// ResolveRoot settles the two paths module names are computed from. It makes
-// Entry and Root absolute and resolves the symbolic links in them, deriving
-// Root from Entry's directory when it is not set; both must exist. A module's
-// name is its path relative to Root, so the two have to be spelled alike: a
-// relative root, or one reached through a symbolic link, used to rename the
-// entry. Relative paths are taken from the working directory.
+// ResolveRoot settles the paths modules are found under and named after. It
+// makes Entry, Root and every directory of Search absolute and resolves the
+// symbolic links in them, deriving Root from Entry's directory when it is not
+// set; all of them must exist. The entry's name, and in debug mode every
+// chunk name, is a path relative to Root, so the paths have to be spelled
+// alike: a relative root, or one reached through a symbolic link, used to
+// rename the entry, and a search directory reached through a link, or taken
+// from a working directory reached through one, gave its modules paths
+// through the link. Relative paths are taken from the working directory.
+// Search gets a list of its own, so a list the caller holds is left as it
+// was.
 func (c *Config) ResolveRoot() error {
 	if c.Entry == "" {
 		return errEntryNotSet
@@ -308,19 +313,23 @@ func (c *Config) ResolveRoot() error {
 	}
 
 	c.Entry = entry
+	root := filepath.Dir(entry)
 
-	if c.Root == "" {
-		c.Root = filepath.Dir(entry)
-
-		return nil
+	if c.Root != "" {
+		root, err = realPath("root", c.Root)
+		if err != nil {
+			return err
+		}
 	}
 
-	root, err := realPath("root", c.Root)
+	c.Root = root
+
+	search, err := realPaths("search", c.Search)
 	if err != nil {
 		return err
 	}
 
-	c.Root = root
+	c.Search = search
 
 	return nil
 }
@@ -335,6 +344,27 @@ func realPath(what, path string) (string, error) {
 
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", what, err)
+	}
+
+	return resolved, nil
+}
+
+// realPaths is realPath of every path, in a list of its own. An empty list is
+// returned as it is.
+func realPaths(what string, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return paths, nil
+	}
+
+	resolved := make([]string, len(paths))
+
+	for i, path := range paths {
+		var err error
+
+		resolved[i], err = realPath(what, path)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return resolved, nil
