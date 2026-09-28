@@ -123,9 +123,8 @@ type Module struct {
 	Names []string
 	// BuiltinNames are the names in Names that some runtime has a built-in
 	// module of (see WarnShadowsBuiltin). Where it has one, require loads the
-	// runtime's own module and never this file, so the bundle must register
-	// the module under these names where the runtime's own searchers come
-	// first.
+	// runtime's own module and never this file, so the bundle must serve the
+	// module under these names only where the runtime finds none of its own.
 	BuiltinNames []string
 	// Aliases are the names --package-prefix generated from Names. Nothing in
 	// the project requires the module by them.

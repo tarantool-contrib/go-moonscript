@@ -282,9 +282,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a `csv.lua` on Tarantool, was registered in `package.preload`, which
   Tarantool consults before its own built-in modules: the bundle loaded the
   project's `csv.lua` where the program natively loads Tarantool's `csv`.
-  Such a module is now registered in `package.postload` behind a searcher
-  appended after the interpreter's own, as with `--fallback`, so the
-  runtime's module wins wherever there is one and the embedded module is
-  used elsewhere; a `shadows-builtin` warning names those runtimes.
+  Such a module is now served by a wrapper around the interpreter's first
+  searcher, which hands it out only where that searcher finds nothing: the
+  runtime's module wins wherever there is one, and elsewhere the embedded
+  module wins over every file on disk, as the modules in `package.preload`
+  do; a `shadows-builtin` warning names those runtimes. With `--fallback`
+  such a module goes to `package.postload` like every other one.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

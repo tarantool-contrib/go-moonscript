@@ -202,34 +202,63 @@ func TestEmit_Fallback(t *testing.T) {
 	assertRuns(t, bundle, "embedded m\n")
 }
 
-// TestEmit_RegistersBuiltinNamesBehindTheRuntime: a name that some runtime
-// has a built-in module of goes into package.postload behind a searcher
-// appended after the interpreter's own, in every mode, so the runtime's
-// module wins where there is one and the embedded one is used elsewhere. The
-// other names of the module stay in package.preload. Tarantool finds its csv
-// with a searcher that runs after package.preload, so there a loader in
-// package.preload would win over the built-in.
-func TestEmit_RegistersBuiltinNamesBehindTheRuntime(t *testing.T) {
+// TestEmit_ServesBuiltinNamesAfterTheFirstSearcher: a name that some runtime
+// has a built-in module of is served by a wrapper around the interpreter's
+// first searcher, which hands out the embedded loader only when that
+// searcher finds nothing, so the runtime's module wins where there is one
+// and the embedded one is used elsewhere. The other names of the module stay
+// in package.preload. Tarantool finds its csv through its first searcher,
+// after package.preload, so there a loader in package.preload would win over
+// the built-in. In fallback mode every name goes to package.postload, behind
+// the appended searcher, as before.
+func TestEmit_ServesBuiltinNamesAfterTheFirstSearcher(t *testing.T) {
 	t.Parallel()
 
 	csv := newModule("/test/csv.lua", "return { impl = \"embedded\" }\n", "csv", "compat.csv")
 	csv.BuiltinNames = []string{"csv"}
 	g := newGraph(newModule("/test/main.lua",
 		"print(require(\"csv\").impl or \"built-in\", require(\"compat.csv\").impl)\n"), csv)
+	wrapper := "__luamerge_searchers[1] = function(name, ...)\n" +
+		"  if name ~= \"csv\" then return __luamerge_first(name, ...) end\n"
 
-	for name, debug := range map[string]bool{"default": false, "debug": true} {
+	for name, tt := range map[string]struct {
+		debug, fallback bool
+		want, notWant   []string
+	}{
+		"default": {
+			debug: false, fallback: false,
+			want:    []string{wrapper, "package.preload[\"compat.csv\"] = __luamerge_loader"},
+			notWant: []string{"package.preload[\"csv\"]", "postload"},
+		},
+		"debug": {
+			debug: true, fallback: false,
+			want:    []string{wrapper, "package.preload[\"compat.csv\"] = __luamerge_loader"},
+			notWant: []string{"package.preload[\"csv\"]", "postload"},
+		},
+		"fallback": {
+			debug: false, fallback: true,
+			want: []string{
+				"package.postload[\"csv\"] = __luamerge_loader", "package.postload[\"compat.csv\"] = __luamerge_loader",
+				"searchers[#searchers+1] = function(mod)",
+			},
+			notWant: []string{"__luamerge_first", "package.preload["},
+		},
+	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			opts := defaults()
-			opts.Debug = debug
+			opts.Debug, opts.Fallback = tt.debug, tt.fallback
 
 			bundle := emitBundle(t, g, opts)
 
-			assert.Contains(t, bundle, "package.postload[\"csv\"] = __luamerge_loader")
-			assert.NotContains(t, bundle, "package.preload[\"csv\"]")
-			assert.Contains(t, bundle, "package.preload[\"compat.csv\"] = __luamerge_loader")
-			assert.Contains(t, bundle, "searchers[#searchers+1] = function(mod)")
+			for _, want := range tt.want {
+				assert.Contains(t, bundle, want)
+			}
+
+			for _, notWant := range tt.notWant {
+				assert.NotContains(t, bundle, notWant)
+			}
 
 			luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
 				t.Helper()

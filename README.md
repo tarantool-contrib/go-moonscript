@@ -99,7 +99,7 @@ Why each piece is there:
 
 - **`package.preload[name]`** — standard `require()` finds the loader here before searching the filesystem, so the embedded copy is used, and `require` itself manages `package.loaded`: a module is cached once it has loaded, a module that raised while loading is not, and a require cycle fails as it does natively (Lua 5.1, LuaJIT and Tarantool report the loop; later versions run out of C stack).
 - **Registered only when the slot is empty** — a loader the embedding application put in `package.preload` before running the program wins over the embedded copy, as it wins over the file on `package.path` natively; so does LuaJIT's built-in `table.new`.
-- **Names of runtime built-ins go behind the interpreter's searchers** — a module required by a name that some runtime has a built-in module of (a pure-Lua `bit.lua` or `utf8.lua`, a `csv.lua` on Tarantool) is registered in `package.postload` instead, behind a searcher appended after the interpreter's own, as with `--fallback`. Natively, where the runtime has such a module, `require` loads it and never the file; Tarantool finds its built-ins with a searcher that runs after `package.preload`, where the embedded copy would win. Behind the interpreter's searchers the embedded module is used only where the runtime has none of that name.
+- **Names of runtime built-ins right after the first searcher** — a module required by a name that some runtime has a built-in module of (a pure-Lua `bit.lua` or `utf8.lua`, a `csv.lua` on Tarantool) is not put in `package.preload` under that name. The module wraps the interpreter's first searcher instead: `package.preload` on PUC Lua and LuaJIT, where LuaJIT keeps `table.new`, and on Tarantool the chain of `package.preload`, override modules and its built-in modules, which comes after `package.preload`, where the embedded copy would win. The wrapper asks that searcher first and hands out the embedded module only when it finds nothing. So the runtime's own module wins where there is one, as natively, and everywhere else the embedded module wins over every file on disk, as the modules in `package.preload` do. For any other name the wrapper returns what the first searcher returns, so the message of a module that is not found stays the interpreter's own.
 - **The `_ENV` local in the enclosing `do` block** — makes `_ENV` the loader's *first upvalue*, which Lua 5.2's `module`/`_ENV` handling depends on. It lives outside the function on purpose. On Lua 5.1, LuaJIT and Tarantool `_ENV` is an ordinary name, and the `and` keeps the line from reading it as a global, which strict mode would reject.
 - **`local __luamerge_loader = function(...)`** — the name comes into scope only after the function, so the module's code sees no local of the wrapper: its globals stay globals whatever their names, and the function's local variable slots are all the module's.
 - **The `arg` line** — PUC Lua 5.1 (`LUA_COMPAT_VARARG`) gives every vararg function an implicit local `arg`, which would hide the global `arg` from the module; there the line fills that local with the global table. On every other interpreter the condition is false and the line touches nothing, so an assignment to `arg` in a module stays global. It reads the global with `rawget`, so a strict `_G` without a global `arg` does not make it raise. Disable with `--no-arg-fix`.
@@ -408,7 +408,7 @@ The file that contains the `require()` plays no part, as in Lua: `require("util"
 
 The standard library — `_G`, `coroutine`, `debug`, `io`, `math`, `os`, `package`, `string` and `table` — is never looked up. Every interpreter has it in `package.loaded` before the program starts, so `require("debug")` returns it without searching and never loads a file of that name; the bundler neither embeds nor reports it, even with `--strict`. `--include` of one of these names is skipped with a warning.
 
-Some modules only some runtimes have built in: `bit32` (Lua 5.2 and 5.3), `utf8` (Lua 5.3 and later, and Tarantool), LuaJIT's `bit`, `ffi`, `jit`, `table.new`, `string.buffer` and the like, and Tarantool's own, such as `json`, `fiber` or `csv`. A `require` of one that the project has no file for is left to the runtime and not reported, even with `--strict`: where the runtime has the module it loads it, and elsewhere the program fails as it does natively. A file the project does have for such a name — a pure-Lua `bit.lua` or `utf8.lua` for the runtimes without one — is embedded behind the interpreter's own searchers (see [How it works](#how-it-works)), with a `shadows-builtin` warning that names the runtimes which load their own module instead. The list, read from the interpreters themselves, is in [`internal/graph/builtin.go`](internal/graph/builtin.go).
+Some modules only some runtimes have built in: `bit32` (Lua 5.2 and 5.3), `utf8` (Lua 5.3 and later, and Tarantool), LuaJIT's `bit`, `ffi`, `jit`, `table.new`, `string.buffer` and the like, and Tarantool's own, such as `json`, `fiber` or `csv`. A `require` of one that the project has no file for is left to the runtime and not reported, even with `--strict`: where the runtime has the module it loads it, and elsewhere the program fails as it does natively. A file the project does have for such a name — a pure-Lua `bit.lua` or `utf8.lua` for the runtimes without one — is embedded and served right after the interpreter's first searcher (see [How it works](#how-it-works)), with a `shadows-builtin` warning that names the runtimes which load their own module instead. The list, read from the interpreters themselves, is in [`internal/graph/builtin.go`](internal/graph/builtin.go).
 
 ### Prefix stripping
 
@@ -510,10 +510,17 @@ do
 end
 ```
 
-A module required by the name of a runtime's built-in module is registered behind the same searcher in the default mode too, while the other names stay in `package.preload`:
+A module required by the name of a runtime's built-in module wraps the interpreter's first searcher for that name, right after its loader, and its other names stay in `package.preload` (with `--fallback`, every name goes to `package.postload` as above):
 
 ```lua
-if package.postload["utf8"] == nil then package.postload["utf8"] = __luamerge_loader end
+local __luamerge_searchers = package.searchers or package.loaders
+local __luamerge_first = __luamerge_searchers[1]
+__luamerge_searchers[1] = function(name, ...)
+  if name ~= "utf8" then return __luamerge_first(name, ...) end
+  local found, data = __luamerge_first(name, ...)
+  if type(found) == "function" then return found, data end
+  return __luamerge_loader
+end
 ```
 
 ## Limitations
@@ -527,7 +534,6 @@ if package.postload["utf8"] == nil then package.postload["utf8"] = __luamerge_lo
 - **Modules inherit the bundle's environment.** Natively `require` runs a module in the global environment; in a bundle, modules and the entry run in the environment the bundle itself was loaded with, in both modes. That differs only when a host loads the bundle with an environment of its own (`setfenv`, or `load`'s `env` argument).
 - **With `--suffix`, the entry runs one stack level deeper than a script**, inside a function the bundle calls and returns from before the suffix runs. A check that counts stack levels to tell whether it is the main script, such as `pcall(debug.getlocal, 4, 1)`, sees a module there on every interpreter but Tarantool. So does it with `--debug` on PUC Lua 5.1, where the bundle's call of the entry's chunk leaves a tail-call level.
 - **Module code runs inside a vararg function.** On PUC Lua 5.1 and Lua 5.5 such a function keeps one of its 200 local variable slots for itself, so a module can declare at most 199 locals at its top level there (200 natively); the same holds for the entry with `--suffix`. On PUC Lua 5.1 an assignment to `arg` in a module (or, with `--suffix`, in the entry) sets that function's implicit `arg` local, not the global.
-- **A module named like a runtime's built-in is found after the interpreter's own searchers**, as with `--fallback`. On a runtime without that built-in, a module of the same name elsewhere on `package.path` or `package.cpath` — a system-installed `bit32.lua`, or LuaBitOp's `bit.so` next to a project's pure-Lua `bit.lua` — is loaded instead of the embedded one, while the original program, run from its own directory, finds its own file first.
 - **Tarantool's `override.<name>` modules are not modeled.** Natively Tarantool loads a module named `override.foo` (such as `override/foo.lua`) for `require("foo")` ahead of both `foo.lua` and a built-in `foo`; the bundler neither embeds such a module nor lets it take the place of an embedded one.
 
 ## Contributing

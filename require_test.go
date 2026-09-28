@@ -156,8 +156,9 @@ func TestBundle_RuntimeBuiltinWithoutAFile(t *testing.T) {
 }
 
 // TestBundle_ModuleNamedLikeABuiltin: a module of the project named like a
-// module Tarantool has built in is embedded, and registered where Tarantool's
-// own searchers come first, with a warning of its own kind that says so.
+// module Tarantool has built in is embedded, and served only after the
+// interpreter's first searcher, which holds Tarantool's built-ins, with a
+// warning of its own kind that says so.
 func TestBundle_ModuleNamedLikeABuiltin(t *testing.T) {
 	t.Parallel()
 
@@ -179,7 +180,7 @@ func TestBundle_ModuleNamedLikeABuiltin(t *testing.T) {
 	assert.Equal(t, 1, w.Line)
 	assert.Contains(t, w.Message, "Tarantool", "the warning names the runtime")
 	assert.Equal(t, []string{main, csv}, res.Files, "the module is embedded")
-	assert.Contains(t, out, `package.postload["csv"] = __luamerge_loader`)
+	assert.Contains(t, out, `if name ~= "csv" then return __luamerge_first(name, ...) end`)
 	assert.NotContains(t, out, `package.preload["csv"]`)
 }
 

@@ -133,3 +133,67 @@ func TestCLI_ProjectModuleNamedLikeABuiltin(t *testing.T) {
 		}
 	}
 }
+
+// TestCLI_BuiltinNamedModuleBeatsFilesOnDisk: a project's bit32.lua, for the
+// runtimes without the bit32 library, and another bit32.lua installed further
+// along package.path. Natively the program, run from its directory, finds its
+// own file first on those runtimes, and Lua 5.2 and 5.3 load their built-in.
+// The bundle must do the same from anywhere: the embedded module loses to the
+// runtime's built-in only, never to a file on disk.
+func TestCLI_BuiltinNamedModuleBeatsFilesOnDisk(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	installed := luatest.WriteProject(t, luatest.Project{
+		"bit32.lua": "return { impl = \"a system-installed bit32.lua\" }\n",
+	})
+
+	for mode, flags := range modes() {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+
+			spec := cliCase(luatest.Project{
+				"main.lua":  "print(\"bit32 is \" .. (require(\"bit32\").impl or \"built-in\"))\n",
+				"bit32.lua": "return { impl = \"the project's bit32.lua\" }\n",
+			}, flags...)
+			spec.Options.LuaPath = "./?.lua;./?/init.lua;" + installed + "/?.lua;;"
+			spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+				t.Helper()
+
+				require.Equal(t, 0, orig.ExitCode, "the original\n%s", orig)
+				require.NotContains(t, orig.Stdout, "system-installed", "the original\n%s", orig)
+				luatest.AssertSame(t, orig, bundle)
+			}
+
+			luatest.Differential(t, spec)
+		})
+	}
+}
+
+// TestCLI_MissingModuleErrorStaysNative: a bundle that carries a module named
+// like a runtime's built-in reports a module it does not carry, and that is
+// not on disk either, with the interpreter's own message, the list of places
+// it looked included, as the original does.
+func TestCLI_MissingModuleErrorStaysNative(t *testing.T) {
+	t.Parallel()
+
+	for mode, flags := range modes() {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+
+			spec := cliCase(luatest.Project{
+				"main.lua": "local u = require(\"utf8\")\nlocal m = require(\"nope\")\n",
+				"utf8.lua": "return {}\n",
+			}, flags...)
+			spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+				t.Helper()
+
+				require.Contains(t, orig.Message(), "module 'nope' not found", "the original\n%s", orig)
+				luatest.AssertSame(t, orig, bundle)
+			}
+
+			luatest.Differential(t, spec)
+		})
+	}
+}

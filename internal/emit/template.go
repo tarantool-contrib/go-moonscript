@@ -81,14 +81,21 @@ import (
 // appended last, so an on-disk copy on package.path takes precedence and the
 // embedded module is used only as a fallback.
 //
-// A name that some runtime has a built-in module of (a module's LateNames)
-// goes into package.postload behind the same appended searcher in either
-// mode. Natively, where the runtime has that module, require loads it and
-// never the file: from package.loaded, from package.preload (LuaJIT's
-// table.new) or, on Tarantool, from a searcher of its own that runs after
-// package.preload, where a loader of the bundle would win over it. Behind
-// the interpreter's own searchers the embedded module is found only where
-// the runtime has no module of that name.
+// A name that some runtime has a built-in module of (a module's
+// BuiltinNames) is served, outside fallback mode, by a wrapper the module
+// puts around the interpreter's first searcher. Natively, where the runtime
+// has that module, require loads it and never the file: from package.loaded,
+// before any searcher runs, or through that first searcher, which is
+// package.preload on PUC Lua and LuaJIT (LuaJIT keeps table.new there) and on
+// Tarantool the chain of package.preload, override modules and its built-in
+// modules, where a loader in package.preload would win over the built-in. So
+// the wrapper asks the first searcher and hands out the embedded loader only
+// when it finds nothing: the runtime's own module wins where there is one,
+// and everywhere else the embedded module wins over every file on disk, as a
+// module in package.preload does. For any other name the wrapper returns what
+// the first searcher returns, so the message of a module that is not found
+// stays the interpreter's own. The wrapper's locals come after the loader, so
+// the module's code sees none of them.
 //
 // The entry is not a module: its code comes last, at the top level of the
 // bundle, so it runs as the main chunk, the way the interpreter runs a script.
@@ -124,7 +131,7 @@ __luamerge_load({{bracket .Source}}, {{q (chunkname .Path)}})
 {{if .Prefix}}do
 {{.Prefix}}end
 
-{{end}}{{if .Postload}}package.postload = package.postload or {}
+{{end}}{{if .Fallback}}package.postload = package.postload or {}
 do
   local postload = package.postload
   local searchers = package.searchers or package.loaders
@@ -151,7 +158,14 @@ end
 function(...) return {{template "load" .Code}}(...) end
 {{- else}}{{template "function" .Code}}{{end}}
 {{range .Names}}if package.{{$.RegTable}}[{{q .}}] == nil then package.{{$.RegTable}}[{{q .}}] = __luamerge_loader end
-{{end}}{{range .LateNames}}if package.postload[{{q .}}] == nil then package.postload[{{q .}}] = __luamerge_loader end
+{{end}}{{with .BuiltinNames}}local __luamerge_searchers = package.searchers or package.loaders
+local __luamerge_first = __luamerge_searchers[1]
+__luamerge_searchers[1] = function(name, ...)
+  if {{range $i, $name := .}}{{if $i}} and {{end}}name ~= {{q $name}}{{end}} then return __luamerge_first(name, ...) end
+  local found, data = __luamerge_first(name, ...)
+  if type(found) == "function" then return found, data end
+  return __luamerge_loader
+end
 {{end}}end
 {{end}}{{range .Aliases}}if package.{{$.RegTable}}[{{q .Name}}] == nil then
   package.{{$.RegTable}}[{{q .Name}}] = function(...) return require({{q .Target}}) end
@@ -278,15 +292,12 @@ type templateData struct {
 	Modules   []moduleData
 	// Aliases are the names --package-prefix generated, registered after
 	// every module.
-	Aliases []graph.Alias
-	Prefix  string
-	Suffix  string
-	Shebang string
-	Debug   bool
-	// Postload sets up package.postload and the searcher, appended after the
-	// interpreter's own, that consults it: in fallback mode, and whenever a
-	// module has LateNames.
-	Postload bool
+	Aliases  []graph.Alias
+	Prefix   string
+	Suffix   string
+	Shebang  string
+	Debug    bool
+	Fallback bool
 	// RegTable is the package field loaders are registered in: "preload"
 	// normally, "postload" in fallback mode.
 	RegTable string
@@ -308,9 +319,9 @@ type codeData struct {
 type moduleData struct {
 	// Names are registered in RegTable.
 	Names []string
-	// LateNames are the names some runtime has a built-in module of,
-	// registered in package.postload behind the interpreter's own searchers.
-	// In fallback mode they are among Names instead.
-	LateNames []string
-	Code      codeData
+	// BuiltinNames are the names some runtime has a built-in module of,
+	// served by a wrapper around the interpreter's first searcher. In
+	// fallback mode they are among Names instead.
+	BuiltinNames []string
+	Code         codeData
 }
