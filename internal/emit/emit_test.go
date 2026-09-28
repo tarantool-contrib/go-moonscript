@@ -137,12 +137,22 @@ func TestEmit_ModuleWithAliases(t *testing.T) {
 func TestEmit_Suffix(t *testing.T) {
 	t.Parallel()
 
-	g := newGraph(newModule("/test/main.lua", "print(\"hello\")\n"))
-	opts := defaults()
-	opts.Prefix = "print(\"prefix\")"
-	opts.Suffix = "print(\"suffix\")"
+	// return must be the last statement of the entry's block, and the suffix
+	// still runs after it.
+	g := newGraph(newModule("/test/main.lua", "print(\"hello\")\nreturn \"result\"\n"))
 
-	assertRuns(t, emitBundle(t, g, opts), "prefix\nhello\nsuffix\n")
+	for name, debug := range map[string]bool{"default": false, "debug": true} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := defaults()
+			opts.Prefix = "print(\"prefix\")"
+			opts.Suffix = "print(\"suffix\")"
+			opts.Debug = debug
+
+			assertRuns(t, emitBundle(t, g, opts), "prefix\nhello\nsuffix\n")
+		})
+	}
 }
 
 func TestEmit_Fallback(t *testing.T) {

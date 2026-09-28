@@ -98,5 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `require("mylib")` on Lua 5.1, LuaJIT and Tarantool.
 - With `--fallback`, a `main.lua` in the working directory no longer replaces
   the bundle's entry.
+- A bundle built with `--suffix` failed to load with a syntax error: the
+  suffix was emitted after the final `return`. The suffix now runs after the
+  entry, and the bundle still returns every value the entry returns.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD

@@ -26,6 +26,13 @@ import (
 // are the chunk's, the stack above it is a script's, and it is neither looked
 // up through the searchers nor cached in package.loaded. In debug mode its
 // loaded chunk is called with the bundle's `...` instead.
+//
+// A suffix must run after the entry, while `return` must be the last
+// statement of a block. With a suffix the entry is therefore a function: the
+// bundle calls it with its `...`, keeps every result (select("#") counts a
+// trailing nil, which a table alone would lose; Lua 5.1 has no table.pack),
+// runs the suffix in a block of its own and returns the results. The call
+// puts one more level on the stack above the entry than a script has.
 const templateText = `{{if .Shebang}}{{.Shebang}}
 {{end}}-- Amalgamated by luamerge
 -- Entry: {{.EntryName}}
@@ -54,9 +61,21 @@ package.{{$.RegTable}}[{{q $primary}}] = function(...)
 {{else}}{{indent .Source 0}}{{end}}end
 end
 {{range .AliasNames}}package.{{$.RegTable}}[{{q .}}] = function(...) return require({{q $primary}}) end
-{{end}}{{end}}{{with .Entry}}{{if $.Debug}}return assert((loadstring or load)({{bracket .Source}},
+{{end}}{{end}}{{with .Entry}}{{if $.Suffix}}local __luamerge_main = {{if $.Debug -}}
+assert((loadstring or load)({{bracket .Source}},
+  {{q (chunkname .Path)}})){{else}}(function()
+local _ENV = _ENV
+return function(...)
+{{if not $.NoArgFix}}  local arg = _G.arg
+{{end}}{{indent .Source 0}}end
+end)(){{end}}
+local __luamerge_n, __luamerge_results = (function(...) return select("#", ...), { ... } end)(__luamerge_main(...))
+do
+{{$.Suffix}}end
+return (table.unpack or unpack)(__luamerge_results, 1, __luamerge_n)
+{{else if $.Debug}}return assert((loadstring or load)({{bracket .Source}},
   {{q (chunkname .Path)}}))(...)
-{{else}}{{indent .Source 0}}{{end}}{{end}}{{.Suffix}}`
+{{else}}{{indent .Source 0}}{{end}}{{end}}`
 
 // indent prefixes every line of source with `spaces` spaces and normalizes the
 // trailing newline. Module bodies are emitted with spaces=0 (verbatim, column 0)

@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -41,6 +42,28 @@ func bundleProject(tb testing.TB, project luatest.Project, args ...string) []byt
 	return luatest.CLI(args...)(tb, luatest.WriteProject(tb, project))
 }
 
+// hostRuns runs a host script that gets the program to run as arg[1]: once
+// next to the original project, with main.lua as the program, and once in a
+// directory that holds nothing but the host and the bundle, with bundle.lua.
+func hostRuns(
+	t *testing.T, interp luatest.Interpreter, host string, project luatest.Project, bundle []byte,
+) (luatest.Result, luatest.Result) {
+	t.Helper()
+
+	origProject := maps.Clone(project)
+	origProject["host.lua"] = host
+	origDir := luatest.WriteProject(t, origProject)
+	bundleDir := luatest.WriteProject(t, luatest.Project{"host.lua": host, "bundle.lua": string(bundle)})
+
+	return luatest.Run(t, interp, origDir, runOptions(), "host.lua", "main.lua"),
+		luatest.Run(t, interp, bundleDir, runOptions(), "host.lua", "bundle.lua")
+}
+
+// showResults is a host that prints how many values the program returned to
+// dofile, and the values.
+const showResults = "local function show(...) print(select(\"#\", ...), ...) end\n" +
+	"show(dofile(arg[1]))\n"
+
 // TestBundle_EntrySeesCommandLineArguments: the entry's `...` holds the
 // command-line arguments, as in a script, not the arguments require passes
 // to a loader.
@@ -76,21 +99,13 @@ func TestBundle_EntryReturnsEveryValue(t *testing.T) {
 
 	luatest.Interpreters(t)
 
-	host := "local function show(...) print(select(\"#\", ...), ...) end\n" +
-		"show(dofile(arg[1]))\n"
-	entry := "return 1, nil, 3\n"
-	bundle := bundleProject(t, luatest.Project{"main.lua": entry}, "--entry", "main.lua")
+	project := luatest.Project{"main.lua": "return 1, nil, 3\n"}
+	bundle := bundleProject(t, project, "--entry", "main.lua")
 
 	luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
 		t.Helper()
 
-		dir := luatest.WriteProject(t, luatest.Project{
-			"host.lua":   host,
-			"main.lua":   entry,
-			"bundle.lua": string(bundle),
-		})
-		orig := luatest.Run(t, interp, dir, runOptions(), "host.lua", "main.lua")
-		bun := luatest.Run(t, interp, dir, runOptions(), "host.lua", "bundle.lua")
+		orig, bun := hostRuns(t, interp, showResults, project, bundle)
 		require.Equal(t, "3\t1\tnil\t3\n", orig.Stdout, "the original\n%s", orig)
 		luatest.AssertSame(t, orig, bun)
 	})
@@ -220,4 +235,68 @@ func TestBundle_EntryPathNameIsFree(t *testing.T) {
 	}
 
 	luatest.Differential(t, spec)
+}
+
+// modes are the ways of emitting module and entry code, as CLI flags.
+func modes() map[string][]string {
+	return map[string][]string{"default": nil, "debug": {"--debug"}}
+}
+
+// TestBundle_Suffix: the suffix runs after the program, whatever the entry's
+// last statement is. The original has no suffix, so the bundle prints what
+// the original prints and then what the suffix prints.
+func TestBundle_Suffix(t *testing.T) {
+	t.Parallel()
+
+	for mode, flags := range modes() {
+		for name, entry := range map[string]string{
+			"statement": "print(\"main\")\n",
+			"return":    "print(\"main\")\nreturn \"main's result\"\n",
+		} {
+			t.Run(mode+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				spec := cliCase(luatest.Project{"main.lua": entry},
+					append([]string{"--suffix", "print(\"suffix\")"}, flags...)...)
+				spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
+					t.Helper()
+
+					assert.Equal(t, "main\n", orig.Stdout, "the original\n%s", orig)
+					assert.Equal(t, orig.Stdout+"suffix\n", bundle.Stdout, "the bundle\n%s", bundle)
+					luatest.AssertSameExitCode(t, orig, bundle)
+					luatest.AssertSameStderr(t, orig, bundle)
+				}
+
+				luatest.Differential(t, spec)
+			})
+		}
+	}
+}
+
+// TestBundle_SuffixKeepsReturnValues: with a suffix the bundle still returns
+// every value the entry returns, nil in the middle included.
+func TestBundle_SuffixKeepsReturnValues(t *testing.T) {
+	t.Parallel()
+
+	luatest.Interpreters(t)
+
+	project := luatest.Project{"main.lua": "return 1, nil, 3\n"}
+
+	for mode, flags := range modes() {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+
+			bundle := bundleProject(t, project,
+				append([]string{"--entry", "main.lua", "--suffix", "print(\"suffix\")"}, flags...)...)
+
+			luatest.ForEachInterpreter(t, func(t *testing.T, interp luatest.Interpreter) {
+				t.Helper()
+
+				orig, bun := hostRuns(t, interp, showResults, project, bundle)
+				require.Equal(t, "3\t1\tnil\t3\n", orig.Stdout, "the original\n%s", orig)
+				assert.Equal(t, "suffix\n"+orig.Stdout, bun.Stdout, "the bundle\n%s", bun)
+				luatest.AssertSameExitCode(t, orig, bun)
+			})
+		})
+	}
 }
