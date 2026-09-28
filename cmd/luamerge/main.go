@@ -25,6 +25,10 @@ var (
 	date    = "unknown"
 )
 
+// exitUsage is the exit status of a mistake on the command line, the one
+// pflag exits with for an unknown flag.
+const exitUsage = 2
+
 func main() {
 	os.Exit(run())
 }
@@ -97,7 +101,15 @@ func run() int {
 		pflag.Lookup(name).NoOptDefVal = "true"
 	}
 
+	// Parsing stops at the first positional argument, so the argument before
+	// it is the last one parsed (see unexpectedArgument).
+	pflag.CommandLine.SetInterspersed(false)
 	pflag.Parse()
+
+	if pflag.NArg() > 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "error: %s\n", unexpectedArgument(pflag.CommandLine, os.Args[1:]))
+		return exitUsage
+	}
 
 	if showVersion {
 		_, _ = fmt.Fprintf(os.Stdout, "luamerge version %s (commit %s, built on %s)\n", version, commit, date)
@@ -216,6 +228,39 @@ func run() int {
 	}
 
 	return 0
+}
+
+// unexpectedArgument describes the first positional argument of args, the
+// arguments parsed into flags, for an error message; luamerge takes none.
+// Parsing stopped at that argument, so the one before it, if any, was the
+// last parsed. When that is a flag, it is one that does not take the next
+// argument as its value, since it would have taken this one: a boolean flag,
+// which takes a value only after "=". If the stray word reads as a boolean,
+// it was meant as that value (--minify false turns minification on and
+// leaves "false" over), and the message shows the "=" form.
+func unexpectedArgument(flags *pflag.FlagSet, args []string) string {
+	i := len(args) - flags.NArg()
+	stray := args[i]
+
+	msg := fmt.Sprintf("unexpected argument %q: luamerge takes no positional arguments", stray)
+
+	if strings.HasSuffix(stray, ".lua") {
+		return msg + "; name the entry with --entry " + stray
+	}
+
+	if i == 0 {
+		return msg
+	}
+
+	// The "--" that ends the flags is no flag.
+	name, isFlag := strings.CutPrefix(args[i-1], "--")
+	_, err := strconv.ParseBool(stray)
+
+	if isFlag && flags.Lookup(name) != nil && err == nil {
+		return fmt.Sprintf("%s; a boolean flag takes its value after \"=\": --%s=%s", msg, name, stray)
+	}
+
+	return msg
 }
 
 // multiString is a list flag. A value holds comma-separated items, split as

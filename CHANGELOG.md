@@ -235,5 +235,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outside the root is named after its file.
 - A `--root` that does not exist is an error. The build used to go on and
   find no module under it.
+- A positional argument is an error, with exit status 2 like an unknown flag.
+  Positional arguments were ignored, so `--minify false` minified (a boolean
+  flag takes its value only after `=`: `--minify=false`), and
+  `luamerge main.lua` complained that `--entry` was missing.
 
 [Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
