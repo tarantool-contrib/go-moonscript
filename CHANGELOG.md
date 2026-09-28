@@ -239,6 +239,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment, and `Options.PackageName` set after `LoadOptions` is the one
   `Bundle` uses. The configured name was applied to `strip_prefix` and
   `package_prefix` while loading, so a later one was ignored.
+- `--output ''` means the output set in `luamerge.yaml` or the environment,
+  or stdout by default, as the flag's help says. The build used to fail,
+  renaming its temporary file to a file named `''`.
 - A positional argument is an error, with exit status 2 like an unknown flag.
   Positional arguments were ignored, so `--minify false` minified (a boolean
   flag takes its value only after `=`: `--minify=false`), and

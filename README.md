@@ -117,7 +117,7 @@ Every file, the entry included, is read the way the interpreter reads a file it 
 |------|-------------|---------|
 | `--config` | Config file; a file named here must exist, while the default is read only if present (`--config ''` is the default) | `luamerge.yaml` |
 | `--entry` | Entry Lua file **(required)** | – |
-| `--output` | Output file, `-` for stdout | `-` |
+| `--output` | Output file, `-` for stdout; `--output ''` leaves it to the configuration | `-` |
 | `--root` | Base directory for module resolution; module names are paths relative to it. Must exist | directory of entry file |
 | `--path` | Lua path templates, semicolon-separated | `?.lua;?/init.lua` |
 | `--search` | Additional search directories, relative to the working directory, not the root (comma-separated or repeated) | – |

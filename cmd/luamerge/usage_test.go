@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -85,6 +86,53 @@ func TestCLI_PositionalArgumentsHint(t *testing.T) {
 			assert.Equal(t, usageExitCode, code, "exit code")
 			assert.Contains(t, stderr, "unexpected argument")
 			assert.NotContains(t, stderr, "=")
+		})
+	}
+}
+
+// TestCLI_EmptyOutput checks that an empty --output means what its help says:
+// the output of the configuration, or the default, stdout. It used to name a
+// file "", and the build failed renaming its temporary file to "".
+func TestCLI_EmptyOutput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		yaml string   // luamerge.yaml; "" writes none.
+		env  []string // KEY=VALUE pairs.
+		file string   // The output expected; "" means stdout.
+	}{
+		{"default", "", nil, ""},
+		{"config file", "output: out/bundle.lua\n", nil, "out/bundle.lua"},
+		{"environment", "", []string{"LUAMERGE_OUTPUT=env.lua"}, "env.lua"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// Arrange.
+			project := luatest.Project{"main.lua": "print(\"hi\")\n"}
+			if tt.yaml != "" {
+				project["luamerge.yaml"] = tt.yaml
+			}
+
+			dir := luatest.WriteProject(t, project)
+
+			// Act.
+			result := luatest.RunCLI(t, dir, tt.env, "--entry", "main.lua", "--output", "")
+
+			// Assert.
+			require.Equal(t, 0, result.ExitCode, result.Stderr)
+
+			bundle := result.Stdout
+			if tt.file != "" {
+				assert.Empty(t, result.Stdout)
+
+				bundle = readFile(t, filepath.Join(dir, tt.file))
+			}
+
+			assert.Contains(t, bundle, entryHeader("main"))
 		})
 	}
 }

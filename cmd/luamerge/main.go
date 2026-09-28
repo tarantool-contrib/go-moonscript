@@ -86,7 +86,7 @@ func run() int {
 	pflag.StringVar(&packagePrefix, "package-prefix", "",
 		"Prefix for all module names (e.g., 'mypkg' makes require('mypkg.module')")
 	pflag.StringVar(&packageName, "package-name", "",
-		"Package name (sets both strip-prefix and package-prefix to this value)")
+		"Package name (strip-prefix and package-prefix take this value unless set themselves)")
 	pflag.StringVar(&stripPrefix, "strip-prefix", "",
 		"Strip prefix from module names (e.g., 'tuple_diff' makes require('tuple_diff.lib.foo') find 'lib/foo.lua')")
 	pflag.BoolVar(&showVersion, "version", false, "Print version and exit")
@@ -142,7 +142,6 @@ func run() int {
 		dst  *string
 	}{
 		{"entry", entry, &cfg.Entry},
-		{"output", output, &cfg.Output},
 		{"root", root, &cfg.Root},
 		{"path", path, &cfg.Path},
 		{"prefix", prefix, &cfg.Prefix},
@@ -158,6 +157,12 @@ func run() int {
 		if flags.Changed(ov.name) {
 			*ov.dst = ov.val
 		}
+	}
+
+	// An empty --output leaves the output to the configuration, whose default
+	// is stdout, as the flag's help says; a file named "" does not exist.
+	if flags.Changed("output") && output != "" {
+		cfg.Output = output
 	}
 
 	// optionalBool flags are tri-state: apply only when the flag was given.
