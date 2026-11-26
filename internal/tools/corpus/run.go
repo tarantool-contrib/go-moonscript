@@ -207,7 +207,9 @@ func run(dir string) error {
 	jobs := make(chan *Occurrence)
 	results := make(chan Result)
 	var wg sync.WaitGroup
-	refDir := filepath.Join(dir, "ref")
+	if _, err := loadExpected(dir); err != nil {
+		return err
+	}
 	for range max(*flagJobs, 1) {
 		wg.Add(1)
 		go func() {
@@ -219,7 +221,7 @@ func run(dir string) error {
 				}
 			}()
 			for f := range jobs {
-				st := readStatus(refDir, f.ID)
+				st := refStatus(dir, f.ID)
 				if w == nil {
 					var err error
 					if w, err = startWorker(dir, *flagParseOnly); err != nil {
@@ -332,6 +334,15 @@ func run(dir string) error {
 	}
 	fmt.Printf("\nreport:  %s\nresults: %s\nhistory: %s\n", reportPath, resultsPath, filepath.Join(reports, "history.tsv"))
 	fmt.Printf("full diff for one file: corpus-bin -diff <id or repo/path substring>\n")
+	if *flagStrict {
+		bad := 0
+		for _, g := range groups {
+			bad += g.s.files - g.s.fullMatchFiles - g.s.refUnusable
+		}
+		if bad > 0 {
+			return fmt.Errorf("-strict: %d files do not match the reference", bad)
+		}
+	}
 	return nil
 }
 

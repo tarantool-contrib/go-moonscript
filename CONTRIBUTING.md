@@ -116,9 +116,57 @@ behaviour, which shouldn't happen: look at the diff before committing it.
 - `internal/tools/corpus`: the real-world corpus check. `fetch.sh` clones
   the MoonScript repositories found on GitHub, `corpus collect` deduplicates
   them and derives error-case mutants, `corpus ref` runs the reference
-  (Docker), `corpus run` compares. Run it before changes to the parser or the
-  compiler; see the comment at the top of
+  (Docker), `corpus run` compares (`corpus -lint` the linter). Run it before
+  changes to the parser or the compiler; see the comment at the top of
   [`internal/tools/corpus/main.go`](internal/tools/corpus/main.go).
+
+### The corpus in CI
+
+CI runs the corpus check on every push and pull request (the `corpus`
+job), without a local corpus and without the corpus sources in the
+repository: they are third-party code under assorted licenses. Committed
+instead, in `testdata/corpus/`:
+
+- `manifest.tsv` (2.9 MB): for each of the 19,960 distinct files, where to
+  fetch it from: a repository at a pinned commit (1,609 repositories, a
+  set that covers every file: forks share most of theirs), the path, the
+  sha256 and the git blob id;
+- `expected.tsv` (2.9 MB): for each file and each of its mutants, digests
+  (64-bit sha256 prefixes) of upstream moonc 0.8.0's parse tree, Lua
+  output, error messages and lint report (formats in
+  [`internal/tools/corpus/expected.go`](internal/tools/corpus/expected.go)).
+
+`scripts/check-corpus.sh` does what CI does, on any machine with Go and
+git:
+
+1. `corpus fetch` fetches the files not there yet into
+   `$MOON_CORPUS/files` (default `~/.cache/go-moonscript/corpus-pinned`):
+   one blob-less fetch of the needed blobs per repository, over
+   `GIT_URL` (default `https://github.com/%s.git`; use
+   `GIT_URL='git@github.com:%s.git'` for SSH), and checks every sha256.
+   Repositories that are gone (deleted, made private, force-pushed and
+   garbage-collected) are reported and skipped; it fails only when less
+   than 90% of the files are there;
+2. `corpus prepare` regenerates the mutants (the generator is seeded by the
+   file hash and independent of the Go release; `TestMutantsStable` pins
+   it) and the corpus' own `manifest.tsv` and `expected.tsv`;
+3. `corpus run -strict` and `corpus -lint -strict` compare with the
+   digests and fail on any difference. The report names the files; for a
+   diff, make their reference outputs with Docker, `corpus ref -corpus
+   $MOON_CORPUS -filter ID` (`ref -lint` for the linter), then `corpus
+   -corpus $MOON_CORPUS -diff ID` (`-lint -diff`).
+
+CI caches `files/` (about 20 MB compressed) under the hash of
+`manifest.tsv`, so the sources are fetched only when the manifest changes
+(then only the new files, from the previous cache) or the cache was
+evicted. A warm run takes about 2 minutes, a cold one about 2 more for the
+fetch.
+
+After a change of the corpus (`fetch.sh`, `corpus collect`), of the
+reference outputs, or of the mutant generator, regenerate both files from
+the full local corpus with `scripts/gen-corpus-manifest.sh` (it first makes
+the missing reference outputs in Docker; `--no-ref` skips that) and commit
+them. It is deterministic: the same corpus gives the same files.
 
 ## Commits
 

@@ -177,14 +177,24 @@ func genLintRef(dir string) error {
 	return nil
 }
 
-// lintOut is one side's lint result, in reflint.lua's terms.
+// lintOut is one side's lint result, in reflint.lua's terms. Hashed: a
+// reference known by the Digest of its lintKey only (see expected.go).
 type lintOut struct {
 	Status           string // clean | lint | parse-error | crash-table | crash-string | go-panic
 	Default, Compact string
 	Err              string
+	Hashed           bool
+	Digest           string
 }
 
 func loadLintRef(dir, id string) lintOut {
+	if m := mustExpected(dir); m != nil && !hasRefOutputs(dir, "ref-lint", id) {
+		o, err := parseLintEntry(m[id].lint)
+		if err != nil {
+			return lintOut{Status: "missing", Hashed: true}
+		}
+		return o
+	}
 	refDir := filepath.Join(dir, "ref-lint")
 	read := func(ext string) string {
 		b, _ := os.ReadFile(filepath.Join(refDir, id+"."+ext))
@@ -248,6 +258,8 @@ func classifyLint(ref, got lintOut) (outcome, detail string) {
 		return LNoRef, ref.Status
 	case got.Status == "go-panic":
 		return LGoPanic, firstLines(got.Err, 3)
+	case ref.Hashed:
+		return classifyLintDigest(ref, got)
 	case ref.Status != got.Status:
 		var d string
 		if got.Status == "crash-table" || got.Status == "crash-string" {
@@ -287,6 +299,29 @@ func classifyLint(ref, got lintOut) (outcome, detail string) {
 	return LMatch, ""
 }
 
+// classifyLintDigest is classifyLint for a Hashed reference.
+func classifyLintDigest(ref, got lintOut) (outcome, detail string) {
+	crash := ref.Status == "crash-table" || ref.Status == "crash-string"
+	switch {
+	case ref.Status != got.Status:
+		d := "ref " + ref.Status + ", go " + got.Status
+		if got.Err != "" {
+			d += ": " + firstLines(got.Err, 3)
+		}
+		return LStatus, d
+	case ref.Status == "clean":
+		return LMatch, ""
+	case digest(lintKey(got, false)) == ref.Digest:
+		if crash {
+			return LCrashMatch, ""
+		}
+		return LMatch, ""
+	case crash:
+		return LCrashMismatch, "go: " + firstLines(got.Err, 3) + " (reference: digest " + ref.Digest + ")"
+	}
+	return LMismatch, "differs from the expected digest " + ref.Digest
+}
+
 // firstDiff describes the first differing line.
 func firstDiff(want, got string) string {
 	w, g := strings.Split(want, "\n"), strings.Split(got, "\n")
@@ -308,6 +343,9 @@ func firstDiff(want, got string) string {
 func runLint(dir string) error {
 	files, err := lintFiles(dir)
 	if err != nil {
+		return err
+	}
+	if _, err := loadExpected(dir); err != nil {
 		return err
 	}
 	start := time.Now()
@@ -413,6 +451,9 @@ func runLint(dir string) error {
 		}
 	}
 	fmt.Printf("\nreport: %s\nfull diff for one file: corpus-bin -lint -diff <id>\n", reportPath)
+	if bad := len(res) - counts[LMatch] - counts[LCrashMatch]; *flagStrict && bad > 0 {
+		return fmt.Errorf("-strict: %d files do not match the reference", bad)
+	}
 	return nil
 }
 
@@ -450,7 +491,11 @@ func showLintDiff(dir, sel string) error {
 			fmt.Printf("--- err\n%s\n", o.Err)
 		}
 	}
-	show("reference", ref)
+	if ref.Hashed {
+		fmt.Printf("\n=== reference: %s, digest %s\n%s\n", ref.Status, orStr(ref.Digest, "-"), digestOnly)
+	} else {
+		show("reference", ref)
+	}
 	show("go", got)
 	return nil
 }

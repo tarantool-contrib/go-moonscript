@@ -59,6 +59,16 @@ The first version: a native Go port of MoonScript v0.8.0.
   LuaJIT-tests run against the VM, with every outcome pinned.
 - `internal/tools/luabench`: LuaJIT's benchmark suite and MoonScript
   benchmarks on the VM, PUC Lua 5.1 and LuaJIT.
+- The real-world corpus check in CI (the `corpus` job,
+  `scripts/check-corpus.sh`): 19,960 MoonScript files of 1,609 GitHub
+  repositories and 55,595 mutants of them, against upstream moonc 0.8.0's
+  parse trees, Lua output, error messages and lint reports. The sources
+  are not committed: `testdata/corpus/manifest.tsv` pins them (repository,
+  commit, path, sha256, git blob id), `testdata/corpus/expected.tsv` holds
+  digests of the reference outputs, `corpus fetch` fetches them (skipping
+  repositories that are gone) and CI caches them;
+  `scripts/gen-corpus-manifest.sh` regenerates both files from a full
+  corpus.
 
 ### Changed
 

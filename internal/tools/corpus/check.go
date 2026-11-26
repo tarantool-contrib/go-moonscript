@@ -67,14 +67,23 @@ type Result struct {
 	want, got struct{ tree, lua, perr, cerr string }
 }
 
-// Ref is the reference result of one file.
+// Ref is the reference result of one file. Hashed: Tree, Lua and Err are
+// digests (a fetched corpus, see expected.go).
 type Ref struct {
 	Status          string
 	Tree, Lua, Err  string
 	HasTree, HasLua bool
+	Hashed          bool
 }
 
 func loadRef(dir, id string) Ref {
+	if m := mustExpected(dir); m != nil && !hasRefOutputs(dir, "ref", id) {
+		r, err := parseRefEntry(m[id].ref)
+		if err != nil {
+			return Ref{Status: "missing", Hashed: true}
+		}
+		return r
+	}
 	refDir := filepath.Join(dir, "ref")
 	r := Ref{Status: readStatus(refDir, id)}
 	if b, err := os.ReadFile(filepath.Join(refDir, id+".tree")); err == nil {
@@ -142,9 +151,13 @@ func check(id, src string, ref Ref, parseOnly bool) (res Result) {
 		res.ParseExcerpt = firstLines(panicMsg, 12)
 		return res
 	case refParsed && perr == nil:
-		if gotTree == ref.Tree {
+		switch {
+		case ref.same(ref.Tree, gotTree):
 			res.Parse = PTreeMatch
-		} else {
+		case ref.Hashed:
+			res.Parse = PTreeMismatch
+			res.ParseBucket, res.ParseExcerpt = "tree differs from the expected digest", digestOnly
+		default:
 			res.Parse = PTreeMismatch
 			res.ParseBucket, res.ParseExcerpt = treeDiff(ref.Tree, gotTree, src)
 		}
@@ -155,13 +168,18 @@ func check(id, src string, ref Ref, parseOnly bool) (res Result) {
 		return res
 	case perr == nil:
 		res.Parse = PGoAccepts
-		res.ParseBucket = "ref error: " + normMsg(firstLine(ref.Err))
-		res.ParseExcerpt = "reference error:\n" + indent(ref.Err)
+		res.ParseBucket = "ref error: " + normMsg(firstLine(ref.errText()))
+		res.ParseExcerpt = "reference error:\n" + indent(ref.errText())
 		return res
 	default:
-		if perr.Error() == ref.Err {
+		switch {
+		case ref.same(ref.Err, perr.Error()):
 			res.Parse = PErrMatch
-		} else {
+		case ref.Hashed:
+			res.Parse = PErrMismatch
+			res.ParseBucket = "go error: " + normMsg(firstLine(perr.Error()))
+			res.ParseExcerpt = indent(perr.Error()) + "\n" + digestOnly
+		default:
 			res.Parse = PErrMismatch
 			res.ParseBucket, res.ParseExcerpt = errDiff(ref.Err, perr.Error())
 		}
@@ -202,18 +220,24 @@ func check(id, src string, ref Ref, parseOnly bool) (res Result) {
 
 	switch {
 	case ref.Status == "compile-internal":
-		w := normInternal(ref.Err)
+		w := ref.Err // its digest
+		if !ref.Hashed {
+			w = normInternal(ref.Err)
+		}
 		g := ""
 		if panicMsg != "" {
 			g = normInternal(panicMsg)
 		} else if cerr != nil {
 			g = normInternal(gotErr)
 		}
-		if g != "" && g == w {
+		if g != "" && ref.same(w, g) {
 			res.Compile = CRefInternalMatch
 		} else {
 			res.Compile = CRefInternalDiff
 			res.CompileBucket = "ref internal: " + truncate(w, 100)
+			if ref.Hashed {
+				w = "(digest " + w + ")"
+			}
 			res.CompileExcerpt = "reference: " + w + "\ngo:        " + orStr(g, "(compiled)")
 		}
 	case panicMsg != "":
@@ -225,9 +249,13 @@ func check(id, src string, ref Ref, parseOnly bool) (res Result) {
 		res.CompileBucket = panicBucket(panicMsg)
 		res.CompileExcerpt = firstLines(panicMsg, 12)
 	case ref.Status == "ok" && cerr == nil:
-		if code == ref.Lua {
+		switch {
+		case ref.same(ref.Lua, code):
 			res.Compile = CLuaMatch
-		} else {
+		case ref.Hashed:
+			res.Compile = CLuaMismatch
+			res.CompileBucket, res.CompileExcerpt = "lua differs from the expected digest", digestOnly
+		default:
 			res.Compile = CLuaMismatch
 			res.CompileBucket, res.CompileExcerpt = luaDiff(ref.Lua, code)
 		}
@@ -237,17 +265,30 @@ func check(id, src string, ref Ref, parseOnly bool) (res Result) {
 		res.CompileExcerpt = indent(gotErr)
 	case cerr == nil:
 		res.Compile = CGoAccepts
-		res.CompileBucket = "ref error: " + normMsg(firstLine(ref.Err))
-		res.CompileExcerpt = "reference error:\n" + indent(ref.Err)
+		res.CompileBucket = "ref error: " + normMsg(firstLine(ref.errText()))
+		res.CompileExcerpt = "reference error:\n" + indent(ref.errText())
 	default:
-		if gotErr == ref.Err {
+		switch {
+		case ref.same(ref.Err, gotErr):
 			res.Compile = CErrMatch
-		} else {
+		case ref.Hashed:
+			res.Compile = CErrMismatch
+			res.CompileBucket = "go error: " + normMsg(firstLine(gotErr))
+			res.CompileExcerpt = indent(gotErr) + "\n" + digestOnly
+		default:
 			res.Compile = CErrMismatch
 			res.CompileBucket, res.CompileExcerpt = errDiff(ref.Err, gotErr)
 		}
 	}
 	return res
+}
+
+// errText is the reference error for reports.
+func (r Ref) errText() string {
+	if r.Hashed {
+		return "(expected digest " + r.Err + ")"
+	}
+	return r.Err
 }
 
 func panicText(r any, stack string) string {

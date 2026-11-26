@@ -344,6 +344,10 @@ func showDiff(dir, sel string) error {
 	if res.CompileBucket != "" {
 		fmt.Printf("compile bucket: %s\n", res.CompileBucket)
 	}
+	if ref.Hashed {
+		fmt.Printf("\n%s\n", digestOnly)
+		return nil
+	}
 
 	tmp, err := os.MkdirTemp(filepath.Join(dir), "tmp-diff-")
 	if err != nil {

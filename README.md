@@ -266,7 +266,7 @@ MoonScript v0.8.0 on PUC Lua 5.1, built by [`scripts/moonref`](scripts/moonref):
 - a corpus of 19,712 real-world MoonScript files from 2,324 GitHub
   repositories (2.6 million lines) plus 55,595 mutated copies of them as
   parse and compile error cases: the parse trees, the Lua output, the error
-  messages and the lint reports all match.
+  messages and the lint reports all match, checked in CI on every change.
 
 Known differences:
 

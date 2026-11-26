@@ -18,6 +18,7 @@ type summary struct {
 	parse, compile, fatal                  map[string]int
 	refParsed, refParseErr, refOK, refCErr int
 	refCInternal, refOther, fullMatchFiles int
+	refUnusable                            int // refOther with a known reason (ref-timeout, ...)
 }
 
 func summarize(res []Result) *summary {
@@ -39,6 +40,9 @@ func summarize(res []Result) *summary {
 			s.refParseErr++
 		default:
 			s.refOther++
+			if r.Ref != "" && r.Ref != "missing" && r.Ref != "pending" {
+				s.refUnusable++
+			}
 		}
 		if r.Fatal != "" {
 			s.fatal[r.Fatal]++

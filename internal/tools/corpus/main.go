@@ -32,6 +32,14 @@
 //	$C ref -lint         # reference moonc -l results (ref-lint/, Docker)
 //	$C -lint             # compare the Go linter (see lint.go)
 //
+// Without the corpus sources (CI; see pinned.go and testdata/corpus/):
+//
+//	$C export            # testdata/corpus/{manifest,expected}.tsv from a
+//	                     # full corpus (scripts/gen-corpus-manifest.sh)
+//	$C fetch -corpus D   # fetch the manifest's files into D/files
+//	$C prepare -corpus D # mutants, D/manifest.tsv, D/expected.tsv
+//	$C -corpus D -strict; $C -corpus D -lint -strict  # check the digests
+//
 // Every file is checked in a worker subprocess so that panics, fatal errors
 // (stack overflow) and hangs (-timeout) only fail that file.
 package main
@@ -42,6 +50,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
 )
 
@@ -66,6 +75,13 @@ var (
 	flagSegment    = flag.String("segment", "", "only these comma-separated segments (moonscript, mutants, moonlibs-lua)")
 	flagNoMutants  = flag.Bool("no-mutants", false, "ignore the derived mutant files (repo ~mutant/...)")
 	flagLint       = flag.Bool("lint", false, "lint mode: ref/run/-diff compare moonc -l instead of the compiler (see lint.go)")
+	flagStrict     = flag.Bool("strict", false, "run, -lint: exit with status 1 unless every file matches")
+	flagPinned     = flag.String("pinned", "testdata/corpus", "export, fetch, prepare: directory of the committed manifest.tsv and expected.tsv")
+	flagBlobIDs    = flag.Bool("blob-ids", true, "export: write the git blob ids too (fetch can then skip the commit trees)")
+	flagGitURL     = flag.String("git-url", "https://github.com/%s.git", "fetch: repository URL, %s is owner/name")
+	flagFetchJobs  = flag.Int("fetch-j", 16, "fetch: parallel repositories")
+	flagFetchTO    = flag.Duration("fetch-timeout", 3*time.Minute, "fetch: timeout for one repository")
+	flagMinFiles   = flag.Float64("min-files", 0.9, "fetch: fail when less than this fraction of the files is present")
 )
 
 func defaultCorpus() string {
@@ -81,12 +97,12 @@ func defaultCorpus() string {
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: corpus [collect|ref|run] [flags]\n\n")
+		fmt.Fprintf(os.Stderr, "usage: corpus [collect|ref|run|export|fetch|prepare] [flags]\n\n")
 		flag.PrintDefaults()
 	}
 	mode := "run"
 	args := os.Args[1:]
-	if len(args) > 0 && (args[0] == "collect" || args[0] == "ref" || args[0] == "run") {
+	if len(args) > 0 && slices.Contains([]string{"collect", "ref", "run", "export", "fetch", "prepare"}, args[0]) {
 		mode, args = args[0], args[1:]
 	}
 	if err := flag.CommandLine.Parse(args); err != nil {
@@ -101,6 +117,12 @@ func main() {
 	switch {
 	case *flagWorker:
 		err = workerMain(*flagCorpus, *flagParseOnly)
+	case mode == "export":
+		err = export(*flagCorpus, *flagPinned)
+	case mode == "fetch":
+		err = fetch(*flagCorpus, filepath.Join(*flagPinned, "manifest.tsv"))
+	case mode == "prepare":
+		err = prepare(*flagCorpus, filepath.Join(*flagPinned, "manifest.tsv"), filepath.Join(*flagPinned, "expected.tsv"))
 	case mode == "collect":
 		err = collect(*flagCorpus, *flagMaxBytes)
 	case mode == "ref" && *flagLint:

@@ -7,6 +7,8 @@ name: CI
 # test: the test suite on the oldest and the newest supported Go, and
 # pristine gopher-lua's own suites against the patched copy; the race
 # detector and coverage on the newest.
+# corpus: the parser, the compiler and the linter against upstream moonc
+# 0.8.0 on real-world code (scripts/check-corpus.sh, testdata/corpus/).
 #
 # Weekly, everything runs again, against the latest patch release of each
 # Go version.
@@ -113,3 +115,63 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+  corpus:
+    # The real-world corpus: 19,960 files of 1,609 GitHub repositories and
+    # 55,595 mutants of them, compared with digests of upstream moonc
+    # 0.8.0's outputs. The sources are not committed: they are fetched from
+    # their repositories at pinned commits (testdata/corpus/manifest.tsv)
+    # and cached under the manifest's hash, so a fetch happens only when
+    # the manifest changes or the cache was evicted. Repositories that are
+    # gone are reported and skipped.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      MOON_CORPUS: ${{ github.workspace }}/.corpus
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27.x'
+
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: .corpus/files
+          key: corpus-v1-${{ hashFiles('testdata/corpus/manifest.tsv') }}
+          # else an older corpus: only the files it lacks are fetched
+          restore-keys: corpus-v1-
+
+      - name: fetch the corpus sources
+        run: scripts/check-corpus.sh fetch
+        env:
+          FETCH_JOBS: '32'
+
+      # before prepare, which adds the mutants to .corpus/files
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: .corpus/files
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: mutants
+        id: prepare
+        run: scripts/check-corpus.sh prepare
+
+      - name: parser and compiler
+        run: scripts/check-corpus.sh run
+        env:
+          JOBS: '4'
+
+      - name: linter
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: scripts/check-corpus.sh lint
+        env:
+          JOBS: '4'
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: corpus-reports
+          path: .corpus/reports/
