@@ -1552,19 +1552,10 @@ func init() {
 			{
 				ls := L
 				idx := lbase
-				if ls.uvcache != nil {
-					var prev *Upvalue
-					for uv := ls.uvcache; uv != nil; uv = uv.next {
-						if uv.index >= idx {
-							if prev != nil {
-								prev.next = nil
-							} else {
-								ls.uvcache = nil
-							}
-							uv.Close()
-						}
-						prev = uv
-					}
+				for uv := ls.uvcache; uv != nil && uv.index >= idx; uv = ls.uvcache {
+					ls.uvcache = uv.next
+					uv.next = nil
+					uv.Close()
 				}
 			}
 			if callable.IsG {
@@ -1759,19 +1750,10 @@ func init() {
 			{
 				ls := L
 				idx := lbase
-				if ls.uvcache != nil {
-					var prev *Upvalue
-					for uv := ls.uvcache; uv != nil; uv = uv.next {
-						if uv.index >= idx {
-							if prev != nil {
-								prev.next = nil
-							} else {
-								ls.uvcache = nil
-							}
-							uv.Close()
-						}
-						prev = uv
-					}
+				for uv := ls.uvcache; uv != nil && uv.index >= idx; uv = ls.uvcache {
+					ls.uvcache = uv.next
+					uv.next = nil
+					uv.Close()
 				}
 			}
 			if L.hookMask&MaskReturn != 0 { // go-moonscript patch
@@ -2317,19 +2299,10 @@ func init() {
 			{
 				ls := L
 				idx := RA
-				if ls.uvcache != nil {
-					var prev *Upvalue
-					for uv := ls.uvcache; uv != nil; uv = uv.next {
-						if uv.index >= idx {
-							if prev != nil {
-								prev.next = nil
-							} else {
-								ls.uvcache = nil
-							}
-							uv.Close()
-						}
-						prev = uv
-					}
+				for uv := ls.uvcache; uv != nil && uv.index >= idx; uv = ls.uvcache {
+					ls.uvcache = uv.next
+					uv.next = nil
+					uv.Close()
 				}
 			}
 			return 0

@@ -1076,48 +1076,36 @@ func (ls *LState) rkStringK(idx int) (LValue, string, uint32) {
 	return lv, s, hashString(s)
 }
 
+// go-moonscript patch: the open upvalues (uvcache) are listed from the
+// highest stack slot down, as Lua's openupval, so that closing the ones
+// of a returning function stops at the first one below it (it went over
+// the whole list, all the open upvalues of the thread, on each return)
+// and a closure finds the upvalues of the top frame first.
+
 func (ls *LState) closeUpvalues(idx int) { // +inline-start
-	if ls.uvcache != nil {
-		var prev *Upvalue
-		for uv := ls.uvcache; uv != nil; uv = uv.next {
-			if uv.index >= idx {
-				if prev != nil {
-					prev.next = nil
-				} else {
-					ls.uvcache = nil
-				}
-				uv.Close()
-			}
-			prev = uv
-		}
+	for uv := ls.uvcache; uv != nil && uv.index >= idx; uv = ls.uvcache {
+		ls.uvcache = uv.next
+		uv.next = nil
+		uv.Close()
 	}
 } // +inline-end
 
 func (ls *LState) findUpvalue(idx int) *Upvalue {
 	var prev *Upvalue
-	var next *Upvalue
-	if ls.uvcache != nil {
-		for uv := ls.uvcache; uv != nil; uv = uv.next {
-			if uv.index == idx {
-				return uv
-			}
-			if uv.index > idx {
-				next = uv
-				break
-			}
-			prev = uv
-		}
+	uv := ls.uvcache
+	for ; uv != nil && uv.index > idx; uv = uv.next {
+		prev = uv
 	}
-	uv := &Upvalue{reg: ls.reg, index: idx, closed: false}
+	if uv != nil && uv.index == idx {
+		return uv
+	}
+	nuv := &Upvalue{reg: ls.reg, index: idx, next: uv}
 	if prev != nil {
-		prev.next = uv
+		prev.next = nuv
 	} else {
-		ls.uvcache = uv
+		ls.uvcache = nuv
 	}
-	if next != nil {
-		uv.next = next
-	}
-	return uv
+	return nuv
 }
 
 func (ls *LState) metatable(lvalue LValue, rawget bool) LValue {
