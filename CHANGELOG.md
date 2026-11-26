@@ -44,6 +44,10 @@ The first version: a native Go port of MoonScript v0.8.0.
   `runtime.StateOptions`: PUC Lua 5.1.5 (the default) or LuaJIT 2.1 (its
   syntax and library extensions: `goto`, `bit`, `jit`, `table.new`, ...;
   no FFI).
+- `MOON_LUA=luajit` runs `moon` in the LuaJIT 2.1 dialect, checked against
+  upstream `moon` run by `luajit` (`testdata/*/ref_luajit/`); unset or
+  `lua51` is Lua 5.1, any other value an error. Upstream's command line is
+  unchanged.
 - PUC Lua 5.1's error messages (variable names, argument errors, error
   levels), syntax error messages and limits (a port of `lparser.c` /
   `lj_parse.c` replaces the yacc grammar), the missing 5.1 functions

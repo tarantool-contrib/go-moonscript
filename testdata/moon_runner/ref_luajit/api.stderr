@@ -1,0 +1,4 @@
+moon: /usr/local/share/lua/5.1/moonscript/errors.lua:30: 'for' initial value must be a number
+stack traceback:
+	/usr/local/share/lua/5.1/moonscript/errors.lua:30: in function 'reverse_line_number'
+	api.moon:26: (22) in main chunk

@@ -1,0 +1,3 @@
+moon: docs/standard_lib_011.moon:1: (1) attempt to call global 'SomeClass' (a nil value)
+stack traceback:
+	docs/standard_lib_011.moon:1: (1) in main chunk

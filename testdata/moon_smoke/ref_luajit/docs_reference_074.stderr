@@ -1,0 +1,3 @@
+moon: docs/reference_074.moon:5: (15) attempt to index local '_parent_0' (a nil value)
+stack traceback:
+	docs/reference_074.moon:5: (15) in main chunk

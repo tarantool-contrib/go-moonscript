@@ -1,0 +1,3 @@
+moon: spec/inputs/operators.moon:55: (26) attempt to perform arithmetic on global 'yeah' (a nil value)
+stack traceback:
+	spec/inputs/operators.moon:55: (26) in main chunk

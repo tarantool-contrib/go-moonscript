@@ -1,0 +1,4 @@
+moon: docs/reference_042.moon:1: (4) bad argument #1 to 'pairs' (table expected, got nil)
+stack traceback:
+	[C]: in function 'pairs'
+	docs/reference_042.moon:1: (4) in main chunk

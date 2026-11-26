@@ -1,0 +1,4 @@
+moon: (command line):1: from -e
+stack traceback:
+	[C]: in function 'error'
+	(command line):1: in main chunk

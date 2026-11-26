@@ -1,0 +1,3 @@
+moon: spec/inputs/import.moon:3: (2) attempt to index global 'yeah' (a nil value)
+stack traceback:
+	spec/inputs/import.moon:3: (2) in main chunk

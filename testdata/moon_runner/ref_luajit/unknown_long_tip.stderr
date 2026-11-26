@@ -1,0 +1,5 @@
+Usage: moon [-h] [--coverage] [-d] [--execute <execute>] [--version]
+       [<script>] [<args>] ...
+
+Error: unknown option '--d'
+Did you mean '-d'?

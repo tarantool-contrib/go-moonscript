@@ -1,0 +1,3 @@
+moon: spec/inputs/cond.moon:19: (27) attempt to call global 'noso' (a nil value)
+stack traceback:
+	spec/inputs/cond.moon:19: (27) in main chunk

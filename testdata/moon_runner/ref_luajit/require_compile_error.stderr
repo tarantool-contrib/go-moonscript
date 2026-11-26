@@ -1,0 +1,8 @@
+moon: /usr/local/share/lua/5.1/moonscript/base.lua:91: ./lib/bad_compile.moon: failed to compile: Short-dot syntax must be called within a with block at line 3, column 3:
+    .thing = 1
+    ^
+stack traceback:
+	[C]: in function 'error'
+	/usr/local/share/lua/5.1/moonscript/base.lua:91: in function </usr/local/share/lua/5.1/moonscript/base.lua:76>
+	[C]: in function 'require'
+	require_compile_error.moon:2: (2) in main chunk

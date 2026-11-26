@@ -1,0 +1,4 @@
+moon: docs/standard_lib_010.moon:4: (22) assertion failed!
+stack traceback:
+	[C]: in function 'assert'
+	docs/standard_lib_010.moon:4: (22) in main chunk

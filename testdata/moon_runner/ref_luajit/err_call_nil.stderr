@@ -1,0 +1,4 @@
+moon: err_call_nil.moon:4: (4) attempt to call field 'missing_method' (a nil value)
+stack traceback:
+	err_call_nil.moon:4: (4) in function 'do_it'
+	err_call_nil.moon:6: (6) in main chunk

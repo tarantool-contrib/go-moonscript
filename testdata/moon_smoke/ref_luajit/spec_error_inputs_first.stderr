@@ -1,0 +1,3 @@
+moon: spec/error_inputs/first.moon:24: (20) attempt to index global 'what' (a nil value)
+stack traceback:
+	spec/error_inputs/first.moon:24: (20) in main chunk

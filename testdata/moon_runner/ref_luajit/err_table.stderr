@@ -1,0 +1,6 @@
+/usr/bin/luajit: /usr/local/share/lua/5.1/moonscript/errors.lua:81: attempt to call method 'match' (a nil value)
+stack traceback:
+	/usr/local/share/lua/5.1/moonscript/errors.lua:81: in function 'rewrite_single'
+	/usr/local/share/lua/5.1/moonscript/errors.lua:98: in function 'rewrite_traceback'
+	/usr/local/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:125: in function </usr/local/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:47>
+	[C]: at 0x637f602e42c0

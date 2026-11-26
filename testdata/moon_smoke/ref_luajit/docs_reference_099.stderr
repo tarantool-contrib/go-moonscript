@@ -1,0 +1,18 @@
+moon: docs/reference_099.moon:6: (3) module 'helpers' not found:No LuaRocks module found for helpers
+	no field package.preload['helpers']
+	no file '/usr/local/share/lua/5.1/helpers.lua'
+	no file '/usr/local/share/lua/5.1/helpers/init.lua'
+	no file './helpers.lua'
+	no file '/usr/share/luajit-2.1.0-beta3/helpers.lua'
+	no file '/usr/share/lua/5.1/helpers.lua'
+	no file '/usr/share/lua/5.1/helpers/init.lua'
+	no file '/.luarocks/share/lua/5.1/helpers.lua'
+	no file '/.luarocks/share/lua/5.1/helpers/init.lua'
+	no file '/usr/local/lib/lua/5.1/helpers.so'
+	no file './helpers.so'
+	no file '/usr/lib/x86_64-linux-gnu/lua/5.1/helpers.so'
+	no file '/usr/local/lib/lua/5.1/loadall.so'
+	no file '/.luarocks/lib/lua/5.1/helpers.so'
+stack traceback:
+	[C]: in function 'require'
+	docs/reference_099.moon:6: (3) in main chunk

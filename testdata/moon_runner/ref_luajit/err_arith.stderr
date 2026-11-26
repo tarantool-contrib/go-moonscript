@@ -1,0 +1,4 @@
+moon: err_arith.moon:6: (11) attempt to perform arithmetic on a string value
+stack traceback:
+	err_arith.moon:6: (11) in function 'add_all'
+	err_arith.moon:9: (15) in main chunk

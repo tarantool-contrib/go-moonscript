@@ -1,0 +1,3 @@
+moon: spec/inputs/return.moon:9: (22) attempt to get length of local '_list_0' (a nil value)
+stack traceback:
+	spec/inputs/return.moon:9: (22) in main chunk

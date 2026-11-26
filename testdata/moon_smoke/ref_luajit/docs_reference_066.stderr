@@ -1,0 +1,3 @@
+moon: docs/reference_066.moon:1: (2) attempt to get length of local '_list_0' (a nil value)
+stack traceback:
+	docs/reference_066.moon:1: (2) in main chunk

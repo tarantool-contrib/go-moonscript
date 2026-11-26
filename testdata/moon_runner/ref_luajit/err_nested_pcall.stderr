@@ -1,0 +1,4 @@
+moon: err_nested_pcall.moon:8: (17) uncaught after pcall
+stack traceback:
+	[C]: in function 'outer'
+	err_nested_pcall.moon:8: (17) in main chunk

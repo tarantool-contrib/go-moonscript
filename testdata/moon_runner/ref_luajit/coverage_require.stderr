@@ -1,0 +1,49 @@
+------| @./lib/errors_on_load.moon
+*    1| print "loading errors_on_load"
+*    2| error "failed while loading"
+     3| 
+
+------| @./lib/util.moon
+     1| -- a module found through package.moonpath (./?.moon -> ./lib/util.moon)
+*    2| loaded_count = (loaded_count or 0) + 1
+     3| 
+*    4| class Stack
+*    5|   new: => @items = {}
+*    6|   push: (v) => table.insert @items, v
+*    7|   pop: => table.remove @items
+*    8|   size: => #@items
+     9| 
+    10| {
+    11|   :Stack
+*   12|   add: (a, b) -> a + b
+    13|   name: ...
+    14|   fail: (msg) -> error "util failed: #{msg}"
+    15|   index_nil: -> nil_value.field
+    16| }
+    17| 
+
+------| @require.moon
+*    1| util = require "lib.util"
+*    2| print "name", util.name
+*    3| print "add", util.add 2, 3
+*    4| s = util.Stack!
+*    5| s\push 1
+*    6| s\push 2
+*    7| print "stack", s\size!, s\pop!, s\size!
+*    8| print "same module", require("lib.util") == util
+*    9| helper = require "lib.helper"
+*   10| print helper.greet("moon"), helper.name
+*   11| print "lua requiring moon", require("lib.uses_moon").sum 1, 2, 3
+*   12| package.moonpath ..= ";./?/init.moon"
+*   13| print "package init", require("pkg").kind
+*   14| print "moonpath", package.moonpath == require("moonscript.base").create_moonpath(package.path)
+*   15| print "moonpath entries end in .moon", not package.moonpath\find("%.lua;") and package.moonpath\match("%.moon$") != nil
+*   16| ok, err = pcall require, "lib.bad_syntax"
+*   17| print "bad syntax", ok, (err\gsub("^.-base%.lua:%d+: ", ""))
+*   18| ok, err = pcall require, "lib.errors_on_load"
+*   19| print "error on load", ok, err
+*   20| ok, err = pcall require, "lib.errors_on_load"
+*   21| print "second try", ok, err
+*   22| print "loader installed", package.loaders[2] == require("moonscript.base").moon_loader
+    23| 
+

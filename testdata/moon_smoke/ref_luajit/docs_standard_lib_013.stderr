@@ -1,0 +1,5 @@
+moon: docs/standard_lib_013.moon:8: (39) attempt to call global 'mixin_object' (a nil value)
+stack traceback:
+	docs/standard_lib_013.moon:8: (39) in function '__init'
+	docs/standard_lib_013.moon:8: (47) in function 'Encapsulation'
+	docs/standard_lib_013.moon:10: (54) in main chunk

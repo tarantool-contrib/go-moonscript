@@ -1,0 +1,3 @@
+moon: spec/error_inputs/third.moon:11: (11) attempt to index global 'dead' (a nil value)
+stack traceback:
+	spec/error_inputs/third.moon:11: (11) in main chunk

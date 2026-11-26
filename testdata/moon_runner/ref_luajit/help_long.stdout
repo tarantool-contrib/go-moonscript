@@ -1,0 +1,14 @@
+Usage: moon [-h] [--coverage] [-d] [--execute <execute>] [--version]
+       [<script>] [<args>] ...
+
+Arguments:
+   script
+   args
+
+Options:
+   -h, --help            Show this help message and exit.
+   --coverage, -c        Collect and print code coverage
+   -d                    Disable stack trace rewriting
+   --execute <execute>,  Execute MoonScript code string
+          -e <execute>
+   --version, -v         Print version information

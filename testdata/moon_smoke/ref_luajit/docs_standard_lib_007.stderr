@@ -1,0 +1,3 @@
+moon: docs/standard_lib_007.moon:3: (21) attempt to call global 'is_instance' (a nil value)
+stack traceback:
+	docs/standard_lib_007.moon:3: (21) in main chunk

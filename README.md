@@ -127,6 +127,7 @@ moon script.moon arg1 arg2    # run a script; arg and ... hold the arguments
 moon -e 'print "sum", 1 + 2'  # run a string
 moon -c script.moon           # run, then print a line coverage report
 moon -d script.moon           # don't rewrite error tracebacks to .moon lines
+MOON_LUA=luajit moon x.moon   # run in the LuaJIT 2.1 dialect, as luajit would
 ```
 
 `require "name"` finds MoonScript modules along `package.moonpath`, which
@@ -237,7 +238,14 @@ messages, `math.random` sequence (glibc's `rand`, as PUC on Linux) and
 floats, the `bit` library, a `jit` module (interpreter only),
 `table.new`/`table.clear`, `load` with strings and modes, `xpcall` with
 arguments and so on, with LuaJIT's number formatting and `math.random`.
-There is no FFI. `moon` runs in the Lua 5.1 dialect, as the reference does.
+There is no FFI. `moon` runs in the Lua 5.1 dialect, as the reference does;
+with the environment variable `MOON_LUA=luajit` it runs in the LuaJIT
+dialect and behaves like upstream `moon` run by `luajit` (`MOON_LUA=lua51`
+or unset is the default, any other value is an error). The VM still keeps
+some Lua 5.1 behaviour there: tail calls keep their frame (error positions
+and tracebacks of `return error ...`), debug hooks are per coroutine and
+fire on Lua 5.1's lines (`moon -c`), and `t[k]` errors say `field '?'`; see
+the [`moon` documentation](cmd/moon/main.go).
 
 **Use this module's gopher-lua, not `github.com/yuin/gopher-lua`.** The Lua
 types of the API (`*lua.LState`, `lua.LValue`, ...) belong to the patched

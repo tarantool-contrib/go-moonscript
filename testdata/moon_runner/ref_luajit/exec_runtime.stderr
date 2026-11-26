@@ -1,0 +1,4 @@
+moon: (command line):2: attempt to perform arithmetic on a nil value
+stack traceback:
+	(command line):2: in function <(command line):1>
+	(command line):3: in main chunk

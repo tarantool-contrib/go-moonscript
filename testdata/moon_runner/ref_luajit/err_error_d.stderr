@@ -1,0 +1,8 @@
+/usr/bin/luajit: err_error.moon:7: insufficient funds: 5 < 20
+stack traceback:
+	[C]: in function 'error'
+	err_error.moon:7: in function 'withdraw'
+	err_error.moon:34: in function 'process'
+	err_error.moon:42: in function 'moonscript_chunk'
+	/usr/local/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:106: in function </usr/local/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:104>
+	[C]: at 0x5abd8c61a2c0

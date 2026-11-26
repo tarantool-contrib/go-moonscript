@@ -1,15 +1,19 @@
 package main
 
 // Behavioral tests of the moon command against the reference moon (upstream
-// bin/moon v0.8.0 on PUC Lua 5.1.5). The reference outputs are recorded by
-// scripts/gen-moon-runner-ref.sh (needs Docker); these tests run without it.
+// bin/moon v0.8.0 on PUC Lua 5.1.5, and run by LuaJIT 2.1 for the LuaJIT
+// variants, which run the port with MOON_LUA=luajit). The reference outputs
+// are recorded by scripts/gen-moon-runner-ref.sh (needs Docker) in ref/ and
+// ref_luajit/; these tests run without it.
 //
 // TestMoonRunner runs every case of testdata/moon_runner/cases.tsv (scripts
 // written for this suite: classes, modules through package.moonpath, script
 // arguments, the moon standard library, runtime errors and their rewritten
 // tracebacks, syntax errors in required modules, the CLI flags) and
 // TestMoonSmoke runs the upstream scripts listed in
-// testdata/moon_smoke/scripts.txt (docs examples, spec inputs). Each runs
+// testdata/moon_smoke/scripts.txt (docs examples, spec inputs);
+// TestMoonRunnerLuaJIT and TestMoonSmokeLuaJIT run the same in the LuaJIT
+// dialect. Each runs
 // the test binary itself as moon (TestMain) in the case's directory and
 // compares exit status, stdout and stderr after normalize, which removes
 // the differences that come from the VM and the installation rather than
@@ -24,7 +28,8 @@ package main
 //     from upstream (no lpeg), so its line numbers become "N".
 //  3. The driver: errors escaping bin/moon (-d mode, or a failure inside the
 //     traceback rewriter) are reported by lua5.1 as "/usr/bin/lua5.1: msg"
-//     and by the port as "moon: msg"; the traceback frames from the driver
+//     (or by luajit as "/usr/bin/luajit: msg") and by the port as "moon:
+//     msg"; the traceback frames from the driver
 //     itself (".../bin/moon:106: ..." vs "moon:96: ...") and everything
 //     below them are replaced by "\t<moon driver>". The frames of the
 //     script, including "in function 'moonscript_chunk'", are kept.
@@ -41,7 +46,7 @@ package main
 //     error>".
 //
 // Cases whose output differs for other reasons are skipped with the reason
-// (runnerKnownDiffs, smokeSkips).
+// (runnerKnownDiffs, smokeSkips, smokeSkipsLuaJIT).
 
 import (
 	"bytes"
@@ -69,8 +74,25 @@ type result struct {
 	exit           int
 }
 
+// dialect is a Lua the runner runs on: the value of MOON_LUA and the
+// directory of the references.
+type dialect struct {
+	env, ref string
+}
+
+var (
+	lua51  = dialect{"", "ref"}
+	luajit = dialect{"luajit", "ref_luajit"}
+)
+
 // runMoon runs the test binary as moon with args in dir.
 func runMoon(t *testing.T, dir string, args ...string) result {
+	t.Helper()
+	return runMoonIn(t, lua51, dir, args...)
+}
+
+// runMoonIn runs the test binary as moon on d with args in dir.
+func runMoonIn(t *testing.T, d dialect, dir string, args ...string) result {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
@@ -78,7 +100,7 @@ func runMoon(t *testing.T, dir string, args ...string) result {
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), runAsMoon+"=1", "LUA_PATH=")
+	cmd.Env = append(os.Environ(), runAsMoon+"=1", "LUA_PATH=", luaEnv+"="+d.env)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
@@ -92,10 +114,10 @@ func runMoon(t *testing.T, dir string, args ...string) result {
 	return result{stdout.String(), stderr.String(), code}
 }
 
-func readRef(t *testing.T, dir, name string) result {
+func readRef(t *testing.T, d dialect, dir, name string) result {
 	t.Helper()
 	read := func(ext string) string {
-		data, err := os.ReadFile(filepath.Join(dir, "ref", name+"."+ext))
+		data, err := os.ReadFile(filepath.Join(dir, d.ref, name+"."+ext))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,9 +145,11 @@ var (
 func normalize(s string, ref, stderr bool) string {
 	if ref {
 		s = strings.ReplaceAll(s, refInstallDir, "")
-		s = strings.ReplaceAll(s, "\n/usr/bin/lua5.1: ", "\nmoon: ")
-		if strings.HasPrefix(s, "/usr/bin/lua5.1: ") {
-			s = "moon: " + strings.TrimPrefix(s, "/usr/bin/lua5.1: ")
+		for _, prog := range []string{"/usr/bin/lua5.1: ", "/usr/bin/luajit: "} {
+			s = strings.ReplaceAll(s, "\n"+prog, "\nmoon: ")
+			if strings.HasPrefix(s, prog) {
+				s = "moon: " + strings.TrimPrefix(s, prog)
+			}
 		}
 	}
 	s = luarocksRe.ReplaceAllString(s, "")
@@ -199,7 +223,48 @@ func readCases(t *testing.T) []runnerCase {
 // reason.
 var runnerKnownDiffs = map[string]string{}
 
-func TestMoonRunner(t *testing.T) {
+func TestMoonRunner(t *testing.T) { testRunner(t, lua51, runnerKnownDiffs) }
+
+// Differences of the VM's LuaJIT dialect from LuaJIT 2.1 (not of the
+// runner), which the LuaJIT cases below are skipped for.
+const (
+	// LuaJIT replaces the frame of a tail call: error "x" in `return
+	// error "x"` (MoonScript's implicit return) gets the position of the
+	// frame below, or none if that is a C function or the coroutine's
+	// base, tracebacks have no "(tail call)" entries and name a
+	// tail-called function after its caller's call. The VM keeps Lua
+	// 5.1's tail call frames.
+	jitTailCall = "VM: LuaJIT 2.1 tail calls replace the frame (error positions, tracebacks); the VM keeps Lua 5.1's"
+	// LuaJIT names no variable for a value indexed by a non-constant key
+	// ("arithmetic on a string value"); Lua 5.1 says "field '?'".
+	jitFieldName = "VM: LuaJIT 2.1 names no variable for t[k] in error messages, the VM says field '?' as Lua 5.1"
+	// LuaJIT's hooks are global, so a coroutine runs the coverage hook;
+	// Lua 5.1's are per thread. LuaJIT's constant table constructors
+	// (TDUP) have no instructions on the lines of the constant fields, so
+	// these get no line events.
+	jitHooks = "VM: LuaJIT 2.1 line hooks are global (coroutines too) and constant table fields have no line events; the VM's are Lua 5.1's"
+)
+
+// runnerKnownDiffsLuaJIT are the cases whose output necessarily differs
+// from luajit's, with the reason.
+var runnerKnownDiffsLuaJIT = map[string]string{
+	"api":                   jitTailCall,
+	"closures":              jitTailCall,
+	"err_coroutine":         jitTailCall,
+	"err_level2":            jitTailCall,
+	"err_nested_pcall":      jitTailCall,
+	"require":               jitTailCall,
+	"require_runtime_error": jitTailCall,
+	"err_arith":             jitFieldName,
+	"coverage_loop":         jitHooks,
+	"coverage_report":       jitHooks,
+	"coverage_report_c":     jitHooks,
+	"coverage_require":      jitHooks + "; " + jitTailCall,
+}
+
+func TestMoonRunnerLuaJIT(t *testing.T) { testRunner(t, luajit, runnerKnownDiffsLuaJIT) }
+
+func testRunner(t *testing.T, d dialect, knownDiffs map[string]string) {
 	cases := readCases(t)
 	if len(cases) == 0 {
 		t.Fatal("no cases")
@@ -207,11 +272,11 @@ func TestMoonRunner(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if reason, ok := runnerKnownDiffs[c.name]; ok {
+			if reason, ok := knownDiffs[c.name]; ok {
 				t.Skip("known difference: " + reason)
 			}
-			want := readRef(t, runnerDir, c.name)
-			got := runMoon(t, runnerDir, c.args...)
+			want := readRef(t, d, runnerDir, c.name)
+			got := runMoonIn(t, d, runnerDir, c.args...)
 			compareResults(t, want, got)
 		})
 	}
@@ -224,7 +289,42 @@ var smokeSkips = map[string]string{
 	"docs_reference_097": "uses the lpeg global that the reference's lpeg C module sets",
 }
 
-func TestMoonSmoke(t *testing.T) {
+// smokeSkipsLuaJIT are the upstream scripts whose output can't match
+// luajit's, with the reason.
+var smokeSkipsLuaJIT = map[string]string{
+	"docs_reference_097":    smokeSkips["docs_reference_097"],
+	"docs_reference_116":    jitTailCall,
+	"docs_standard_lib_013": "VM: LuaJIT 2.1 reports a failing tail call whose arguments span lines at the line they end on, the VM at the line of the call as Lua 5.1",
+	"spec_inputs_literals":  "VM: no FFI, so LuaJIT's 64-bit integer literals (1LL, 1ULL) are malformed numbers",
+}
+
+// TestMoonLuaEnv: MOON_LUA selects the dialect, an unknown value is an
+// error.
+func TestMoonLuaEnv(t *testing.T) {
+	for _, c := range []struct {
+		env, want string
+	}{
+		{"", "Lua 5.1\n"},
+		{"lua51", "Lua 5.1\n"},
+		{"luajit", "LuaJIT 2.1.0-beta3\n"},
+	} {
+		got := runMoonIn(t, dialect{c.env, ""}, runnerDir, "-e", `print jit and jit.version or _VERSION`)
+		if got.exit != 0 || got.stdout != c.want || got.stderr != "" {
+			t.Errorf("MOON_LUA=%s: %+v, want %q", c.env, got, c.want)
+		}
+	}
+	got := runMoonIn(t, dialect{"lua5.3", ""}, runnerDir, "hello.moon")
+	want := result{"", "moon: MOON_LUA: unknown Lua dialect \"lua5.3\" (lua51 or luajit)\n", 1}
+	if got != want {
+		t.Errorf("MOON_LUA=lua5.3: %+v, want %+v", got, want)
+	}
+}
+
+func TestMoonSmoke(t *testing.T) { testSmoke(t, lua51, smokeSkips) }
+
+func TestMoonSmokeLuaJIT(t *testing.T) { testSmoke(t, luajit, smokeSkipsLuaJIT) }
+
+func testSmoke(t *testing.T, d dialect, skips map[string]string) {
 	data, err := os.ReadFile(filepath.Join(smokeDir, "moon_smoke", "scripts.txt"))
 	if err != nil {
 		t.Fatal(err)
@@ -238,14 +338,14 @@ func TestMoonSmoke(t *testing.T) {
 		name := strings.TrimSuffix(strings.ReplaceAll(script, "/", "_"), ".moon")
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			want := readRef(t, filepath.Join(smokeDir, "moon_smoke"), name)
+			want := readRef(t, d, filepath.Join(smokeDir, "moon_smoke"), name)
 			if want.exit == 124 {
 				t.Skip("does not terminate (the reference run timed out)")
 			}
-			if reason, ok := smokeSkips[name]; ok {
+			if reason, ok := skips[name]; ok {
 				t.Skip(reason)
 			}
-			compareResults(t, want, runMoon(t, smokeDir, script))
+			compareResults(t, want, runMoonIn(t, d, smokeDir, script))
 		})
 	}
 	if n == 0 {

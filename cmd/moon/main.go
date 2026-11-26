@@ -16,6 +16,15 @@
 // gives instructions luac's lines), so a hook of a script's own sees the
 // same lines.
 //
+// The environment variable MOON_LUA selects the Lua moon emulates:
+// unset or empty (or "lua51") for PUC Lua 5.1.5, the interpreter of the
+// reference moon, or "luajit" for LuaJIT 2.1 (the VM's LuaJIT dialect: its
+// library extensions and syntax, the bit and jit modules, LuaJIT's number
+// formatting; see runtime.ParseDialect for the accepted names). Upstream
+// moon has no such switch, it runs on the Lua its launcher names; with
+// MOON_LUA=luajit, moon behaves like upstream bin/moon run by luajit. Any
+// other value is an error (exit status 1).
+//
 // Differences from the reference moon (PUC Lua 5.1):
 //
 //   - moon -c prints a coverage report. Upstream's never does on Lua 5.1:
@@ -36,6 +45,22 @@
 //   - No C modules (package.cpath is empty, no lpeg global), a different
 //     pairs order, and Lua syntax errors in compiled code (only for
 //     LuaJIT/5.2 syntax) are worded by gopher-lua's parser.
+//
+// With MOON_LUA=luajit, the same, with "luajit:" for "lua5.1:", and these
+// differences of the VM's LuaJIT dialect from LuaJIT 2.1 (the tests check
+// the runner against upstream bin/moon run by luajit and skip the cases
+// these change):
+//
+//   - Tail calls keep their frame as in Lua 5.1, so `return error "x"`
+//     (MoonScript's implicit return) still reports the position of the
+//     function calling error, and tracebacks show "(tail call)"; LuaJIT
+//     replaces the frame, so the position is the frame below's or none.
+//   - An error on t[k] names it "field '?'", as Lua 5.1 does; LuaJIT names
+//     no variable.
+//   - Debug hooks are per coroutine and line events fall on Lua 5.1's
+//     lines, so moon -c reports Lua 5.1's coverage; LuaJIT's hook also
+//     runs in coroutines and its constant table fields have no line events.
+//   - There is no FFI: 64-bit integer literals (1LL, 1ULL) don't parse.
 package main
 
 import (
@@ -77,6 +102,9 @@ func memoryLimit() int64 {
 	return defaultMemoryLimit
 }
 
+// luaEnv names the environment variable that selects the dialect.
+const luaEnv = "MOON_LUA"
+
 func main() {
 	os.Exit(run(os.Args, os.Stdout, os.Stderr))
 }
@@ -84,7 +112,12 @@ func main() {
 // run runs moon with argv (argv[0] is the program). Scripts calling
 // os.exit end the process directly.
 func run(argv []string, stdout, stderr io.Writer) int {
-	L := moonrt.NewState()
+	dialect, err := moonrt.ParseDialect(os.Getenv(luaEnv))
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%s: %s: %v\n", progname, luaEnv, err)
+		return 1
+	}
+	L := moonrt.NewState(moonrt.StateOptions(dialect))
 	defer L.Close()
 	L.SetMemoryLimit(memoryLimit())
 

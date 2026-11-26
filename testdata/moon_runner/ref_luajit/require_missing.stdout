@@ -1,0 +1,4 @@
+false
+module 'does.not.exist' not found:
+no field package.preload['does.not.exist']
+no file './does/not/exist.lua'

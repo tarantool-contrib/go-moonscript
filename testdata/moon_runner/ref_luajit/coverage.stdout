@@ -1,0 +1,11 @@
+starting coverage
+hello world
+args:	2	a	b
+arg:	2	hello.moon	a	b
+arg[-1] set:	true
+1	a
+2	b
+count	2	2
+table	true
+number formatting	0.33333333333333	5	9.007199254741e+15	1e+15	1e+100	-0.5	110
+returns are ignored

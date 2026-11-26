@@ -1,0 +1,4 @@
+moon: docs/reference_102.moon:2: (4) attempt to call global 'Person' (a nil value)
+stack traceback:
+	docs/reference_102.moon:2: (4) in function 'create_person'
+	docs/reference_102.moon:6: (13) in main chunk

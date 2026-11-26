@@ -1,0 +1,4 @@
+moon: sub/nested.moon:4: (3) nested failure
+stack traceback:
+	[C]: in function 'error'
+	sub/nested.moon:4: (3) in main chunk

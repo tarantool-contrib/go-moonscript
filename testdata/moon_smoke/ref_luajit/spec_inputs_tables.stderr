@@ -1,0 +1,3 @@
+moon: spec/inputs/tables.moon:27: (26) attempt to call global 'hello' (a nil value)
+stack traceback:
+	spec/inputs/tables.moon:27: (26) in main chunk

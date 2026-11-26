@@ -1,0 +1,3 @@
+moon: docs/reference_026.moon:1: (2) attempt to call global 'my_func' (a nil value)
+stack traceback:
+	docs/reference_026.moon:1: (2) in main chunk

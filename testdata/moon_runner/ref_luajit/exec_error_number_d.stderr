@@ -1,0 +1,6 @@
+/usr/bin/luajit: (command line):1: 1.5
+stack traceback:
+	[C]: in function 'error'
+	(command line):1: in function 'moonscript_chunk'
+	/usr/local/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:106: in function </usr/local/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:104>
+	[C]: at 0x55e34c2ae2c0

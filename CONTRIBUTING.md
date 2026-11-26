@@ -83,7 +83,7 @@ Then regenerate what a change affects:
 | `scripts/gen-docs-golden.sh` | `testdata/docs/`: the documentation examples |
 | `scripts/gen-upstream-spec-ref.sh` | `testdata/upstream_spec/`: upstream's behavioural specs |
 | `scripts/gen-lint-golden.sh` | `testdata/lint/` |
-| `scripts/gen-moon-runner-ref.sh` | `testdata/moon_runner/`, `testdata/moon_smoke/` |
+| `scripts/gen-moon-runner-ref.sh` | `testdata/moon_runner/`, `testdata/moon_smoke/`: `ref/` from `moon` on Lua 5.1, `ref_luajit/` from `moon` run by `luajit` (image `luajitref:2.1`, built if missing; `lua51` or `luajit` as argument: one of them) |
 | `scripts/gen-hook-ref.sh` | `runtime/testdata/hooks/` |
 | `scripts/gen-compat-ref.sh` | `third_party/gopher-lua/testdata/compat/ref/`: Lua behaviour tests of the VM |
 | `scripts/gen-pattern-fuzz.sh` | the pattern-matching differential test (`lib_pattern_fuzz.lua`) |

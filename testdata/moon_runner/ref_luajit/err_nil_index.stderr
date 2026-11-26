@@ -1,0 +1,4 @@
+moon: err_nil_index.moon:6: (8) attempt to index field 'client' (a nil value)
+stack traceback:
+	err_nil_index.moon:6: (8) in function 'get'
+	err_nil_index.moon:9: (11) in main chunk
