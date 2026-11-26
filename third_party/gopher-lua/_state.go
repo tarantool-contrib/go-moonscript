@@ -2354,8 +2354,15 @@ func (ls *LState) XMoveTo(other *LState, n int) {
 	}
 	top := ls.GetTop()
 	n = intMin(n, top)
-	for i := n; i > 0; i-- {
-		other.Push(ls.Get(top - i + 1))
+	// go-moonscript patch: one copy (it was a Push of each Get)
+	if n > 0 {
+		rg := other.reg
+		newSize := rg.top + n
+		if newSize > cap(rg.array) {
+			rg.resize(newSize)
+		}
+		copy(rg.array[rg.top:newSize], ls.reg.array[ls.reg.top-n:ls.reg.top])
+		rg.top = newSize
 	}
 	ls.SetTop(top - n)
 }
