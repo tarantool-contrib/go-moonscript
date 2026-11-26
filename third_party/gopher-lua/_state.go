@@ -625,7 +625,7 @@ func panicWithoutTraceback(L *LState) {
 }
 
 func newLState(options Options) *LState {
-	al := newAllocator(32)
+	al := newAllocator(512) // go-moonscript patch: 4 KB pages, not 256 bytes
 	ls := &LState{
 		G:       newGlobal(),
 		Parent:  nil,
