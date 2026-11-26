@@ -1,0 +1,26 @@
+1e	malformed
+1e+	malformed
+1E-	malformed
+0x	malformed
+3..2	malformed
+1x	malformed
+0x1p4	16
+0x1P-1	malformed
+08	8
+010	10
+1.5.5	malformed
+0xg	malformed
+1e5	100000
+0x1F	31
+3 .. 2	32
+0x1e+1	31
+.5	0.5
+5.	5
+1e+5	100000
+1.e2	100
+.e2	error
+0x.1	malformed
+1_0	malformed
+0b1	malformed
+1.5f	malformed
+2e2e2	malformed

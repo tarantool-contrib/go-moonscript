@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "iter"}}, {{[7] "chain", {[7] "ref", "ipairs"}, {"call", {{[14] "ref", "items"}}}}}}
+{[21] "assign", {{[21] "ref", "slice"}}, {{[28] "comprehension", {[30] "ref", "item"}, {{"foreach", {"i", "item"}, {[49] "ref", "iter"}}, {"when", {"exp", {[59] "ref", "i"}, ">", {[63] "number", "1"}, "and", {[69] "ref", "i"}, "<", {[73] "number", "3"}}}}}}}

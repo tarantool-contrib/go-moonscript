@@ -1,0 +1,48 @@
+true
+0	768	65280
+9	15
+32512
+false	lib_os_51.lua:5: bad argument #1 to f (string expected, got table)
+true	
+nil	<tmp>.none: No such file or directory	2
+nil	<tmp>.none: No such file or directory	2
+true
+nil	<tmp>: No such file or directory	2
+true
+<dir>: Directory not empty	1
+true	true	true
+nil	<tmp>: No such file or directory	2
+<name>: No such file or directory
+C
+C	C	C
+nil	nil
+all	C	C
+collate	C	C
+ctype	C	C
+monetary	C	C
+numeric	C	C
+time	C	C
+C.UTF-8	C.UTF-8	C
+LC_CTYPE=C.UTF-8;LC_NUMERIC=C;LC_TIME=C;LC_COLLATE=C;LC_MONETARY=C;LC_MESSAGES=C;LC_PAPER=C;LC_NAME=C;LC_ADDRESS=C;LC_TELEPHONE=C;LC_MEASUREMENT=C;LC_IDENTIFICATION=C
+C.UTF-8	C.UTF-8
+C	C
+true
+false	lib_os_51.lua:5: bad argument #1 to f (string expected, got table)
+false	lib_os_51.lua:5: field 'day' missing in date table
+false	lib_os_51.lua:5: field 'day' missing in date table
+false	lib_os_51.lua:5: field 'day' missing in date table
+false	lib_os_51.lua:5: field 'month' missing in date table
+false	lib_os_51.lua:5: field 'year' missing in date table
+false	lib_os_51.lua:5: field 'year' missing in date table
+false	lib_os_51.lua:5: field 'year' missing in date table
+false	lib_os_51.lua:5: bad argument #1 to f (table expected, got number)
+false	lib_os_51.lua:5: bad argument #1 to f (table expected, got string)
+43200
+0
+3601
+31622400
+-90000
+0
+2010	7	15	10	20	30	196	5
+0
+number	number	true

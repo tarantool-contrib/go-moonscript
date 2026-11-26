@@ -1,0 +1,51 @@
+exit 1
+globals.moon
+
+line 1: accessing global `undefined_thing`
+==========================================
+> print undefined_thing
+
+line 2: accessing global `some_global`
+======================================
+> x = some_global.field
+
+line 3: accessing global `some_function`
+========================================
+> some_function 1, 2
+
+line 11: accessing global `interpolated`
+========================================
+> z = "#{interpolated} string"
+
+line 14: accessing global `value_global`
+========================================
+>   key: value_global
+
+line 15: accessing global `computed_key`
+========================================
+>   [computed_key]: 1
+
+line 19: accessing global `obj_global`
+======================================
+> with obj_global
+
+line 23: accessing global `BaseGlobal`
+======================================
+> class Thing extends BaseGlobal
+
+line 26: accessing global `missing_in_method`
+=============================================
+>   method: => @name .. missing_in_method
+
+line 24: accessing global `default_opts`
+========================================
+>   new: (@name, opts = default_opts) =>
+
+line 28: accessing global `default_arg_global`
+===================================================
+> fn = (a = default_arg_global) -> a + other_global
+
+line 28: accessing global `other_global`
+===================================================
+> fn = (a = default_arg_global) -> a + other_global
+

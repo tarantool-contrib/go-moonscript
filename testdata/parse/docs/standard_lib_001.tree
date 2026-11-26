@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "moon"}}, {{[7] "chain", {[7] "ref", "require"}, {"call", {{[15] "string", """, "moon"}}}}}}
+{[56] "chain", {[56] "ref", "moon"}, {"dot", "p"}, {"call", {{[62] "table", {{{"key_literal", "hello"}, {[71] "string", """, "world"}}}}}}}

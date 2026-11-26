@@ -1,0 +1,4 @@
+{[1] "class", "MyClass", "", {}}
+{[16] "chain", {[16] "ref", "is_class"}, {"call", {{[24] "ref", "MyClass"}}}}
+{[48] "chain", {[48] "ref", "is_class"}, {"call", {{[56] "chain", {[56] "ref", "MyClass"}, {"call", {}}}}}}
+{[81] "chain", {[81] "ref", "is_class"}, {"call", {{[89] "chain", {[89] "ref", "MyClass"}, {"dot", "__base"}}}}}

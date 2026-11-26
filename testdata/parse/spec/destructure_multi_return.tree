@@ -1,0 +1,6 @@
+{[2] "assign", {{[2] "ref", "num"}, {[6] "table", {{{"key_literal", "message"}, {[16] "ref", "message"}}}}}, {{[19] "chain", {[19] "ref", "two_values"}, {"call", {}}}}}
+{[33] "assign", {{[33] "table", {{{"key_literal", "alpha"}, {[40] "ref", "alpha"}}}}, {[42] "table", {{{"key_literal", "beta"}, {[49] "ref", "beta"}}}}, {[51] "table", {{{"key_literal", "gamma"}, {[59] "ref", "gamma"}}}}}, {{[62] "chain", {[62] "ref", "multi_destruct"}, {"call", {}}}}}
+{[80] "assign", {{[80] "ref", "head"}, {[85] "table", {{{"key_literal", "content"}, {[95] "ref", "content"}}}}, {[97] "ref", "tail"}}, {{[104] "chain", {[104] "ref", "mix"}, {"call", {}}}}}
+{[111] "assign", {{[111] "ref", "start"}, {[117] "table", {{{"key_literal", "extra"}, {[125] "ref", "extra"}}}}, {[127] "ref", "rest"}}, {{[134] "chain", {[134] "ref", "forward"}, {"call", {{[142] "number", "88"}, {[146] "number", "77"}}}}}}
+{[151] "assign", {{[151] "ref", "prop"}, {[156] "table", {{{"key_literal", "value"}, {[164] "ref", "value"}}}}}, {{[167] "chain", {[167] "ref", "hello"}, {"dot", "world"}, {"call", {}}}}}
+{[182] "assign", {{[182] "table", {{{"key_literal", "value"}, {[189] "ref", "built"}}}}, {[197] "table", {{{"key_literal", "status"}, {[206] "ref", "status"}}}}}, {{[209] "chain", {[209] "ref", "builder"}, {"colon", "build"}, {"call", {}}}}}

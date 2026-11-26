@@ -1,0 +1,55 @@
+[10]	10	10	10	10
+[ 10 ]	10	10	10	10
+[010]	10	10	10	10
+[00011]	11	11	11	11
+[0x10]	16	16	16	16
+[0X1f]	31	31	31	31
+[ 0x10 ]	16	16	16	16
+[-0x10]	-16	-16	-16	-16
+[+5]	5	5	5	5
+[-5]	-5	-5	-5	-5
+[1e2]	100	100	100	100
+[1E+2]	100	100	100	100
+[1e-06]	1e-06	1e-06	1e-06	1e-06
+[+.5e1]	5	5	5	5
+[.5]	0.5	0.5	0.5	0.5
+[5.]	5	5	5	5
+[-1.]	-1	-1	-1	-1
+[.]	nil	error	error	nil
+[0x]	nil	error	error	nil
+[1e]	nil	error	error	nil
+[1e+]	nil	error	error	nil
+[e1]	nil	error	error	nil
+[inf]	inf	inf	inf	inf
+[-inf]	-inf	-inf	-inf	-inf
+[INF]	inf	inf	inf	inf
+[nan]	nan	nan	nan	nan
+[-nan]	nan	nan	nan	nan
+[infinity]	inf	inf	inf	inf
+[infin]	nil	error	error	nil
+[0x1p4]	16	16	16	16
+[0x1.8]	1.5	1.5	1.5	1.5
+[0x.8]	0.5	0.5	0.5	0.5
+[0xA.8p1]	21	21	21	21
+[0x1p]	nil	error	error	nil
+[1_000]	nil	error	error	nil
+[0o17]	nil	error	error	nil
+[1.5e3x]	nil	error	error	nil
+[]	nil	error	error	nil
+[ ]	nil	error	error	nil
+[\95\10]	5	5	5	5
+[\115\12\13]	5	5	5	5
+[0x7fffffffffffffff]	9.2233720368548e+18	9.2233720368548e+18	9.2233720368548e+18	9.2233720368548e+18
+[0xffffffffffffffffff]	4.7223664828696e+21	4.7223664828696e+21	4.7223664828696e+21	4.7223664828696e+21
+[1e400]	inf	inf	inf	inf
+[-1e400]	-inf	-inf	-inf	-inf
+[1e-400]	0	0	0	0
+[-0]	-0	0	-0	-0
+[0x-1]	nil	error	error	nil
+[- 1]	nil	error	error	nil
+[1 2]	nil	error	error	nil
+[1e1.5]	nil	error	error	nil
+[3.4.5]	nil	error	error	nil
+[0x1e+1]	nil	error	error	nil
+12	10	-16	true
+3	16

@@ -1,0 +1,2 @@
+{"decorated", {[1] "chain", {[1] "ref", "print"}, {"call", {{[6] "ref", "x"}}}}, {"comprehension", {{"foreach", {"x"}, {"unpack", {[19] "ref", "y"}}}}}}
+{"decorated", {[21] "chain", {[21] "ref", "print"}, {"call", {{[26] "ref", "i"}}}}, {"comprehension", {{"for", "i", {{[35] "number", "1"}, {[37] "number", "10"}}}, {"when", {"exp", {[44] "ref", "i"}, ">", {[48] "number", "2"}}}}}}

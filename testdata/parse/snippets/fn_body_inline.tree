@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "f"}}, {{[4] "fndef", {}, {}, "slim", {{[7] "chain", {[7] "ref", "print"}, {"call", {{[13] "number", "1"}}}}}}}}
+{[16] "assign", {{[16] "ref", "g"}}, {{[19] "fndef", {}, {}, "fat", {{[22] "self", "x"}}}}}

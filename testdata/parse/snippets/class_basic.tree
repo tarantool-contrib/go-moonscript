@@ -1,0 +1,1 @@
+{[1] "class", "A", "", {{"props", {{"key_literal", "new"}, {[15] "fndef", {{"x"}}, {}, "fat", {{[27] "assign", {{[27] "self", "x"}}, {{[31] "ref", "x"}}}}}}}, {"props", {{"key_literal", "get"}, {[40] "fndef", {}, {}, "fat", {{[43] "self", "x"}}}}}}}

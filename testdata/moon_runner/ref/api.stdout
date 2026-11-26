@@ -1,0 +1,40 @@
+local x = 1
+return print(x + 1)
+line table	1	7
+to_lua error	nil	failed to parse at line 1, column 5:
+  x = = 1
+      ^
+to_lua bad type	nil	expecting string (got number)
+loadstring	1	2
+line table recorded	true
+loadstring error	nil	failed to parse at line 1, column 4:
+  x =
+     ^
+loadfile missing	nil	nope.moon: No such file or directory
+dofile	returned	2
+create_moonpath	./?.moon;/a/?/init.moon
+insert_loader again	false
+dirsep	/
+runtime error	fake.moon:3: line four
+reverse	4
+truncate	stack traceback:
+	a:1: in function 'x'
+	b:2: in main chunk
+rewrite unchanged	moon: nowhere:3: msg
+stack traceback:
+	nowhere:3: in main chunk
+rewrite bad header	nil
+util.trim	[a b]
+util.split	a|b|c
+util.pos_to_line	2
+util.get_closest_line	a	1
+util.mtype	number	table
+util.safe_module	false	/usr/local/share/lua/5.1/moonscript/util.lua:209: Attempted to import non-existent `missing` from mod
+util.get_options	table: 0x6354ecc55ef0	1	2
+return print('from tree')
+parse error	nil	failed to parse at line 1, column 5:
+  x = = 1
+      ^
+compile error	local self.__class = 1	table: 0x6354ecbde8d0
+version	0.8.0
+data	true

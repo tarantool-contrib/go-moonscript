@@ -1,0 +1,3 @@
+fndef_dup_error2.moon	failed to compile: Can't destructure into 'a': name is bound by another parameter at line 1, column 15:
+  f = ({:a}, {b, a}) -> a
+                ^

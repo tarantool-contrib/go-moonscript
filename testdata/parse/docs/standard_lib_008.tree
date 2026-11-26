@@ -1,0 +1,5 @@
+{[1] "class", "Parent", "", {}}
+{[14] "class", "Child", {[33] "ref", "Parent"}, {}}
+{[42] "chain", {[42] "ref", "is_instance_of"}, {"call", {{[56] "chain", {[56] "ref", "Child"}, {"call", {}}}, {[64] "ref", "Child"}}}}
+{[80] "chain", {[80] "ref", "is_instance_of"}, {"call", {{[94] "chain", {[94] "ref", "Child"}, {"call", {}}}, {[102] "ref", "Parent"}}}}
+{[142] "chain", {[142] "ref", "is_instance_of"}, {"call", {{[156] "chain", {[156] "ref", "Parent"}, {"call", {}}}, {[165] "ref", "Child"}}}}

@@ -1,0 +1,4 @@
+moon: ./lib/util.moon:15: (44) attempt to index global 'nil_value' (a nil value)
+stack traceback:
+	./lib/util.moon:15: (44) in function 'index_nil'
+	err_in_module.moon:3: (3) in main chunk

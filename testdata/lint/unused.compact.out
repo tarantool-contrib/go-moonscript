@@ -1,0 +1,10 @@
+exit 1
+unused.moon:17:5: assigned but unused `nested_unused` [unused]
+unused.moon:11:3: assigned but unused `inner` [unused]
+unused.moon:27:3: assigned but unused `loop_unused` [unused]
+unused.moon:30:3: assigned but unused `pair_unused` [unused]
+unused.moon:35:3: assigned but unused `in_if` [unused]
+unused.moon:37:3: assigned but unused `in_elseif` [unused]
+unused.moon:39:3: assigned but unused `in_else` [unused]
+unused.moon:42:3: assigned but unused `in_while` [unused]
+unused.moon:2:1: assigned but unused `a`, `c` [unused]

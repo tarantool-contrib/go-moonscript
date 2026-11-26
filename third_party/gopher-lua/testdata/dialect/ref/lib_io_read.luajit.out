@@ -1,0 +1,7 @@
+one	two
+	3	
+	rest		nil
+false	bad argument #2 to ? (invalid format)
+false	bad argument #2 to ? (invalid format)
+false	bad argument #2 to ? (invalid option)
+nil	nil	nil	function	function	function

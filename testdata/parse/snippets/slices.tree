@@ -1,0 +1,6 @@
+{[1] "assign", {{[1] "ref", "a"}}, {{[4] "chain", {[4] "ref", "t"}, {"slice", {[7] "number", "1"}, {[9] "number", "2"}}}}}
+{[12] "assign", {{[12] "ref", "b"}}, {{[15] "chain", {[15] "ref", "t"}, {"slice", 1, {[19] "number", "2"}}}}}
+{[22] "assign", {{[22] "ref", "c"}}, {{[25] "chain", {[25] "ref", "t"}, {"slice", {[28] "number", "1"}, ""}}}}
+{[32] "assign", {{[32] "ref", "d"}}, {{[35] "chain", {[35] "ref", "t"}, {"slice", {[38] "number", "1"}, {[40] "number", "2"}, {[42] "number", "3"}}}}}
+{[45] "assign", {{[45] "ref", "e"}}, {{[48] "chain", {[48] "ref", "t"}, {"slice", 1, "", {[53] "number", "2"}}}}}
+{[56] "assign", {{[56] "ref", "f"}}, {{[59] "comprehension", {[61] "ref", "x"}, {{"foreach", {"x"}, {"unpack", {[73] "chain", {[73] "ref", "t"}, {"slice", {[75] "number", "2"}, ""}}}}}}}}

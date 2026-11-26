@@ -1,0 +1,7 @@
+globals	function	function	function	function	function
+{
+    [1] = "from"
+    [2] = "all"
+}
+
+123

@@ -1,0 +1,5 @@
+moon: docs/standard_lib_012.moon:7: (34) attempt to call global 'mixin' (a nil value)
+stack traceback:
+	docs/standard_lib_012.moon:7: (34) in function '__init'
+	docs/standard_lib_012.moon:7: (42) in function 'Second'
+	docs/standard_lib_012.moon:9: (49) in main chunk

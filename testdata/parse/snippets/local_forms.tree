@@ -1,0 +1,4 @@
+{[1] "declare_glob", "*"}
+{[9] "declare_glob", "^"}
+{[17] "declare_with_shadows", {"a", "b"}}
+{[28] "declare_with_shadows", {"x"}}

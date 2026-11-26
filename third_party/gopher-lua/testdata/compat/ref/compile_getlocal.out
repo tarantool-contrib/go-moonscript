@@ -1,0 +1,51 @@
+names=fn should_exist=foo
+in do	a=10 b=20 x=1 y=2
+after do	a=10 b=20 x=1 z=3
+num for	a=10 b=20 x=1 z=3 (for index)=1 i=1 w=2
+num for	a=10 b=20 x=1 z=3 (for index)=2 i=2 w=4
+after num for	a=10 b=20 x=1 z=3
+gen for	a=10 b=20 x=1 z=3 (for generator)=fn (for control)=1 k=1 v=p
+after gen for	a=10 b=20 x=1 z=3
+while	a=10 b=20 x=2 z=3 q=1
+repeat	a=10 b=20 x=2 z=3 r=5
+s	a=10 b=20 x=2 z=3
+u	a=10 b=20 x=2 z=3 s=a=10 b=20 x=2 z=3
+ret	a=10 b=20 x=2 z=3 s=a=10 b=20 x=2 z=3 u=a=10 b=20 x=2 z=3 s=a=10 b=20 x=2 z=3 v=nil
+vararg	arg=nil n=2
+80: names=fn should_exist=foo f=fn g=fn h=fn events=tbl
+67: 
+68: a=1
+69: a=1 (for index)=1 i=1
+68: a=1 (for index)=1
+69: a=1 (for index)=2 i=2
+68: a=1 (for index)=2
+71: a=1
+72: a=1 (for generator)=fn (for control)=x k=x
+71: a=1 (for generator)=fn (for control)=x
+74: a=1
+75: 
+111: names=fn should_exist=foo f=fn g=fn h=fn events=tbl k=fn
+86: 
+87: fs=tbl
+88: fs=tbl (for index)=1 i=1
+89: fs=tbl (for index)=1 i=1 c=1
+87: fs=tbl (for index)=1
+88: fs=tbl (for index)=2 i=2
+89: fs=tbl (for index)=2 i=2 c=2
+87: fs=tbl (for index)=2
+91: fs=tbl
+92: fs=tbl n=0
+93: fs=tbl n=0
+94: fs=tbl n=0 m=0
+95: fs=tbl n=0 m=0
+92: fs=tbl n=1
+93: fs=tbl n=1
+94: fs=tbl n=1 m=1
+95: fs=tbl n=1 m=1
+92: fs=tbl n=2
+98: fs=tbl n=2
+99: fs=tbl n=2 r=1
+100: fs=tbl n=2 r=1
+102: fs=tbl n=2
+103: fs=tbl n=2 dd=3
+105: fs=tbl n=2

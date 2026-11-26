@@ -1,0 +1,3 @@
+moon: spec/inputs/with.moon:11: (16) attempt to index local '_with_0' (a nil value)
+stack traceback:
+	spec/inputs/with.moon:11: (16) in main chunk

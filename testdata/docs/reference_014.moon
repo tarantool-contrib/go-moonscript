@@ -1,0 +1,1 @@
+func = (num) => @value + num

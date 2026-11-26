@@ -1,0 +1,4 @@
+exit 1
+failed to parse at line 2, column 5:
+  y = = 2
+      ^

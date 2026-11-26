@@ -1,0 +1,68 @@
+# name<TAB>moon arguments (tab-separated); run in testdata/moon_runner.
+# Reference outputs: ref/<name>.{stdout,stderr,exit} (scripts/gen-moon-runner-ref.sh).
+hello	hello.moon	a	b c	3
+hello_noargs	hello.moon
+classes	classes.moon
+require	require.moon
+require_syntax_error	require_syntax_error.moon
+require_compile_error	require_compile_error.moon
+require_runtime_error	require_runtime_error.moon
+require_missing	require_missing.moon
+stdlib	stdlib.moon
+stdlib_all	stdlib_all.moon
+api	api.moon
+lua_features	lua_features.moon
+shebang	shebang.moon	x
+nested_dir	sub/nested.moon
+err_error	err_error.moon
+err_nil_index	err_nil_index.moon
+err_arith	err_arith.moon
+err_call_nil	err_call_nil.moon
+err_in_module	err_in_module.moon
+err_level2	err_level2.moon
+err_table	err_table.moon
+err_nested_pcall	err_nested_pcall.moon
+err_syntax	err_syntax.moon
+err_compile	err_compile.moon
+err_coroutine	err_coroutine.moon
+err_error_d	-d	err_error.moon
+err_in_module_d	-d	err_in_module.moon
+exit_code	exit_code.moon
+exit_zero	exit_zero.moon
+exec	-e	print "exec", ...	x	y
+exec_long	--execute=print 1 + 2
+exec_bundle	-de	print "bundled"
+exec_error	-e	error "from -e"
+exec_syntax	-e	x = = 1
+exec_runtime	-e	(-> nil + 1)!
+exec_empty	--execute=
+exec_missing_arg	-e
+exec_then_unknown	-e	-x
+version	-v
+version_long	--version
+help	-h
+help_long	--help
+help_bundle	-hv
+help_eq	--help=x
+no_script
+missing_file	nofile.moon
+dash_only	-
+unknown_opt	-x
+unknown_long	--versio
+unknown_long_tip	--d
+dash_dash	--	hello.moon	q
+flag_d_twice	-d	-d	hello.moon
+script_is_dir	lib
+closures	closures.moon
+exec_error_number_d	-d	-e	error 1.5
+exec_error_table_d	-d	-e	error {}
+exec_error_level0	-e	error "no position", 0
+coverage	-c	hello.moon	a	b
+coverage_long	--coverage	classes.moon
+coverage_require	-c	require.moon
+coverage_error	-c	err_error.moon
+coverage_error_d	-c	-d	err_error.moon
+coverage_exec	-c	-e	print "hi", 1 + 2
+coverage_loop	-c	cov_loop.moon
+coverage_report	cov_report.moon
+coverage_report_c	-c	cov_report.moon

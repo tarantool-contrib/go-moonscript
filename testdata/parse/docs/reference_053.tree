@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "ref", "func_a"}}, {{[9] "fndef", {}, {}, "slim", {{[12] "for", "i", {{[19] "number", "1"}, {[21] "number", "10"}}, {{[26] "ref", "i"}}}}}}}
+{[29] "assign", {{[29] "ref", "func_b"}}, {{[37] "fndef", {}, {}, "slim", {{[40] "return", {"explist", {[47] "for", "i", {{[54] "number", "1"}, {[56] "number", "10"}}, {{[61] "ref", "i"}}}}}}}}}
+{[65] "chain", {[65] "ref", "print"}, {"call", {{[70] "chain", {[70] "ref", "func_a"}, {"call", {}}}}}}
+{[93] "chain", {[93] "ref", "print"}, {"call", {{[98] "chain", {[98] "ref", "func_b"}, {"call", {}}}}}}

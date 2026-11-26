@@ -1,0 +1,2 @@
+{[1] "chain", {[1] "ref", "assert"}, {"call", {{"exp", "self", "==", {[12] "ref", "self"}}}}}
+{[18] "chain", {[18] "ref", "assert"}, {"call", {{"exp", "self.__class", "==", {[30] "chain", {[30] "ref", "self"}, {"dot", "__class"}}}}}}

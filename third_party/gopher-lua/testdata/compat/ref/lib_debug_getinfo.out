@@ -1,0 +1,27 @@
+currentline=-1 func=fn lastlinedefined=25 linedefined=22 nups=0 short_src=lib_debug_getinfo.lua source=lib_debug_getinfo.lua what=Lua
+currentline=-1 func=print lastlinedefined=-1 linedefined=-1 nups=0 short_src=[C] source==[C] what=C
+activelines={23,24,25}
+lastlinedefined=-1 linedefined=-1 short_src=[C] source==[C] what=C
+currentline=30 func=fn lastlinedefined=0 linedefined=0 nups=0 short_src=lib_debug_getinfo.lua source=lib_debug_getinfo.lua what=main
+lastlinedefined=0 linedefined=0 nups=0 short_src=lib_debug_getinfo.lua source=lib_debug_getinfo.lua what=main
+nil
+2	true
+false	bad argument #1 to ? (function or level expected)
+false	bad argument #2 to ? (invalid option)
+false	bad argument #2 to ? (invalid option)
+false	bad argument #1 to ? (function or level expected)
+currentline=-1 lastlinedefined=-1 linedefined=-1 short_src=(tail call) source==(tail call) what=tail
+currentline=47 lastlinedefined=47 linedefined=47 short_src=lib_debug_getinfo.lua source=lib_debug_getinfo.lua what=Lua
+lastlinedefined=-1 linedefined=-1 short_src=[C] source==[C] what=C
+nil
+lastlinedefined=0 linedefined=0 short_src=name source==name what=main
+activelines={3,4} lastlinedefined=0 linedefined=0 short_src=file.lua source=file.lua what=main
+currentline=54
+lastlinedefined=-1 linedefined=-1 nups=0 short_src=[C] source==[C] what=C	true
+lastlinedefined=56 linedefined=56 short_src=lib_debug_getinfo.lua source=lib_debug_getinfo.lua what=Lua
+lastlinedefined=0 linedefined=0 short_src=lib_debug_getinfo.lua source=lib_debug_getinfo.lua what=main
+true	lastlinedefined=59 linedefined=59 short_src=lib_debug_getinfo.lua source=lib_debug_getinfo.lua what=Lua	nil
+nil	dead
+nil
+x	x	x	6
+nil	false	bad argument #2 to ? (level out of range)

@@ -1,0 +1,17 @@
+starting coverage
+name	lib.util
+add	5
+stack	2	2	1
+same module	true
+hello from lua, moon	lib.helper
+lua requiring moon	6
+package init	package init
+moonpath	false
+moonpath entries end in .moon	true
+bad syntax	false	./lib/bad_syntax.moon: failed to parse at line 2, column 5:
+  y = = 2
+      ^
+loading errors_on_load
+error on load	false	./lib/errors_on_load.moon:2: failed while loading
+second try	false	loop or previous error loading module 'lib.errors_on_load'
+loader installed	true

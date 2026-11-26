@@ -1,0 +1,17 @@
+table	true	true
+LuaJIT 2.1.0-beta3	20100	string	string
+true	LuaJIT 2.1
+on	function
+off	function
+flush	function
+status	function
+attach	function
+true	true	true	true
+true	true	true
+true	true
+false	false	false	false	function expected, got boolean
+false	function expected, got function
+false	function expected, got boolean
+true	true	true
+false	function expected, got number
+string expected, got table

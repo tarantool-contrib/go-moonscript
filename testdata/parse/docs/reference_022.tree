@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "x"}}, {{"exp", {[4] "chain", {[4] "ref", "func"}, {"call", {{"string", """, "hello"}}}}, "+", {[18] "number", "100"}}}}
+{[23] "assign", {{[23] "ref", "y"}}, {{[26] "chain", {[26] "ref", "func"}, {"call", {{"exp", {[31] "string", """, "hello"}, "+", {[41] "number", "100"}}}}}}}

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: MoonScript language questions
+    url: https://moonscript.org/reference/
+    about: The MoonScript language reference.

@@ -1,0 +1,3 @@
+moon: docs/reference_050.moon:1: (4) attempt to index local '_list_0' (a nil value)
+stack traceback:
+	docs/reference_050.moon:1: (4) in main chunk

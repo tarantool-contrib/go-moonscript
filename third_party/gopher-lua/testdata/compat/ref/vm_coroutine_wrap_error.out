@@ -1,0 +1,14 @@
+false	vm_coroutine_wrap_error.lua:5: boom
+true	1
+false	true
+1
+nil
+true	false	true
+suspended
+true	done
+false	true
+false	true
+in outer2	false	vm_coroutine_wrap_error.lua:32: x
+in outer2	true
+1
+2

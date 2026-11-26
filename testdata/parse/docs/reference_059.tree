@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "have_coins"}}, {{[13] "ref", "false"}}}
+{[20] "chain", {[20] "ref", "print"}, {"call", {{[25] "if", {[28] "ref", "have_coins"}, {{[44] "string", """, "Got coins"}}, {"else", {{[61] "string", """, "No coins"}}}}}}}

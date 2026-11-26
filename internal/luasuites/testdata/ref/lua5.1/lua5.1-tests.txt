@@ -1,0 +1,49 @@
+### --setup exit=0
+RESULT	pass
+### api.lua exit=0
+NOTE	 >>> testC not active: skipping API tests <<<
+RESULT	pass
+### attrib.lua exit=0
+NOTE	 >>> cannot load dynamic library <<<
+RESULT	pass
+### big.lua exit=0
+RESULT	fail	/suites/lua/run51.lua:67	/suites/lua/run51.lua:67: big.lua:11: assertion failed!
+### calls.lua exit=0
+RESULT	pass
+### closure.lua exit=0
+NOTE	 >>> testC not active: skipping yield/hook tests <<<
+RESULT	pass
+### code.lua exit=0
+NOTE	 >>> testC not active: skipping opcode tests <<<
+RESULT	pass
+### constructs.lua exit=0
+RESULT	pass
+### db.lua exit=0
+RESULT	pass
+### errors.lua exit=0
+RESULT	pass
+### events.lua exit=0
+RESULT	pass
+### files.lua exit=0
+RESULT	pass
+### gc.lua exit=0
+RESULT	pass
+### literals.lua exit=0
+NOTE	 >>> pt_BR locale not available: skipping decimal point tests <<<
+RESULT	pass
+### locals.lua exit=0
+RESULT	pass
+### math.lua exit=0
+RESULT	pass
+### nextvar.lua exit=0
+RESULT	pass
+### pm.lua exit=0
+RESULT	pass
+### sort.lua exit=0
+RESULT	pass
+### strings.lua exit=0
+RESULT	pass
+### vararg.lua exit=0
+RESULT	pass
+### verybig.lua exit=0
+RESULT	pass

@@ -1,0 +1,5 @@
+moon: docs/reference_116.moon:3: (4) attempt to index local 'self' (a nil value)
+stack traceback:
+	docs/reference_116.moon:3: (4) in function <docs/reference_116.moon:3>
+	(tail call): ?
+	docs/reference_116.moon:12: (12) in main chunk

@@ -1,0 +1,22 @@
+{[2] "table", {{{[6] "number", "1"}}, {{[8] "number", "2"}}}}
+{[14] "table", {{{[15] "number", "1"}}, {{[18] "number", "2"}}}}
+{[24] "table", {{{[25] "number", "1"}}, {{[28] "number", "2"}}}}
+{[34] "table", {{{[35] "number", "1"}}, {{[37] "number", "2"}}}}
+{[41] "table", {{{[43] "number", "1"}}, {{[45] "number", "2"}}}}
+{[51] "table", {{{[52] "chain", {[52] "ref", "something"}, {"call", {{[62] "number", "1"}, {[65] "number", "2"}, {[72] "number", "4"}, {[74] "number", "5"}, {[76] "number", "6"}}}}}, {{[81] "number", "3"}}, {{[83] "number", "4"}}, {{[85] "number", "5"}}}}
+{[90] "table", {{{[94] "chain", {[94] "ref", "a"}, {"call", {{[95] "number", "1"}, {[98] "number", "2"}, {[100] "number", "3"}}}}}, {{[105] "number", "4"}}, {{[107] "number", "5"}}, {{[109] "number", "6"}}, {{[113] "number", "1"}}, {{[115] "number", "2"}}, {{[117] "number", "3"}}}}
+{[123] "table", {{{[127] "chain", {[127] "ref", "b"}, {"call", {{[128] "number", "1"}, {[131] "number", "2"}, {[133] "number", "3"}, {[140] "number", "4"}, {[142] "number", "5"}, {[144] "number", "6"}}}}}, {{[148] "number", "1"}}, {{[150] "number", "2"}}, {{[152] "number", "3"}}, {{[159] "number", "1"}}, {{[161] "number", "2"}}, {{[163] "number", "3"}}}}
+{[168] "table", {{{[169] "number", "1"}}, {{[172] "number", "2"}}, {{[174] "number", "3"}}}}
+{[179] "table", {{{[180] "chain", {[180] "ref", "c"}, {"call", {{[182] "number", "1"}, {[185] "number", "2"}, {[187] "number", "3"}}}}}}}
+{[194] "chain", {[194] "ref", "hello"}, {"call", {{[199] "number", "1"}, {[202] "number", "2"}, {[204] "number", "3"}, {[206] "number", "4"}, {[211] "number", "1"}, {[213] "number", "2"}, {[215] "number", "3"}, {[217] "number", "4"}, {[219] "number", "4"}, {[221] "number", "5"}}}}
+{[224] "chain", {[224] "ref", "x"}, {"call", {{[225] "number", "1"}, {[231] "number", "2"}, {[233] "number", "3"}, {[239] "number", "4"}, {[241] "number", "5"}, {[244] "number", "6"}}}}
+{[249] "chain", {[249] "ref", "hello"}, {"call", {{[254] "number", "1"}, {[257] "number", "2"}, {[259] "number", "3"}, {[264] "chain", {[264] "ref", "world"}, {"call", {{[269] "number", "4"}, {[272] "number", "5"}, {[274] "number", "6"}, {[281] "number", "5"}, {[283] "number", "6"}, {[285] "number", "7"}, {[287] "number", "8"}}}}}}}
+{[290] "chain", {[290] "ref", "hello"}, {"call", {{[295] "number", "1"}, {[298] "number", "2"}, {[300] "number", "3"}, {[305] "chain", {[305] "ref", "world"}, {"call", {{[310] "number", "4"}, {[313] "number", "5"}, {[315] "number", "6"}, {[322] "number", "5"}, {[324] "number", "6"}, {[326] "number", "7"}, {[328] "number", "8"}}}}, {[333] "number", "9"}, {[335] "number", "9"}}}}
+{[339] "table", {{{[343] "chain", {[343] "ref", "hello"}, {"call", {{[348] "number", "1"}, {[351] "number", "2"}}}}}, {{[356] "number", "3"}}, {{[358] "number", "4"}}, {{[363] "number", "5"}}, {{[365] "number", "6"}}}}
+{[371] "assign", {{[371] "ref", "x"}}, {{[374] "table", {{{[379] "chain", {[379] "ref", "hello"}, {"call", {{[384] "number", "1"}, {[387] "number", "2"}, {[389] "number", "3"}, {[391] "number", "4"}, {[398] "number", "5"}, {[400] "number", "6"}, {[402] "number", "7"}}}}}, {{[406] "number", "1"}}, {{[408] "number", "2"}}, {{[410] "number", "3"}}, {{[412] "number", "4"}}}}}}
+{[417] "if", {[419] "chain", {[419] "ref", "hello"}, {"call", {{[425] "number", "1"}, {[428] "number", "2"}, {[430] "number", "3"}, {[435] "ref", "world"}, {[444] "ref", "world"}}}}, {{[454] "chain", {[454] "ref", "print"}, {"call", {{[459] "string", """, "hello"}}}}}}
+{[469] "if", {[471] "chain", {[471] "ref", "hello"}, {"call", {{[477] "number", "1"}, {[480] "number", "2"}, {[482] "number", "3"}, {[489] "ref", "world"}, {[500] "ref", "world"}}}}, {{[508] "chain", {[508] "ref", "print"}, {"call", {{[513] "string", """, "hello"}}}}}}
+{[528] "chain", {[528] "ref", "a"}, {"call", {{[531] "ref", "one"}, {[538] "ref", "two"}, {[543] "ref", "three"}}}}
+{[552] "chain", {[552] "ref", "b"}, {"call", {{[555] "ref", "one"}, {[564] "ref", "two"}, {[571] "ref", "three"}}}}
+{[581] "chain", {[581] "ref", "c"}, {"call", {{[583] "ref", "one"}, {[588] "ref", "two"}, {[595] "ref", "three"}, {[602] "ref", "four"}}}}
+{[614] "ref", "nil"}

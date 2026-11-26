@@ -1,0 +1,5 @@
+exit 1
+control.moon:5:5: assigned but unused `in_when` [unused]
+control.moon:9:5: assigned but unused `in_switch_else` [unused]
+control.moon:12:3: assigned but unused `in_unless` [unused]
+control.moon:28:8: accessing global `c_global` [global_access]

@@ -1,0 +1,1 @@
+{[1] "unless", {"exp", {[7] "chain", {[7] "ref", "os"}, {"dot", "date"}, {"call", {{[16] "string", """, "%A"}}}}, "==", {[24] "string", """, "Monday"}}, {{[36] "chain", {[36] "ref", "print"}, {"call", {{[41] "string", """, "it is not Monday!"}}}}}}

@@ -1,0 +1,21 @@
+-- string.gsub builds its result in one pass; it copied the whole string
+-- once per match (quadratic: a million matches copied about a terabyte).
+local s = string.rep("a", 1000000)
+local r, n = string.gsub(s, "a", "b")
+print(#r, n, r == string.rep("b", 1000000))
+r, n = string.gsub(s, "", "-")
+print(#r, n)
+r, n = string.gsub(string.rep("ab", 300000), "(a)(b)", "%2%1")
+print(#r, n, r:sub(1, 6))
+local i = 0
+r, n = string.gsub(string.rep("xy", 200000), "x", function() i = i + 1; if i % 2 == 0 then return false end return "<" .. i .. ">" end)
+print(#r, n, r:sub(1, 12))
+r, n = string.gsub(string.rep("k v ", 100000), "%w", {k = "key", v = false})
+print(#r, n, r:sub(1, 12))
+print(string.gsub("hello world", "(o)", "[%1]"))
+print(string.gsub("hello world", "o", "0", 1))
+print(string.gsub("abc", "x", "y"))
+print(string.gsub("", "", "e"))
+print(string.gsub("abc", "b*", "-"))
+print(string.gsub("hello", "", "."))
+print(string.gsub("aaa", "^a", "b"))

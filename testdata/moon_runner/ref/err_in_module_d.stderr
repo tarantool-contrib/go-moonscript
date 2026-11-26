@@ -1,0 +1,8 @@
+/usr/bin/lua5.1: ./lib/util.moon:44: attempt to index global 'nil_value' (a nil value)
+stack traceback:
+	./lib/util.moon:44: in function 'index_nil'
+	err_in_module.moon:3: in function 'moonscript_chunk'
+	...cal/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:106: in function <...cal/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:104>
+	(tail call): ?
+	(tail call): ?
+	[C]: ?

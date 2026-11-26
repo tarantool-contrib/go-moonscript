@@ -1,0 +1,39 @@
+exit 1
+unused.moon
+
+line 17: assigned but unused `nested_unused`
+============================================
+>     nested_unused = 3
+
+line 11: assigned but unused `inner`
+====================================
+>   inner = arg * 2
+
+line 27: assigned but unused `loop_unused`
+==========================================
+>   loop_unused = i
+
+line 30: assigned but unused `pair_unused`
+==========================================
+>   pair_unused = k
+
+line 35: assigned but unused `in_if`
+====================================
+>   in_if = 1
+
+line 37: assigned but unused `in_elseif`
+========================================
+>   in_elseif = 2
+
+line 39: assigned but unused `in_else`
+======================================
+>   in_else = 3
+
+line 42: assigned but unused `in_while`
+=======================================
+>   in_while = 1
+
+line 2: assigned but unused `a`, `c`
+====================================
+> a, b, c = 1, 2, 3
+

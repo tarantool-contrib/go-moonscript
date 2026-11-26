@@ -1,0 +1,6 @@
+moon: err_nested_pcall.moon:6: (11) uncaught after pcall
+stack traceback:
+	[C]: in function 'error'
+	err_nested_pcall.moon:6: (11) in function <err_nested_pcall.moon:10>
+	(tail call): ?
+	err_nested_pcall.moon:8: (17) in main chunk

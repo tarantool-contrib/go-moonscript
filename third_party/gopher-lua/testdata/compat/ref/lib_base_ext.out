@@ -1,0 +1,8 @@
+false	false	function expected, got string
+false	string expected, got function
+3
+false	string expected, got table
+false	lib_base_ext.lua:15: assertion failed!
+false	invalid option 'isrunning'
+true	0
+1.844674407371e+19	1.844674407371e+19	1	1.844674407371e+19	1.844674407371e+19

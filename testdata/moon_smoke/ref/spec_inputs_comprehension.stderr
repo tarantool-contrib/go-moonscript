@@ -1,0 +1,3 @@
+moon: spec/inputs/comprehension.moon:5: (12) attempt to call a table value
+stack traceback:
+	spec/inputs/comprehension.moon:5: (12) in main chunk

@@ -1,0 +1,3 @@
+exit 1
+crlf.moon:2:4: accessing global `missing` [global_access]
+crlf.moon:1:1: assigned but unused `a` [unused]

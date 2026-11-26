@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "mystery"}}, {{[10] "fndef", {{"x"}, {"y"}}, {}, "slim", {{[20] "explist", {"exp", {[20] "ref", "x"}, "+", {[24] "ref", "y"}}, {"exp", {[27] "ref", "x"}, "-", {[31] "ref", "y"}}}}}}}
+{[34] "assign", {{[34] "ref", "a"}, {[36] "ref", "b"}}, {{[39] "chain", {[39] "ref", "mystery"}, {"call", {{[47] "number", "10"}, {[51] "number", "20"}}}}}}

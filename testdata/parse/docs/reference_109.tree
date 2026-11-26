@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "ref", "i"}}, {{[4] "number", "100"}}}
+{[10] "assign", {{[10] "ref", "my_func"}}, {{[19] "fndef", {}, {"nil"}, "slim", {{[37] "assign", {{[37] "ref", "i"}}, {{[40] "string", """, "hello"}}}}}}}
+{[90] "chain", {[90] "ref", "my_func"}, {"call", {}}}
+{[99] "chain", {[99] "ref", "print"}, {"call", {{[104] "ref", "i"}}}}

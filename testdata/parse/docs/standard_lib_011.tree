@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "ref", "obj"}}, {{[6] "chain", {[6] "ref", "SomeClass"}, {"call", {}}}}}
+{[19] "assign", {{[19] "ref", "bound_obj"}}, {{[30] "chain", {[30] "ref", "bind_methods"}, {"call", {{[43] "ref", "obj"}}}}}}
+{[83] "chain", {[83] "ref", "obj"}, {"colon", "hello"}, {"call", {}}}
+{[94] "chain", {[94] "ref", "bound_obj"}, {"dot", "hello"}, {"call", {}}}

@@ -1,0 +1,26 @@
+-- LuaJIT 2.1: load(chunk [, chunkname [, mode [, env]]]) with string chunks,
+-- loadstring is load, loadfile(filename [, mode [, env]]), assert raises
+-- any message value, collectgarbage("isrunning")
+print(loadstring == load, loadstring(function() return nil end) ~= nil)
+print(load("return 1 + 1")(), load(42) == nil, loadstring(function() return nil end) ~= nil)
+print(load("return ...", nil, "t")(5, 6))
+print(load("return x", "chunk", "t", {x = 9})(), loadstring("return x", "c", "bt", {x = 8})())
+print(load("return x", nil, nil, nil)(), load("return 1", nil, nil, 5)())
+print(load("return 1", "x", "b"))
+print(load("return 1", "x", 5))
+print(load("return 1", "x", ""))
+print(load("\27Lua", "x", "t"))
+local parts, i = {"return ", 1, " + ", "2"}, 0
+print(load(function() i = i + 1; return parts[i] end, "=reader", "t", {})())
+i = 0
+print(load(function() i = i + 1; return parts[i] end, "=reader", "b"))
+local ok, e = load(function() error({}) end)
+print(ok, type(e))
+print(type(loadfile(nil, "t", {})), loadfile("/nonexistent/file.lua", "t") == nil)
+print(pcall(function() assert(false, 42) end))
+print(pcall(function() assert(nil, nil) end))
+print(select(2, pcall(function() local t = {} return assert(false, t) == t end)) ~= nil)
+print(select(2, pcall(function() local t = {} assert(false, t) end)) ~= nil, type(select(2, pcall(assert, false, {}))))
+print(pcall(assert, false, true))
+print(select("#", assert(1, nil, 3)), assert("v", "m"))
+print(collectgarbage("isrunning"), collectgarbage("stop"), collectgarbage("isrunning"), collectgarbage("restart"), collectgarbage("isrunning"))

@@ -1,0 +1,3 @@
+short_colon_error.moon	failed to compile: Short-colon syntax must be called within a with block at line 1, column 4:
+  x = \foo
+     ^

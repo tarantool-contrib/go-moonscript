@@ -1,0 +1,3 @@
+{[18] "assign", {{[18] "ref", "ref"}}, {{[23] "fndef", {{"name", {[30] "string", """, "val"}}}, {}, "slim", {{[42] "table", {{{[43] "string", """, "ref"}}, {{[49] "ref", "name"}}}}}}}}
+{[57] "assign", {{[57] "ref", "str"}}, {{[62] "fndef", {{"contents", {[73] "string", """, "dogzone"}}, {"delim", {[90] "string", "'", """}}}, {}, "slim", {{[100] "table", {{{[101] "string", """, "string"}}, {{[110] "ref", "delim"}}, {{[117] "ref", "contents"}}}}}}}}
+{[129] "table", {{{"key_literal", "ref"}, {[137] "ref", "ref"}}, {{"key_literal", "str"}, {[144] "ref", "str"}}}}

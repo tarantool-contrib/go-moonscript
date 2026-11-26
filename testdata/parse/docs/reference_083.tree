@@ -1,0 +1,3 @@
+{[1] "declare_with_shadows", {"a"}}
+{[9] "if", {[11] "ref", "something"}, {{[24] "assign", {{[24] "ref", "a"}}, {{[27] "number", "1"}}}}}
+{[30] "chain", {[30] "ref", "print"}, {"call", {{[35] "ref", "a"}}}}

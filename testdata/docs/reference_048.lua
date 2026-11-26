@@ -1,0 +1,1 @@
+return print("I am " .. tostring(math.random() * 100) .. "% sure.")

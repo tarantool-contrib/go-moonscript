@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "x"}}, {{[4] "table", {{{[7] "ref", "hello"}}, {{[13] "parens", {[14] "ref", "one"}}}, {{[19] "parens", {[20] "ref", "two"}}}, {{[25] "chain", {[25] "ref", "three"}, {"call", {}}}}}}}}

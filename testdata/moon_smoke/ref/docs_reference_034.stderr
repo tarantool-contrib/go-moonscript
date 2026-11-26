@@ -1,0 +1,3 @@
+moon: docs/reference_034.moon:5: (8) attempt to call global 'print_table' (a nil value)
+stack traceback:
+	docs/reference_034.moon:5: (8) in main chunk

@@ -1,0 +1,1 @@
+local some_string = "Here is a string\n  that has a line break in it."

@@ -1,0 +1,36 @@
+<a><z><->_09<A>	4
+<a><b><c>d<e><->	5
+<a><-><_>.%<d>	4
+ab<d>%	1
+<]>-<a><^>	3
+<a>]<b>	2
+W (W) W	3
+<hello> <world>	2
+6	5
+4	3
+1	0
+^aaa	1
+1
+ab	0
+false	lib_pattern_syntax.lua:7: malformed pattern (ends with '%')
+true	nil
+false	lib_pattern_syntax.lua:7: malformed pattern (ends with '%')
+false	lib_pattern_syntax.lua:7: unbalanced pattern
+false	lib_pattern_syntax.lua:7: unbalanced pattern
+true	nil
+false	lib_pattern_syntax.lua:7: malformed pattern (missing ']')
+true	nil
+false	lib_pattern_syntax.lua:7: malformed pattern (missing ']')
+false	lib_pattern_syntax.lua:7: missing '[' after '%f' in pattern
+true	nil
+false	lib_pattern_syntax.lua:7: missing '[' after '%f' in pattern
+false	lib_pattern_syntax.lua:7: invalid capture index
+true	nil
+false	lib_pattern_syntax.lua:7: invalid pattern capture
+true	nil
+false	lib_pattern_syntax.lua:7: invalid pattern capture
+true	abc	0
+false	lib_pattern_syntax.lua:7: malformed pattern (ends with '%')
+false	lib_pattern_syntax.lua:7: malformed pattern (ends with '%')
+false	lib_pattern_syntax.lua:7: malformed pattern (ends with '%')
+false	lib_pattern_syntax.lua:7: malformed pattern (ends with '%')

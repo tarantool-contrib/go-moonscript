@@ -1,0 +1,79 @@
+------| @cov_report.moon
+     1| -- Drives moonscript.cmd.coverage with a hook of its own (upstream moon -c's
+     2| -- hook, a tail call, printed an empty report on Lua 5.1); the report covers
+     3| -- this file: which lines ran, as mapped back from Lua lines by the line
+     4| -- table.
+     5| coverage = require "moonscript.cmd.coverage"
+     6| cov = coverage.CodeCoverage!
+     7| hook = (ev, line) ->
+     8|   info = debug.getinfo 2, "S"
+     9|   cov.line_counts[info.source][line] += 1
+    10| 
+    11| debug.sethook hook, "l"
+    12| 
+*   13| add = (a, b) ->
+*   14|   a + b
+    15| 
+*   16| class Counter
+*   17|   new: (@n = 0) =>
+    18|   inc: =>
+*   19|     @n += 1
+*   20|     @n
+    21| 
+*   22| c = Counter!
+*   23| for i = 1, 3
+*   24|   c\inc!
+    25| 
+*   26| if c.n > 2
+*   27|   print "big", c.n
+    28| else
+    29|   print "small"
+    30| 
+*   31| never = ->
+    32|   print "never called"
+    33| 
+*   34| items = [x * 2 for x in *{1, 2, 3}]
+*   35| t = {k, v for k, v in pairs {a: 1}}
+    36| 
+*   37| while c.n < 5
+*   38|   c\inc!
+    39| 
+*   40| s = switch c.n
+*   41|   when 5
+*   42|     "five"
+    43|   else
+    44|     "other"
+    45| 
+*   46| long_call = add 1,
+    47|   2
+    48| 
+*   49| tbl = {
+*   50|   a: 1
+    51|   b: ->
+    52|     "b"
+    53|   {
+*   54|     nested: true
+    55|   }
+    56| }
+    57| 
+*   58| ok, err = pcall ->
+*   59|   error "boom"
+    60| 
+*   61| with_do = do
+*   62|   x = 10
+*   63|   x * 2
+    64| 
+    65| unless false
+*   66|   print "unless"
+    67| 
+*   68| co = coroutine.wrap ->
+    69|   coroutine.yield 1
+    70|   2
+*   71| co!
+*   72| co!
+    73| 
+*   74| debug.sethook!
+    75| print s, add(1, 2), #items, long_call, with_do, ok
+    76| cov\print_results!
+    77| 
+

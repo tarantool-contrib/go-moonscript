@@ -1,0 +1,6 @@
+moon: bad value: x
+stack traceback:
+	[C]: in function 'error'
+	err_level2.moon:2: (4) in function <err_level2.moon:2>
+	(tail call): ?
+	err_level2.moon:9: (13) in main chunk

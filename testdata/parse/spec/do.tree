@@ -1,0 +1,6 @@
+{[2] "do", {{[7] "chain", {[7] "ref", "print"}, {"call", {{[12] "string", """, "hello"}}}}, {[23] "chain", {[23] "ref", "print"}, {"call", {{[28] "string", """, "world"}}}}}}
+{[38] "assign", {{[38] "ref", "x"}}, {{[41] "do", {{[47] "chain", {[47] "ref", "print"}, {"call", {{[52] "string", """, "hello"}}}}, {[63] "chain", {[63] "ref", "print"}, {"call", {{[68] "string", """, "world"}}}}}}}}
+{[78] "assign", {{[78] "ref", "y"}}, {{[81] "do", {{[87] "assign", {{[87] "ref", "things"}}, {{[95] "string", """, "shhh"}}}, {[105] "fndef", {}, {}, "slim", {{[107] "exp", {[107] "string", """, "hello: "}, "..", {[120] "ref", "things"}}}}}}}}
+{[129] "fndef", {}, {}, "slim", {{[131] "if", {[134] "ref", "something"}, {{[149] "do", {{[152] "string", """, "yeah"}}}}}}}
+{[161] "assign", {{[161] "ref", "t"}}, {{[164] "table", {{{"key_literal", "y"}, {[171] "do", {{[179] "assign", {{[179] "ref", "number"}}, {{[187] "number", "100"}}}, {[196] "fndef", {{"x"}}, {}, "slim", {{[202] "exp", {[202] "ref", "x"}, "+", {[206] "ref", "number"}}}}}}}}}}}
+{[217] "fndef", {{"y", {[220] "parens", {[221] "do", {{[226] "assign", {{[226] "ref", "x"}}, {{"exp", {[229] "number", "10"}, "+", {[234] "number", "2"}}}}, {[239] "ref", "x"}}}}}, {"k", {[245] "do", {{[252] "string", """, "nothing"}}}}}, {}, "slim", {{[265] "do", {{[275] "string", """, "uhhh"}}}}}

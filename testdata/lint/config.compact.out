@@ -1,0 +1,8 @@
+exit 1
+thing_spec.moon:2:19: accessing global `ngx` [global_access]
+app/main.moon:1:32: accessing global `describe` [global_access]
+app/main.moon:1:42: accessing global `not_listed` [global_access]
+./app/main.moon:1:1: accessing global `ngx` [global_access]
+./app/main.moon:1:8: accessing global `app_global` [global_access]
+./app/main.moon:1:32: accessing global `describe` [global_access]
+./app/main.moon:1:42: accessing global `not_listed` [global_access]

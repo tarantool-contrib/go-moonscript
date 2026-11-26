@@ -1,0 +1,3 @@
+moon: spec/inputs/ambiguous.moon:3: (3) attempt to call local 'a' (a string value)
+stack traceback:
+	spec/inputs/ambiguous.moon:3: (3) in main chunk

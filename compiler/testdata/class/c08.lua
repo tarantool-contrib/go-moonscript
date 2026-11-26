@@ -1,0 +1,73 @@
+local f
+f = function()
+  local Inner
+  do
+    local _class_0
+    local _base_0 = {
+      a = 1
+    }
+    _base_0.__index = _base_0
+    _class_0 = setmetatable({
+      __init = function() end,
+      __base = _base_0,
+      __name = "Inner"
+    }, {
+      __index = _base_0,
+      __call = function(cls, ...)
+        local _self_0 = setmetatable({}, _base_0)
+        cls.__init(_self_0, ...)
+        return _self_0
+      end
+    })
+    _base_0.__class = _class_0
+    Inner = _class_0
+    return _class_0
+  end
+end
+local g
+g = function()
+  do
+    local _class_0
+    local _base_0 = { }
+    _base_0.__index = _base_0
+    _class_0 = setmetatable({
+      __init = function() end,
+      __base = _base_0,
+      __name = nil
+    }, {
+      __index = _base_0,
+      __call = function(cls, ...)
+        local _self_0 = setmetatable({}, _base_0)
+        cls.__init(_self_0, ...)
+        return _self_0
+      end
+    })
+    _base_0.__class = _class_0
+    return _class_0
+  end
+end
+return print((function()
+  local Hello
+  do
+    local _class_0
+    local _base_0 = {
+      b = 2
+    }
+    _base_0.__index = _base_0
+    _class_0 = setmetatable({
+      __init = function() end,
+      __base = _base_0,
+      __name = "Hello"
+    }, {
+      __index = _base_0,
+      __call = function(cls, ...)
+        local _self_0 = setmetatable({}, _base_0)
+        cls.__init(_self_0, ...)
+        return _self_0
+      end
+    })
+    _base_0.__class = _class_0
+    Hello = _class_0
+    return _class_0
+  end
+end)())

@@ -1,0 +1,3 @@
+moon: spec/inputs/lists.moon:10: (41) attempt to call global 'good_number' (a nil value)
+stack traceback:
+	spec/inputs/lists.moon:10: (41) in main chunk

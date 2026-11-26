@@ -1,0 +1,3 @@
+moon: docs/reference_090.moon:15: (11) attempt to call field 'length' (a nil value)
+stack traceback:
+	docs/reference_090.moon:15: (11) in main chunk

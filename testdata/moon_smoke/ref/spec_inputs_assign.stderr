@@ -1,0 +1,4 @@
+moon: spec/inputs/assign.moon:34: (33) attempt to index local '_base_0' (a nil value)
+stack traceback:
+	spec/inputs/assign.moon:34: (33) in function <spec/inputs/assign.moon:31>
+	spec/inputs/assign.moon:34: (37) in main chunk

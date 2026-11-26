@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "my_function"}}, {{[14] "fndef", {}, {}, "slim", {}}}}
+{[18] "chain", {[18] "ref", "my_function"}, {"call", {}}}

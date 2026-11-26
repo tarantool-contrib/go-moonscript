@@ -1,0 +1,1 @@
+{[1] "with", {[5] "ref", "x"}, {{[10] "chain", {"colon", "foo"}, {"call", {}}}, {[18] "assign", {{[18] "chain", {"dot", "bar"}}}, {{[24] "number", "1"}}}, {[29] "chain", {"colon", "baz"}, {"call", {{[33] "number", "2"}}}}}}

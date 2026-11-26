@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "tbl"}}, {{[6] "table", {{{"key_literal", "key"}, {[15] "do", {{[23] "chain", {[23] "ref", "print"}, {"call", {{[28] "string", """, "assigning key!"}}}}, {[50] "number", "1234"}}}}}}}}

@@ -1,0 +1,9 @@
+{[34] "fndef", {}, {}, "slim", {{"decorated", {[36] "ref", "x"}, {"comprehension", {{"foreach", {"x"}, {"unpack", {[49] "ref", "things"}}}}}}}}
+{[56] "fndef", {}, {}, "slim", {{[58] "comprehension", {[60] "ref", "x"}, {{"foreach", {"x"}, {"unpack", {[72] "ref", "things"}}}}}}}
+{[115] "do", {{"decorated", {[120] "return", {"explist", {[126] "ref", "x"}}}, {"comprehension", {{"foreach", {"x"}, {"unpack", {[139] "ref", "things"}}}}}}}}
+{[147] "do", {{[152] "return", {"explist", {[158] "comprehension", {[160] "ref", "x"}, {{"foreach", {"x"}, {"unpack", {[172] "ref", "things"}}}}}}}}}
+{[181] "do", {{[186] "return", {"explist", {[192] "tblcomprehension", {{[194] "ref", "x"}, {[196] "ref", "y"}}, {{"foreach", {"x", "y"}, {"unpack", {[210] "ref", "things"}}}}}}}}}
+{[219] "fndef", {}, {}, "slim", {{[224] "if", {[226] "ref", "a"}, {{[233] "if", {[235] "ref", "a"}, {{[244] "ref", "a"}}, {"else", {{[261] "ref", "b"}}}}}, {"elseif", {[271] "ref", "b"}, {{[278] "if", {[280] "ref", "a"}, {{[289] "ref", "a"}}, {"else", {{[306] "ref", "b"}}}}}}, {"else", {{[319] "if", {[321] "ref", "a"}, {{[330] "ref", "a"}}, {"else", {{[347] "ref", "b"}}}}}}}}}
+{[351] "do", {{[356] "return", {"explist", {[362] "if", {[365] "ref", "a"}, {{[372] "if", {[374] "ref", "a"}, {{[383] "ref", "a"}}, {"else", {{[400] "ref", "b"}}}}}, {"elseif", {[410] "ref", "b"}, {{[417] "if", {[419] "ref", "a"}, {{[428] "ref", "a"}}, {"else", {{[445] "ref", "b"}}}}}}, {"else", {{[458] "if", {[460] "ref", "a"}, {{[469] "ref", "a"}}, {"else", {{[486] "ref", "b"}}}}}}}}}}}
+{[489] "fndef", {}, {}, "slim", {{[491] "chain", {[491] "ref", "a"}, {"colon", "b"}}}}
+{[496] "do", {{[498] "chain", {[498] "ref", "a"}, {"colon", "b"}}}}

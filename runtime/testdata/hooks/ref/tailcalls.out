@@ -1,0 +1,27 @@
+return nil [C]:-1 C
+call nil tailcalls.lua:11 Lua
+call nil tailcalls.lua:11 Lua
+call nil tailcalls.lua:11 Lua
+return nil tailcalls.lua:11 Lua
+tail return nil tailcalls.lua:11 Lua
+tail return nil tailcalls.lua:11 Lua
+call nil tailcalls.lua:16 Lua
+call nil [C]:-1 C
+return nil [C]:-1 C
+return nil tailcalls.lua:16 Lua
+call nil tailcalls.lua:20 Lua
+call nil tailcalls.lua:11 Lua
+call nil tailcalls.lua:11 Lua
+return nil tailcalls.lua:11 Lua
+tail return nil tailcalls.lua:11 Lua
+tail return nil tailcalls.lua:11 Lua
+call nil tailcalls.lua:20 Lua
+call nil tailcalls.lua:16 Lua
+call nil [C]:-1 C
+return nil [C]:-1 C
+return nil tailcalls.lua:16 Lua
+tail return nil tailcalls.lua:16 Lua
+call nil [C]:-1 C
+line (tail call) tail
+line (tail call) tail
+done	42	done	7	Lua tail (tail call) nil

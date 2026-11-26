@@ -1,0 +1,3 @@
+moon: spec/inputs/whitespace.moon:18: (22) attempt to call global 'something' (a nil value)
+stack traceback:
+	spec/inputs/whitespace.moon:18: (22) in main chunk

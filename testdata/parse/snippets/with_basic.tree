@@ -1,0 +1,1 @@
+{[1] "with", {[5] "ref", "x"}, {{[10] "assign", {{[10] "chain", {"dot", "a"}}}, {{[14] "number", "1"}}}, {[19] "chain", {"colon", "b"}, {"call", {}}}}}

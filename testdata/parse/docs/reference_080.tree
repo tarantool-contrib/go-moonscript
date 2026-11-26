@@ -1,0 +1,2 @@
+{[1] "export", {"var_name", "var_name2"}}
+{[28] "assign", {{[28] "ref", "var_name"}, {[37] "ref", "var_name3"}}, {{[49] "string", """, "hello"}, {[58] "string", """, "world"}}}

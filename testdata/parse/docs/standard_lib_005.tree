@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "copy"}}, {{[7] "fndef", {{"arg"}}, {}, "slim", {{[16] "tblcomprehension", {{[18] "ref", "k"}, {[20] "ref", "v"}}, {{"foreach", {"k", "v"}, {[32] "chain", {[32] "ref", "pairs"}, {"call", {{[38] "ref", "self"}}}}}}}}}}}

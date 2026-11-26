@@ -1,0 +1,64 @@
+version: "2"
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - bidichk # no Trojan Source bidi characters (public repository)
+    - copyloopvar
+    - errorlint
+    - gocheckcompilerdirectives # typos in //go:generate and //go:embed
+    - misspell
+    - nolintlint
+    - unconvert
+    - usestdlibvars
+    - usetesting # t.TempDir, t.Chdir, t.Context in tests
+    - wastedassign
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment # struct layout churn for no measurable gain
+        - shadow # only idiomatic `if err := ...` shadowing of err
+    misspell:
+      locale: US
+    staticcheck:
+      checks:
+        # golangci-lint's default set ...
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        # ... minus the De Morgan rewrite suggestion: the negated conditions
+        # deliberately mirror upstream `unless` / `not (...)` tests
+        - -QF1001
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    # files with a "// Code generated ... DO NOT EDIT." header
+    generated: strict
+    paths:
+      - third_party/ # vendored gopher-lua, kept close to upstream
+      - testdata/
+      - parse/parser_gen\.go$ # internal/tools/genparser
+      - parse/dispatch_gen\.go$ # internal/tools/gendispatch
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/tarantool-contrib/go-moonscript
+  exclusions:
+    generated: strict
+    paths:
+      - third_party/
+      - testdata/
+      - parse/parser_gen\.go$
+      - parse/dispatch_gen\.go$

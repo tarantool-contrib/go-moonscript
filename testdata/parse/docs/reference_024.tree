@@ -1,0 +1,1 @@
+{[1] "chain", {[1] "ref", "my_func"}, {"call", {{[8] "number", "5"}, {[11] "number", "6"}, {[13] "number", "7"}, {[18] "number", "6"}, {[20] "chain", {[20] "ref", "another_func"}, {"call", {{[33] "number", "6"}, {[36] "number", "7"}, {[38] "number", "8"}, {[45] "number", "9"}, {[47] "number", "1"}, {[49] "number", "2"}}}}, {[54] "number", "5"}, {[56] "number", "4"}}}}

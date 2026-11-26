@@ -1,0 +1,13 @@
+exit 1
+globals.moon:1:6: accessing global `undefined_thing` [global_access]
+globals.moon:2:4: accessing global `some_global` [global_access]
+globals.moon:3:1: accessing global `some_function` [global_access]
+globals.moon:11:8: accessing global `interpolated` [global_access]
+globals.moon:14:7: accessing global `value_global` [global_access]
+globals.moon:15:4: accessing global `computed_key` [global_access]
+globals.moon:19:5: accessing global `obj_global` [global_access]
+globals.moon:23:20: accessing global `BaseGlobal` [global_access]
+globals.moon:26:22: accessing global `missing_in_method` [global_access]
+globals.moon:24:22: accessing global `default_opts` [global_access]
+globals.moon:28:10: accessing global `default_arg_global` [global_access]
+globals.moon:28:37: accessing global `other_global` [global_access]

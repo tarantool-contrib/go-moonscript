@@ -1,0 +1,506 @@
+### --list exit=0
+FILE	lang/andor.lua
+FILE	lang/api_call.lua
+FILE	lang/assignment.lua
+FILE	lang/catch_cpp.lua
+FILE	lang/catch_wrap.lua
+FILE	lang/compare.lua
+FILE	lang/compare_nan.lua
+FILE	lang/constant/number.lua
+FILE	lang/constant/table.lua
+FILE	lang/deep_recursion.lua
+FILE	lang/dualnum.lua
+FILE	lang/for.lua
+FILE	lang/hook_active.lua
+FILE	lang/hook_line.lua
+FILE	lang/hook_top.lua
+FILE	lang/length.lua
+FILE	lang/lightud.lua
+FILE	lang/modulo.lua
+FILE	lang/concat.lua
+FILE	lang/self.lua
+FILE	lang/stackov.lua
+FILE	lang/stackov_c.lua
+FILE	lang/table.lua
+FILE	lang/parse_comp.lua
+FILE	lang/parse_esc.lua
+FILE	lang/parse_misc.lua
+FILE	lang/upvalue/closure.lua
+FILE	lang/tail_recursion.lua
+FILE	lang/vararg_jit.lua
+FILE	lang/gc.lua
+FILE	lang/gc_debug.lua
+FILE	lang/gc_stack.lua
+FILE	lang/gc_step.lua
+FILE	lang/goto.lua
+FILE	lang/meta/arith.lua
+FILE	lang/meta/arith_jit.lua
+FILE	lang/meta/call.lua
+FILE	lang/meta/cat.lua
+FILE	lang/meta/comp.lua
+FILE	lang/meta/comp_jit.lua
+FILE	lang/meta/eq.lua
+FILE	lang/meta/eq_jit.lua
+FILE	lang/meta/framegap.lua
+FILE	lang/meta/index.lua
+FILE	lang/meta/len.lua
+FILE	lang/meta/newindex.lua
+FILE	lang/meta/nomm.lua
+FILE	lang/meta/debuginfo.lua
+FILE	lang/wbarrier.lua
+FILE	lib/base/assert.lua
+FILE	lib/base/error.lua
+FILE	lib/base/getfenv.lua
+FILE	lib/base/getsetmetatable.lua
+FILE	lib/base/ipairs.lua
+FILE	lib/base/next.lua
+FILE	lib/base/pairs.lua
+FILE	lib/base/pcall_jit.lua
+FILE	lib/base/select.lua
+FILE	lib/base/tonumber_tostring.lua
+SKIP	lib/base/tonumber_scan.lua	+ffi
+SKIP	lib/base/xpcall_jit.lua	+compat5.2
+FILE	lib/bit.lua
+FILE	lib/math/abs.lua
+FILE	lib/math/constants.lua
+FILE	lib/math/random.lua
+FILE	lib/string/metatable.lua
+FILE	lib/string/byte.lua
+FILE	lib/string/char.lua
+FILE	lib/string/dump.lua
+FILE	lib/string/format/num.lua
+FILE	lib/string/len.lua
+FILE	lib/string/lower_upper.lua
+FILE	lib/string/multiple_functions.lua
+FILE	lib/string/rep.lua
+FILE	lib/string/reverse.lua
+FILE	lib/string/sub.lua
+FILE	lib/table/concat.lua
+FILE	lib/table/insert.lua
+FILE	lib/table/new.lua
+SKIP	lib/table/pack.lua	+compat5.2
+FILE	lib/table/remove.lua
+FILE	lib/table/sort.lua
+FILE	lib/coroutine/traceback.lua
+FILE	lib/coroutine/yield.lua
+SKIP	lib/ffi	+ffi
+FILE	lib/contents.lua
+SKIP	bc/constov.lua	+slow
+FILE	computations.lua
+SKIP	trace	+jit
+SKIP	opt	+jit
+### lang/andor.lua exit=0
+TEST	1	smoke	ok
+TEST	2	allcases	ok
+TEST	3	tracefib	ok
+### lang/assignment.lua exit=0
+TEST	1	local	ok
+TEST	2	global	ok
+TEST	3	local lhs in key on lhs	ok
+TEST	4	global lhs in key on lhs	ok
+### lang/compare.lua exit=0
+TEST	1	1,2	ok
+TEST	2	2,1	ok
+TEST	3	1,1	ok
+TEST	4	2	ok
+TEST	5	1	ok
+TEST	6	0	ok
+TEST	7	pcall	ok
+TEST	8	bit	ok
+TEST	9	string 1 255	ok
+TEST	10	String comparisons:	ok
+TEST	11	obj_eq/ne	ok
+### lang/compare_nan.lua exit=0
+TEST	1	nan nan	ok
+TEST	2	nan one	ok
+TEST	3	one nan	ok
+TEST	4	nan 1	ok
+TEST	5	1 nan	ok
+TEST	6	not nan nan	ok
+TEST	7	not nan one	ok
+TEST	8	not one nan	ok
+TEST	9	not nan 1	ok
+TEST	10	not 1 nan	ok
+### lang/constant/number.lua exit=0
+TEST	1	exp	ok
+TEST	2	hex exp	ok
+### lang/constant/table.lua exit=0
+TEST	1	tnew	ok
+TEST	2	tdup	ok
+### lang/deep_recursion.lua exit=0
+TEST	1	Recursion sum.	ok
+TEST	2	Recursion wiht pcall.	ok
+TEST	3	Recursion fibonacci.	ok
+### lang/dualnum.lua exit=0
+TEST	1	Positive overflow.	ok
+TEST	2	Negative overflow.	ok
+TEST	3	SLOAD with number to integer conversion.	ok
+TEST	4	min/max correctness.	ok
+### lang/for.lua exit=0
+TEST	1	direction	ok
+TEST	2	coerce to integer at 13	ok
+TEST	3	coerce to integer at 10	ok
+TEST	4	cannot coerce to integer at 10	ok
+### lang/hook_line.lua exit=0
+TEST	1	Base test: cycles, function calls.	ok
+TEST	2	Not visited the end of the function definition.	ok
+### lang/hook_top.lua exit=0
+TEST	1	Run hook on each bytecode instruction.	ok
+TEST	2	Set local variable given to a function inside the hook.	ok
+### lang/length.lua exit=0
+TEST	1	length increasing and decreasing in loop	ok
+TEST	2	length increasing in loop with existing element	ok
+TEST	3	length decreasing in loop with erased element	ok
+### lang/modulo.lua exit=0
+TEST	1	integer equivalence	ok
+TEST	2	fractional equivalence	ok
+TEST	3	jit constant RHS	ok
+TEST	4	jit constant LHS, with exit	ok
+TEST	5	divide by zero	ok
+### lang/concat.lua exit=0
+TEST	1	Constant folding	ok
+TEST	2	Fuse conversions to strings	ok
+TEST	3	Fuse string construction	ok
+TEST	4	CSE, sink	ok
+TEST	5	CSE, two buffers in parallel, no sink	ok
+TEST	6	Append, CSE	ok
+TEST	7	Append, FOLD	ok
+TEST	8	Append to buffer, sink	ok
+TEST	9	Append to two buffers in parallel, no append, no sink	ok
+TEST	10	Sink into side-exit	ok
+TEST	11	Very long strings	ok
+### lang/self.lua exit=0
+TEST	1	trivial setget	ok
+### lang/stackov.lua exit=0
+TEST	1	Base test.	ok
+TEST	2	Stack overflow with non-empty arg list.	ok
+TEST	3	Vararg tail call with non-empty arg list.	skip
+TEST	4	Vararg non-tail call.	ok
+### lang/stackov_c.lua exit=0
+TEST	1	Too many results to unpack.	ok
+### lang/table.lua exit=0
+TEST	1	tables as keys in tables	ok
+TEST	2	some tables as keys in tables	ok
+### lang/parse_comp.lua exit=0
+TEST	1	Parse inline comparisions expressions, base.	ok
+TEST	2	Parse inline comparisions expressions with not.	ok
+### lang/parse_esc.lua exit=0
+TEST	1	Base parsing of escape sequences.	ok
+### lang/parse_misc.lua exit=0
+TEST	1	Ambiguous syntax: function call vs. new statement.	skip
+TEST	2	Ambiguous syntax: function call vs. new statement.	ok
+TEST	3	UTF-8 identifiers.	ok
+### lang/upvalue/closure.lua exit=0
+TEST	1	for	ok
+TEST	2	while	ok
+TEST	3	repeat	ok
+TEST	4	func	ok
+TEST	5	recursive type change	ok
+TEST	6	Don't mark upvalue as immutable if written to after prototype definition	ok
+### lang/tail_recursion.lua exit=0
+TEST	1	self	ok
+TEST	2	mutual	ok
+### lang/vararg_jit.lua exit=0
+TEST	1	1	ok
+TEST	2	2	ok
+TEST	3	3	ok
+TEST	4	4	ok
+TEST	5	5	ok
+TEST	6	6	ok
+TEST	7	7	ok
+### lang/gc.lua exit=0
+TEST	1	rechain	ok
+TEST	2	TSETM gc	ok
+### lang/gc_debug.lua exit=0
+TEST	1	Test __gc metamethod info	ok
+### lang/gc_stack.lua exit=0
+TEST	1	Marking sparse stack.	ok
+### lang/gc_step.lua exit=0
+TEST	1	TNEW	ok
+TEST	2	TDUP	ok
+TEST	3	FNEW	ok
+TEST	4	CAT	ok
+### lang/goto.lua exit=0
+TEST	1	Basic goto and label semantics.	ok
+TEST	2	Goto is not a keyword.	ok
+TEST	3	Goto is a keyword.	skip
+TEST	4	Trailing label is considered to be out of scope.	ok
+TEST	5	Trailing labels and empty statements are considered to be out of scope.	skip
+TEST	6	Simple loop with cross-jumping.	ok
+TEST	7	Backwards goto must close upval.	ok
+TEST	8	Break must close upval, even if closure is parsed after break.	ok
+TEST	9	Label prevents joining to KNIL.	ok
+TEST	10	Break resolved from the right scope.	ok
+TEST	11	Do not join twice with UCLO.	ok
+### lang/meta/arith.lua exit=0
+TEST	1	op	ok
+TEST	2	lhs	ok
+TEST	3	rhs	ok
+TEST	4	meta only lhs	ok
+TEST	5	meta only rhs	ok
+TEST	6	defaults string, int	ok
+TEST	7	defaults int, string	ok
+TEST	8	defaults string, string	ok
+TEST	9	defaults string, kint	ok
+TEST	10	defaults kint, string	ok
+### lang/meta/arith_jit.lua exit=0
+TEST	1	assert rhs	ok
+TEST	2	assert lhs	ok
+TEST	3	assert both sides	ok
+TEST	4	adjust no result to one result	ok
+### lang/meta/call.lua exit=0
+TEST	1	table	ok
+TEST	2	userdata	ok
+TEST	3	number	ok
+TEST	4	table with changing metamethod	ok
+TEST	5	jit table	ok
+TEST	6	jit table rawget as metamethod	ok
+TEST	7	jit number	ok
+TEST	8	jit newindex pcall	ok
+TEST	9	jit index pcall	ok
+### lang/meta/cat.lua exit=0
+TEST	1	default	ok
+TEST	2	lhs	ok
+TEST	3	rhs	ok
+TEST	4	mixed types	ok
+TEST	5	jit mixed types	ok
+### lang/meta/comp.lua exit=0
+TEST	1	__lt and __le xop	ok
+TEST	2	__lt and __le values	ok
+### lang/meta/comp_jit.lua exit=0
+TEST	1	coverage	ok
+TEST	2	Mixed metamethods for ordered comparisons.	ok
+### lang/meta/eq.lua exit=0
+TEST	1	__eq xop	ok
+TEST	2	__eq values	ok
+### lang/meta/eq_jit.lua exit=0
+TEST	1	coverage	ok
+TEST	2	non-constant objects	ok
+### lang/meta/framegap.lua exit=0
+TEST	1	untitled	ok
+### lang/meta/index.lua exit=0
+TEST	1	table 1	ok
+TEST	2	table 2	ok
+TEST	3	userdata	ok
+TEST	4	string	ok
+### lang/meta/len.lua exit=0
+TEST	1	table	ok
+TEST	2	userdata	ok
+TEST	3	number	ok
+### lang/meta/newindex.lua exit=0
+TEST	1	table 1	ok
+TEST	2	jit gaining href	ok
+TEST	3	jit gaining aref	ok
+TEST	4	resize	ok
+TEST	5	str	ok
+### lang/meta/nomm.lua exit=0
+TEST	1	untitled	ok
+### lang/meta/debuginfo.lua exit=0
+TEST	1	table metamethods	ok
+TEST	2	userdata metamethods	ok
+### lang/wbarrier.lua exit=0
+TEST	1	Check write barrier when insert strings.	ok
+### lib/base/assert.lua exit=0
+TEST	1	pass through one	ok
+TEST	2	pass through many	ok
+TEST	3	raise on nil	ok
+TEST	4	raise on false	ok
+### lib/base/error.lua exit=0
+TEST	1	no message	ok
+TEST	2	level 0	ok
+TEST	3	default level	ok
+TEST	4	default level in xpcall	ok
+TEST	5	level 2 in xpcall	ok
+### lib/base/getfenv.lua exit=0
+TEST	1	untitled	ok
+### lib/base/getsetmetatable.lua exit=0
+TEST	1	get __metatable	ok
+TEST	2	jit smoke	ok
+TEST	3	jit assorted	ok
+TEST	4	jit get primitive metatable	ok
+### lib/base/ipairs.lua exit=0
+TEST	1	small integer values	ok
+TEST	2	jit key=value	ok
+TEST	3	untitled	ok
+### lib/base/next.lua exit=0
+TEST	1	_G 1	ok
+TEST	2	as iterator	ok
+### lib/base/pairs.lua exit=0
+TEST	1	nometatable	ok
+TEST	2	empty metatable	ok
+TEST	3	metamethods	skip
+TEST	4	_G	ok
+TEST	5	count	ok
+### lib/base/pcall_jit.lua exit=0
+TEST	1	square sum	ok
+TEST	2	sqrt square sum	ok
+TEST	3	sum with error	ok
+TEST	4	sum or square	ok
+TEST	5	sum or square with error	ok
+### lib/base/select.lua exit=0
+TEST	1	select #	ok
+TEST	2	select modf	ok
+TEST	3	select 1 	ok
+TEST	4	select 2	ok
+TEST	5	select vararg #	ok
+TEST	6	select vararg i	ok
+TEST	7	select vararg 4	ok
+TEST	8	varg-select specialisation requires guard against select	ok
+### lib/base/tonumber_tostring.lua exit=0
+TEST	1	tonumber int	ok
+TEST	2	tonumber float	ok
+TEST	3	tostring int / tonumber	ok
+TEST	4	tostring float / tonumber	ok
+TEST	5	tonumber table	ok
+TEST	6	tostring int / tostring	ok
+TEST	7	tostring table __tostring	ok
+TEST	8	tostring table __tostring __call	ok
+TEST	9	print calls overridden tostring	ok
+TEST	10	tonumber base 2	ok
+TEST	11	__tostring must be callable	ok
+### lib/bit.lua exit=0
+TEST	1	Minimal sanity checks.	ok
+TEST	2	Basic argument processing.	ok
+TEST	3	unop test vectors	ok
+TEST	4	binop test vectors	ok
+TEST	5	shift test vectors	ok
+TEST	6	tohex test vectors	ok
+TEST	7	Don't propagate TOBIT narrowing across two conversions.	ok
+### lib/math/abs.lua exit=0
+TEST	1	smoke	ok
+TEST	2	argcheck	ok
+### lib/math/constants.lua exit=0
+TEST	1	pi	ok
+TEST	2	huge	ok
+### lib/math/random.lua exit=0
+TEST	1	generally uniform in range [0, 1)	ok
+TEST	2	all in range [1, 10]	ok
+TEST	3	all in range [-3, 11]	ok
+### lib/string/metatable.lua exit=0
+TEST	1	__index metamethod is string library	ok
+### lib/string/byte.lua exit=0
+TEST	1	simple	ok
+TEST	2	Fixed slice [i,i+k] or overflow	ok
+TEST	3	Positive slice [i,len] or overflow	ok
+TEST	4	Negative slice [-i,len] or underflow	ok
+TEST	5	Positive slice [1,i] or overflow	ok
+TEST	6	Negative slice [1,-i] or underflow	ok
+TEST	7	Check for slot stack overflow	ok
+### lib/string/char.lua exit=0
+TEST	1	jit one char	ok
+TEST	2	jit until out of bounds	ok
+TEST	3	jit five chars	ok
+### lib/string/dump.lua exit=0
+TEST	1	Must unpatch modified bytecode with ILOOP/JLOOP etc.	ok
+TEST	2	roundtrip constants	ok
+### lib/string/format/num.lua exit=0
+TEST	1	small denormals at low precision	ok
+TEST	2	smoke	ok
+TEST	3	easily enumerable cases of %a, %A	ok
+TEST	4	easily enumerable cases of %f	ok
+TEST	5	easily enumerable cases of %e	ok
+TEST	6	assorted	ok
+TEST	7	assorted %a	ok
+TEST	8	Cases where inprecision can easily affect rounding	ok
+TEST	9	ExploringBinary.com/print-precision-of-dyadic-fractions-varies-by-language/	ok
+TEST	10	ExploringBinary.com/incorrect-floating-point-to-decimal-conversions/	ok
+TEST	11	big f	ok
+TEST	12	RandomASCII.wordpress.com/2013/02/07/	ok
+### lib/string/len.lua exit=0
+TEST	1	smoke	ok
+TEST	2	argcheck	ok
+### lib/string/lower_upper.lua exit=0
+TEST	1	smoke	ok
+TEST	2	repeated	ok
+TEST	3	repeated with growing string	ok
+TEST	4	misc upper	ok
+TEST	5	misc lower	ok
+### lib/string/multiple_functions.lua exit=0
+TEST	1	string_op	ok
+### lib/string/rep.lua exit=0
+TEST	1	smoke	ok
+TEST	2	versus concat	ok
+TEST	3	misc	ok
+TEST	4	separator	ok
+TEST	5	iterate to table	ok
+TEST	6	iterate to table with sep	ok
+TEST	7	iterate and concat	ok
+### lib/string/reverse.lua exit=0
+TEST	1	misc	ok
+### lib/string/sub.lua exit=0
+TEST	1	smoke	ok
+TEST	2	argcheck	ok
+TEST	3	all bar substrings	ok
+TEST	4	Positive slice [i,len] or overflow	ok
+TEST	5	Negative slice [-i,len] or underflow	ok
+TEST	6	Positive slice [1,i] or overflow	ok
+TEST	7	Negative slice [1,-i] or underflow	ok
+TEST	8	jit sub 1 eq	ok
+TEST	9	jit sub 1 ne (contents)	ok
+TEST	10	jit sub 1 ne (rhs too long)	ok
+TEST	11	jit sub 1,2 ne	ok
+TEST	12	jit sub 1,k eq	ok
+TEST	13	jit sub 1,k ne (contents)	ok
+TEST	14	jit sub 1,k ne (rhs too long)	ok
+TEST	15	jit sub 1,2 eq	ok
+TEST	16	jit sub 1,3 eq	ok
+TEST	17	jit sub 1,4 eq	ok
+TEST	18	jit sub i,i	ok
+### lib/table/concat.lua exit=0
+TEST	1	table.concat	ok
+TEST	2	table.concat must inhibit CSE and DSE	ok
+TEST	3	table.concat must inhibit CSE and DSE 2	ok
+TEST	4	table.concat must inhibit CSE and DSE 3	ok
+### lib/table/insert.lua exit=0
+TEST	1	table.insert(t,i)	ok
+TEST	2	table.insert(t,i,i)	ok
+### lib/table/new.lua exit=0
+TEST	1	table.new	ok
+### lib/table/remove.lua exit=0
+TEST	1	table.remove(t) removes correct entries	ok
+TEST	2	table.remove(t) returns the removed entry	ok
+TEST	3	table.remove(t, 1) removes and returns the first entry	ok
+TEST	4	TSETR hash part	ok
+TEST	5	TSETR write barrier	ok
+### lib/table/sort.lua exit=0
+TEST	1	numbers	ok
+TEST	2	strings	ok
+TEST	3	tables	ok
+### lib/coroutine/traceback.lua exit=0
+TEST	1	traceback	ok
+### lib/coroutine/yield.lua exit=0
+TEST	1	Stack overflow on return (create)	ok
+TEST	2	Stack overflow on return (wrap)	ok
+TEST	3	cogen	ok
+TEST	4	cofunc	ok
+TEST	5	assorted	ok
+### lib/contents.lua exit=0
+TEST	1	pre-5.2 base	ok
+TEST	2	5.2 base	skip
+TEST	3	pre-5.2 base rawlen	ok
+TEST	4	5.2 base rawlen	skip
+TEST	5	math	ok
+TEST	6	pre-5.2 math	ok
+TEST	7	5.2 math	skip
+TEST	8	pre-5.2 string	ok
+TEST	9	5.2 string	skip
+TEST	10	5.2 table	skip
+TEST	11	pre-5.2 table.pack	ok
+TEST	12	5.2 table.pack	skip
+TEST	13	io	ok
+TEST	14	io file	ok
+TEST	15	pre-5.2 package	ok
+TEST	16	5.2 package	skip
+TEST	17	bit	ok
+TEST	18	ffi	skip
+TEST	19	ffi 2.1	skip
+### computations.lua exit=0
+TEST	1	ack	ok
+TEST	2	ack notail	ok
+TEST	3	fac	ok
+TEST	4	ffib	ok
+TEST	5	fib	ok
+TEST	6	nsieve	ok
+TEST	7	recsum	ok
+TEST	8	recsump	ok
+TEST	9	tak	ok

@@ -1,0 +1,2 @@
+exit 1
+dir/only.moon:1:6: accessing global `in_dir_global` [global_access]

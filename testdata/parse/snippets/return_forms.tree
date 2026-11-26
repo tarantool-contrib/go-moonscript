@@ -1,0 +1,4 @@
+{[1] "return", ""}
+{[8] "return", {"explist", {[14] "number", "1"}}}
+{[17] "return", {"explist", {[23] "number", "1"}, {[26] "number", "2"}}}
+{[29] "return", {"explist", {[35] "number", "1"}, {[38] "number", "2"}}}

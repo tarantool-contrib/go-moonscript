@@ -1,0 +1,63 @@
+1: malformed number near '1e'
+1: malformed number near '1e+'
+1: malformed number near '1e5x'
+1: malformed number near '1..2'
+1: malformed number near '3..2'
+1: malformed number near '.5e'
+ok	8	100	0.01	0.5	5	16	171
+1: malformed number near '0x'
+1: malformed number near '0x1g'
+1: malformed number near '0x'
+ok	16
+1: malformed number near '0x1P'
+1: malformed number near '0x1p'
+1: malformed number near '0b101'
+1: malformed number near '1LL'
+1: malformed number near '1ULL'
+1: malformed number near '0x10LL'
+1: malformed number near '1i'
+1: malformed number near '1.5ll'
+1: malformed number near '1__2'
+1: '<eof>' expected near '\200'
+1: unfinished string near '<eof>'
+1: unfinished string near ''abc'
+1: unfinished string near '"alo z'
+1: unfinished string near '<eof>'
+1: escape sequence too large near '''
+1: escape sequence too large near '''
+1: escape sequence too large near ''abc'
+1: escape sequence too large near '''
+ok	255	0	65	66	67	48
+ok	x41	z  a	u{41}	q	?	'
+ok	a
+b	a
+b
+ok	
+	\"
+1: unfinished long string near '<eof>'
+1: invalid long string delimiter near '[='
+1: invalid long string delimiter near '[='
+1: invalid long string delimiter near '[=='
+1: invalid long string delimiter near '[='
+1: nesting of [[...]] is deprecated near '['
+1: nesting of [[...]] is deprecated near '['
+ok	 a [[ b 
+ok	 a [=[ b 
+ok	first newline skipped
+ok	CRLF	a
+b
+c
+d
+ok	]]]=]
+3: unfinished long comment near '<eof>'
+3: unfinished long comment near '<eof>'
+ok	1
+ok	2
+1: '<name>' expected near '\195'
+1: unexpected symbol near '\195'
+1: unexpected symbol near '\128'
+ok	1
+ok	2
+ok	3
+1: unexpected symbol near '#'
+1: unexpected symbol near '\239'

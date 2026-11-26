@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "self", "a"}}, {{[5] "self", "b"}}}
+{[9] "assign", {{[9] "self_class", "c"}}, {{[14] "self_class", "d"}}}
+{[19] "assign", {{[19] "chain", "self", {"index", {[21] "number", "1"}}}}, {"self.__class"}}
+{[29] "assign", {"self"}, {{[32] "number", "1"}}}

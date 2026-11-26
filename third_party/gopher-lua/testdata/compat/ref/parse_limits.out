@@ -1,0 +1,45 @@
+locals main	202: main function has more than 200 local variables
+locals nested	206: function at line 5 has more than 200 local variables
+uninit main	203: main function has more than 200 local variables
+uninit nested	207: function at line 5 has more than 200 local variables
+multiline init	202: main function has more than 200 local variables
+local function	202: main function has more than 200 local variables
+200 locals	ok
+local list	1: main function has more than 200 local variables
+local list 200	ok
+params	ok
+params 201	1: function at line 1 has more than 200 local variables
+vararg params	ok
+vararg params 201	1: function at line 1 has more than 200 local variables
+method params	1: function at line 1 has more than 200 local variables
+for locals	198: main function has more than 200 local variables
+for locals 196	ok
+forin locals	197: main function has more than 200 local variables
+scopes	ok
+call 54	too complex
+call 53	ok
+call later	too complex
+table	ok
+table 53	ok
+table 54	ok
+concat	too complex
+return	too complex
+assign 54	ok
+assign 55	ok
+assign index	ok
+upvalues 60	ok
+upvalues 61	66: function at line 64 has more than 60 upvalues
+upvalues 300	304: function at line 152 has more than 60 upvalues
+upvalues main	62: function at line 62 has more than 60 upvalues
+do	197	1: chunk has too many syntax levels
+paren	196	1: chunk has too many syntax levels
+not	196	1: chunk has too many syntax levels
+pow	196	1: chunk has too many syntax levels
+concat	196	1: chunk has too many syntax levels
+table	197	1: chunk has too many syntax levels
+func	197	1: chunk has too many syntax levels
+funcexpr	98	1: chunk has too many syntax levels
+if	197	1: chunk has too many syntax levels
+index	196	1: chunk has too many syntax levels
+assign	197	1: main function has more than 197 variables in assignment
+nested assign	195	1: main function has more than 195 variables in assignment

@@ -1,0 +1,13 @@
+-- collectgarbage takes Lua 5.1's options and returns their results
+print(collectgarbage())
+print(collectgarbage("collect"))
+print(collectgarbage(nil))
+local kb = collectgarbage("count")
+print(type(kb), kb > 0)
+print(type(collectgarbage("step")))
+print(collectgarbage("stop"), collectgarbage("restart"))
+print(collectgarbage("setpause", 150), collectgarbage("setpause", 200), collectgarbage("setpause"))
+print(collectgarbage("setpause", 200))
+print(collectgarbage("setstepmul", 300), collectgarbage("setstepmul", 200))
+print(select("#", collectgarbage()), select("#", collectgarbage("count")))
+print((pcall(collectgarbage, "nope")), (pcall(collectgarbage, {})))

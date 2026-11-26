@@ -1,0 +1,18 @@
+true	1	2	3
+false	handled: boom
+false	table
+true	42
+false	handled: boom
+false	handled: attempt to call a nil value
+false	handled: attempt to call a table value
+false	attempt to call a number value
+true	ok
+true	ok
+false	error in error handling
+false	error in error handling
+false	error in error handling
+false	error in error handling
+2
+false
+true	true	1
+false	deep string

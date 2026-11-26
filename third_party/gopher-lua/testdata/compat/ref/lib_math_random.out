@@ -1,0 +1,11 @@
+true	number
+true	number
+true	number
+false	lib_math_random.lua:5: bad argument #1 to random (interval is empty)
+false	lib_math_random.lua:5: bad argument #1 to random (interval is empty)
+true	number
+true	number
+false	lib_math_random.lua:5: bad argument #2 to random (interval is empty)
+false	lib_math_random.lua:5: wrong number of arguments
+false	lib_math_random.lua:5: wrong number of arguments
+true

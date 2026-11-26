@@ -1,0 +1,17 @@
+exit 1
+app/main.moon
+
+line 1: accessing global `describe`
+======================================================
+> ngx.say app_global, everywhere, describe, not_listed
+
+line 1: accessing global `not_listed`
+======================================================
+> ngx.say app_global, everywhere, describe, not_listed
+
+thing_spec.moon
+
+line 2: accessing global `ngx`
+====================================
+>   it "y", -> print ngx, everywhere
+

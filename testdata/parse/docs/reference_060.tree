@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "is_tall"}}, {{[10] "fndef", {{"name"}}, {}, "slim", {{[23] "if", {"exp", {[25] "ref", "name"}, "==", {[33] "string", """, "Rob"}}, {{[44] "ref", "true"}}, {"else", {{[60] "ref", "false"}}}}}}}}
+{[67] "assign", {{[67] "ref", "message"}}, {{"if", {[79] "chain", {[79] "ref", "is_tall"}, {"call", {{[87] "string", """, "Rob"}}}}, {{[96] "string", """, "I am very tall"}}, {"else", {{[120] "string", """, "I am not so tall"}}}}}}
+{[140] "chain", {[140] "ref", "print"}, {"call", {{[145] "ref", "message"}}}}

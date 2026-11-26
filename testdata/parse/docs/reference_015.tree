@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "my_function"}}, {{[14] "fndef", {{"name", {[21] "string", """, "something"}}, {"height", {[41] "number", "100"}}}, {}, "slim", {{[51] "chain", {[51] "ref", "print"}, {"call", {{[56] "string", """, "Hello I am"}, {[70] "ref", "name"}}}}, {[78] "chain", {[78] "ref", "print"}, {"call", {{[83] "string", """, "My height is"}, {[99] "ref", "height"}}}}}}}}

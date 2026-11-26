@@ -1,0 +1,5 @@
+{[1] "export", "*"}
+{[10] "export", "^"}
+{[19] "export", {"a", "b"}, {{[32] "number", "1"}, {[35] "number", "2"}}}
+{[38] "export", "class", {"class", "X", "", {}}}
+{[53] "export", {"x"}}

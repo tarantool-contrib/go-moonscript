@@ -1,0 +1,1 @@
+{[1] "class", "A", {[16] "chain", {[16] "ref", "f"}, {"call", {{[19] "ref", "x"}}}}, {{"props", {{"key_literal", "y"}, {[26] "number", "1"}}}}}

@@ -1,0 +1,11 @@
+hello world
+args:	3	a	b c	3
+arg:	3	hello.moon	a	b c
+arg[-1] set:	true
+1	a
+2	b c
+3	3
+count	3	2
+table	true
+number formatting	0.33333333333333	5	9.007199254741e+15	1e+15	1e+100	-0.5	110
+returns are ignored

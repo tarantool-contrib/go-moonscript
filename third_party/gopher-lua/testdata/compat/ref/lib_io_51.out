@@ -1,0 +1,74 @@
+file (0x?)	file (0x?)	file (0x?)
+file	nil	nil	nil	false	lib_io_51.lua:5: bad argument #1 to f (value expected)	nil
+nil	cannot close standard file
+nil	cannot close standard file
+nil	cannot close standard file
+file	true	true
+file (0x?)	file
+true
+19	0	19	17	3
+true	true	true
+false	lib_io_51.lua:5: bad argument #2 to f (invalid option)	nil	nil	nil
+nil	Bad file descriptor	9
+true
+file (closed)	closed file
+false	lib_io_51.lua:5: attempt to use a closed file	nil	nil	nil
+false	lib_io_51.lua:5: attempt to use a closed file	nil	nil
+false	lib_io_51.lua:5: attempt to use a closed file	nil	nil
+false	lib_io_51.lua:5: attempt to use a closed file	nil	nil
+false	lib_io_51.lua:5: attempt to use a closed file	nil	nil
+false	lib_io_51.lua:5: attempt to use a closed file	nil	nil
+line 1	2 3.25		last	nil	nil
+0		lin	e 1
+2 3.25
+
+last	nil	nil		nil
+nil
+nil	line 1
+false	false	false	lib_io_51.lua:5: bad argument #2 to f (invalid option)	nil	nil	nil
+nil	Bad file descriptor	9
+12 -350 31 0.5 1 7	 +
+inf	 	-nan	 0x	12	nil	abc - 99
+1E+2x
+[a][][b]
+a		b	0	file
+false	lib_io_51.lua:5: file is already closed	nil
+a		b	0
+false	lib_io_51.lua:5: file is already closed	nil
+false	lib_io_51.lua:5: bad argument #1 to f (<tmp>.none: No such file or directory)	nil	nil
+true	true	true
+file (0x?)	true
+a	
+b	nil
+false	lib_io_51.lua:5: standard input file is closed	nil
+false	lib_io_51.lua:5: attempt to use a closed file	nil
+false	lib_io_51.lua:5: bad argument #1 to f (<tmp>.none: No such file or directory)	nil	nil
+false	lib_io_51.lua:5: bad argument #1 to f (FILE* expected)	nil	nil
+true
+true	true	true
+true
+false	lib_io_51.lua:5: standard output file is closed	nil	nil
+false	lib_io_51.lua:5: standard output file is closed	nil
+one 1
+two
+
+wor
+hello worLD
+hello
+hello!worLD
+No such file or directory	2
+file (0x?)
+nil	Bad file descriptor	9
+nil	Bad file descriptor	9
+nil	nil	Is a directory	21
+nil	/: Is a directory	21
+file (0x?)	file	out
+
+true
+closed file	file (closed)
+true
+true
+to the process 1
+true: Invalid argument	22
+nil	Illegal seek	29
+file	true	0	tmp

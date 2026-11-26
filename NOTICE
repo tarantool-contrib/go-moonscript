@@ -1,0 +1,72 @@
+go-moonscript
+Copyright (C) 2026, Tarantool contributors (see LICENSE)
+
+This product includes software derived from the following projects, used
+under their licenses below.
+
+-------------------------------------------------------------------------------
+MoonScript v0.8.0 (https://github.com/leafo/moonscript)
+
+The parser, the compiler, the linter, the moon and moonc commands and the
+runtime modules are ports of MoonScript; runtime/moonsrc holds its Lua
+library sources, and testdata/ holds its specs, spec inputs and outputs and
+the code examples of its documentation.
+
+MIT License
+
+Copyright (C) 2025 by Leaf Corcoran
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+gopher-lua v1.1.2 (https://github.com/yuin/gopher-lua)
+
+third_party/gopher-lua is a modified copy (see
+third_party/gopher-lua/moonscript.patch for the changes).
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Yusuke Inuzuka
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+Benchmark programs (testdata/bench/lua)
+
+coroutine-ring.lua is from The Computer Language Benchmarks Game (BSD
+3-Clause License, Copyright (c) 2004-2008 Brent Fulgham, 2005-2025 Isaac
+Gouy) and life.lua from the Lua 5.1 distribution (MIT License, Copyright
+(C) 1994-2012 Lua.org, PUC-Rio), both by way of LuaJIT-test-cleanup; see
+testdata/bench/lua/SOURCES.md for the full license texts.

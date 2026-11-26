@@ -1,0 +1,6 @@
+exit 1
+parse_error.moon
+failed to parse at line 2, column 5:
+  y = = 2
+      ^
+

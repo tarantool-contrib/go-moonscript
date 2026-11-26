@@ -1,0 +1,2 @@
+#!moon
+  print 1

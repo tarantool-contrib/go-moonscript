@@ -1,0 +1,5 @@
+{[1] "class", "MyClass", "", {}}
+{[16] "assign", {{[16] "ref", "x"}}, {{[19] "chain", {[19] "ref", "MyClass"}, {"call", {}}}}}
+{[29] "chain", {[29] "ref", "assert"}, {"call", {{"exp", {[35] "chain", {[35] "ref", "type"}, {"call", {{[41] "ref", "x"}}}}, "==", {[46] "ref", "MyClass"}}}}}
+{[55] "chain", {[55] "ref", "assert"}, {"call", {{"exp", {[61] "chain", {[61] "ref", "type"}, {"call", {{[67] "ref", "MyClass"}}}}, "==", {[78] "string", """, "class"}}}}}
+{[87] "chain", {[87] "ref", "assert"}, {"call", {{"exp", {[93] "chain", {[93] "ref", "type"}, {"call", {{[99] "chain", {[99] "ref", "MyClass"}, {"dot", "__base"}}}}}, "==", {[117] "string", """, "table"}}}}}

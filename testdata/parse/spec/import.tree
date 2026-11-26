@@ -1,0 +1,15 @@
+{[3] "import", {"hello"}, {[20] "ref", "yeah"}}
+{[26] "import", {"hello", "world"}, {[50] "chain", {[50] "ref", "table"}, {"index", {[57] "string", """, "cool"}}}}
+{[66] "import", {"a", {"colon", "b"}, "c"}, {[86] "ref", "items"}}
+{[95] "import", {"master", {"colon", "ghost"}}, {[121] "chain", {[121] "ref", "find"}, {"call", {{[126] "string", """, "mytable"}}}}}
+{[139] "assign", {{[139] "ref", "a"}, {[141] "ref", "yumm"}}, {{[148] "number", "3434"}, {[154] "string", """, "hello"}}}
+{[165] "assign", {{[165] "ref", "_table_0"}}, {{[175] "number", "232"}}}
+{[181] "import", {"something"}, {[202] "chain", {[202] "ref", "a"}, {"call", {{[204] "ref", "table"}}}}}
+{[213] "if", {[215] "ref", "indent"}, {{[225] "import", {"okay", {"colon", "well"}}, {[248] "chain", {[248] "ref", "tables"}, {"index", {[256] "number", "100"}}}}}}
+{[262] "do", {{[267] "import", {"a", "b", "c"}, {[286] "ref", "z"}}}}
+{[290] "do", {{[295] "import", {"a", "b", "c"}, {[318] "ref", "z"}}}}
+{[322] "do", {{[327] "import", {"a", "b", "c"}, {[352] "ref", "z"}}}}
+{[356] "do", {{[361] "import", {"a", "b", "c"}, {[390] "ref", "z"}}}}
+{[395] "do", {{[400] "import", {"a", "b", "c"}, {[433] "ref", "z"}}}}
+{[476] "do", {{[481] "declare_glob", "*"}, {[491] "assign", {{[491] "ref", "use"}}, {{[496] "fndef", {}, {}, "slim", {{[499] "chain", {[499] "ref", "insert"}, {"call", {{[506] "string", """, "hello"}}}}}}}}, {[517] "import", {"insert"}, {[535] "ref", "table"}}}}
+{[594] "class", "Pipeline", "", {{"stm", {[611] "import", {"insert"}, {[629] "ref", "table"}}}, {"props", {{"key_literal", "add"}, {[643] "fndef", {{"..."}}, {}, "fat", {{[652] "chain", {[652] "ref", "insert"}, {"call", {"self", "..."}}}}}}}}}

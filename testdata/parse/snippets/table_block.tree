@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "x"}}, {{"table", {{{"key_literal", "a"}, {[9] "number", "1"}}, {{"key_literal", "b"}, {[16] "number", "2"}}, {{"key_literal", "c"}, {"table", {{{"key_literal", "d"}, {[30] "number", "3"}}}}}}}}}

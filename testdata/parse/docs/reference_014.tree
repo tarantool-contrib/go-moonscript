@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "func"}}, {{[7] "fndef", {{"num"}}, {}, "fat", {{[16] "exp", {[16] "self", "value"}, "+", {[25] "ref", "num"}}}}}}

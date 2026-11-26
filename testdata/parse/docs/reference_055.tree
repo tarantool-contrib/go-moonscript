@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "i"}}, {{[4] "number", "0"}}}
+{[7] "while", {"exp", {[12] "ref", "i"}, "<", {[16] "number", "10"}}, {{"decorated", {[22] "continue"}, {"if", {"exp", {[33] "ref", "i"}, "%", {[37] "number", "2"}, "==", {[42] "number", "0"}}}}, {[47] "chain", {[47] "ref", "print"}, {"call", {{[52] "ref", "i"}}}}}}

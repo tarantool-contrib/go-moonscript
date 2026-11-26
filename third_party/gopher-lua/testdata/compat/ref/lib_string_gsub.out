@@ -1,0 +1,18 @@
+hell0 w0rld	2
+hell1.5 w1.5rld	2
+aabbcc	3
+%%%	3
+x-.x-.x-.	3
+[a][b][c]	3
+[a][b][c]	3
+2	97	0
+12.5c	3
+xbc	3
+abc	3
+979899	3
+false	lib_string_gsub.lua:18: invalid replacement value (a boolean)
+false	lib_string_gsub.lua:18: invalid replacement value (a table)
+false	lib_string_gsub.lua:18: invalid replacement value (a boolean)
+false	lib_string_gsub.lua:18: invalid replacement value (a function)
+false	lib_string_gsub.lua:18: invalid capture index
+false	false	false

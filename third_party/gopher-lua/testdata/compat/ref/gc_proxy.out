@@ -1,0 +1,21 @@
+userdata	nil	nil
+table	true
+false	(boolean or proxy expected)
+false	(boolean or proxy expected)
+false	(boolean or proxy expected)
+false	(boolean or proxy expected)
+order	5 4 3 2 1
+late __gc	3
+cycle	2
+in __gc	key	nil
+after	true	nil
+next cycle	nil
+resurrected	userdata	1
+not again	1
+false	gc_proxy.lua:75: in gc
+true	0
+reachable	0
+unreachable	1
+co alive	true	userdata
+co proxy finalized
+end

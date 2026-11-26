@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "doubled"}}, {{[10] "comprehension", {"exp", {[12] "ref", "item"}, "*", {[18] "number", "2"}}, {{"foreach", {"item"}, {"unpack", {[34] "ref", "items"}}}}}}}

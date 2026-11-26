@@ -1,0 +1,9 @@
+exit 1
+imports.moon:5:1: assigning to constant `remove` [constant_assign]
+imports.moon:6:1: assigning to constant `concat` [constant_assign]
+imports.moon:9:3: assigning to constant `insert` [constant_assign]
+imports.moon:13:3: assigning to constant `insert` [constant_assign]
+imports.moon:17:3: assigning to constant `concat` [constant_assign]
+imports.moon:22:3: import overwrites existing binding `remove2` [import_overwrite]
+imports.moon:25:2: assigning to constant `insert` [constant_assign]
+imports.moon:27:24: accessing global `obj` [global_access]

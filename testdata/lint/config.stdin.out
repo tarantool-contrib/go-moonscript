@@ -1,0 +1,18 @@
+exit 1
+stdin
+
+line 1: accessing global `describe`
+===================================
+> describe "x", ->
+
+line 2: accessing global `it`
+====================================
+>   it "y", -> print ngx, everywhere
+
+line 2: accessing global `ngx`
+====================================
+>   it "y", -> print ngx, everywhere
+
+line 2: accessing global `everywhere`
+=====================================
+>   it "y", -> print ngx, everywhere

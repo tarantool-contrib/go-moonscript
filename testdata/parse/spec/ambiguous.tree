@@ -1,0 +1,8 @@
+{[1] "assign", {{[1] "ref", "a"}}, {{[4] "string", "'", "b"}}}
+{[9] "assign", {{[9] "ref", "c"}}, {{[12] "ref", "d"}}}
+{[15] "chain", {"parens", {[16] "chain", {[16] "ref", "a"}, {"call", {{[17] "ref", "b"}}}}}, {"call", {{[20] "chain", {[20] "ref", "c"}, {"call", {{[22] "ref", "d"}}}}}}}
+{[25] "import", {"c"}, {[38] "ref", "d"}}
+{[41] "chain", {"parens", {[42] "chain", {[42] "ref", "a"}, {"call", {{[43] "ref", "b"}}}}}, {"call", {{[46] "chain", {[46] "ref", "c"}, {"call", {{[48] "ref", "d"}}}}}}}
+{[51] "chain", {"parens", {[52] "chain", {[52] "ref", "c"}, {"call", {{[53] "ref", "d"}}}}}, {"call", {{[56] "chain", {[56] "ref", "a"}, {"call", {{[58] "ref", "b"}}}}}}}
+{[61] "assign", {{[61] "ref", "a"}, {[63] "ref", "b"}}, {{[67] "ref", "c"}, {[70] "ref", "d"}}}
+{[73] "chain", {"parens", {[74] "chain", {[74] "ref", "d"}, {"call", {{[75] "ref", "a"}}}}}, {"call", {{[78] "ref", "c"}}}}

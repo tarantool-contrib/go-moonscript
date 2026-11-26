@@ -1,0 +1,4 @@
+{[1] "class", "First", "", {{"props", {{"key_literal", "new"}, {[19] "fndef", {{{"self", "var"}}}, {}, "fat", {}}}}, {"props", {{"key_literal", "show_var"}, {[41] "fndef", {}, {}, "fat", {{[44] "chain", {[44] "ref", "print"}, {"call", {{[50] "string", """, "var is:"}, {[61] "self", "var"}}}}}}}}}}
+{[68] "class", "Second", "", {{"props", {{"key_literal", "new"}, {[87] "fndef", {}, {}, "fat", {{[95] "chain", {[95] "ref", "mixin"}, {"call", {{[100] "ref", "self"}, {[106] "ref", "First"}, {[113] "string", """, "hi"}}}}}}}}}}
+{[120] "assign", {{[120] "ref", "a"}}, {{[123] "chain", {[123] "ref", "Second"}, {"call", {}}}}}
+{[132] "chain", {[132] "ref", "a"}, {"colon", "show_var"}, {"call", {}}}

@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "x"}}, {{[4] "chain", {"string", """, "abc"}, {"colon", "upper"}, {"call", {}}}}}
+{[18] "assign", {{[18] "ref", "y"}}, {{[21] "chain", {"parens", {[23] "string", """, "a"}}, {"colon", "rep"}, {"call", {{[31] "number", "3"}}}}}}

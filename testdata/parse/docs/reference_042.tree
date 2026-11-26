@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "no_color"}}, {{[11] "tblcomprehension", {{[13] "ref", "k"}, {[15] "ref", "v"}}, {{"foreach", {"k", "v"}, {[27] "chain", {[27] "ref", "pairs"}, {"call", {{[33] "ref", "thing"}}}}}, {"when", {"exp", {[44] "ref", "k"}, "!=", {[49] "string", """, "color"}}}}}}}

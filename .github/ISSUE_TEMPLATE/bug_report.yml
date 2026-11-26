@@ -1,0 +1,57 @@
+# Overrides the organization's template, which asks for a Tarantool
+# version: this module doesn't run in Tarantool.
+name: Bug report
+description: The output differs from upstream MoonScript 0.8.0, or something does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Security issues must not be reported here — see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: go-moonscript version
+      description: A release tag, a commit, or the version in your go.mod.
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version and OS
+      description: Output of `go version`.
+      placeholder: "go version go1.27.4 linux/amd64"
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: MoonScript input
+      description: A minimal input that shows the problem.
+      render: moonscript
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or API call
+      description: For example `moonc -p input.moon`, `moon input.moon`, or the Go code calling the library.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output
+      description: What go-moonscript printed or returned, including error messages.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+      description: What upstream MoonScript 0.8.0 (`moonc`, `moon`) gives for the same input, if you can run it, or what you expected.
+      render: text
+    validations:
+      required: true

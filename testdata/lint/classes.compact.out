@@ -1,0 +1,4 @@
+exit 1
+classes.moon:8:5: assigned but unused `tmp` [unused]
+classes.moon:4:5: assigned but unused `unused_in_ctor` [unused]
+classes.moon:14:5: assigned but unused `count` [unused]

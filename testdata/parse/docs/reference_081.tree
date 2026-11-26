@@ -1,0 +1,7 @@
+{[19] "chain", {[19] "ref", "module"}, {"call", {{[25] "string", """, "my_module"}, {[38] "chain", {[38] "ref", "package"}, {"dot", "seeall"}}}}}
+{[54] "export", {"print_result"}}
+{[75] "assign", {{[75] "ref", "length"}}, {{[83] "fndef", {{"x"}, {"y"}}, {}, "slim", {{[93] "chain", {[93] "ref", "math"}, {"dot", "sqrt"}, {"call", {{"exp", {[103] "ref", "x"}, "*", {[106] "ref", "x"}, "+", {[109] "ref", "y"}, "*", {[112] "ref", "y"}}}}}}}}}
+{[115] "assign", {{[115] "ref", "print_result"}}, {{[129] "fndef", {{"x"}, {"y"}}, {}, "slim", {{[142] "chain", {[142] "ref", "print"}, {"call", {{[147] "string", """, "Length is "}, {[161] "chain", {[161] "ref", "length"}, {"call", {{[168] "ref", "x"}, {[171] "ref", "y"}}}}}}}}}}}
+{[188] "chain", {[188] "ref", "require"}, {"call", {{[195] "string", """, "my_module"}}}}
+{[209] "chain", {[209] "ref", "my_module"}, {"dot", "print_result"}, {"call", {{[231] "number", "4"}, {[234] "number", "5"}}}}
+{[259] "chain", {[259] "ref", "print"}, {"call", {{[264] "chain", {[264] "ref", "my_module"}, {"dot", "length"}, {"call", {{[281] "number", "6"}, {[284] "number", "7"}}}}}}}

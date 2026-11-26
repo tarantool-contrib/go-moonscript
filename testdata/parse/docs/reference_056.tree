@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "my_numbers"}}, {{[13] "table", {{{[15] "number", "1"}}, {{[17] "number", "2"}}, {{[19] "number", "3"}}, {{[21] "number", "4"}}, {{[23] "number", "5"}}, {{[25] "number", "6"}}}}}}
+{[28] "assign", {{[28] "ref", "odds"}}, {{[34] "foreach", {"x"}, {{"unpack", {[45] "ref", "my_numbers"}}}, {{"decorated", {[58] "continue"}, {"if", {"exp", {[69] "ref", "x"}, "%", {[73] "number", "2"}, "==", {[78] "number", "1"}}}}, {[83] "ref", "x"}}}}}

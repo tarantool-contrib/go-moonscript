@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "i"}}, {{[4] "number", "10"}}}
+{[8] "while", {"exp", {[13] "ref", "i"}, ">", {[17] "number", "0"}}, {{[22] "chain", {[22] "ref", "print"}, {"call", {{[27] "ref", "i"}}}}, {[32] "update", {[32] "ref", "i"}, "-=", {[36] "number", "1"}}}}
+{[40] "while", {"exp", {[45] "ref", "running"}, "==", {[56] "ref", "true"}}, {{[64] "chain", {[64] "ref", "my_function"}, {"call", {}}}}}

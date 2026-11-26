@@ -1,0 +1,33 @@
+1	2000000
+1	2000000
+3	2000000
+b	1
+2000001
+1	2000001
+1	2000000
+2	5
+2	5
+1	5
+1	0
+2	1
+key	value
+hell0 w0rld	2
+-a-b-c-	4
+--	2
+(ab)%1	true	1	4	ab
+(a*)b%1	true	1	5	aa
+()ab%1	true	nil
+(a(b%1))	false	vm_pattern_limits.lua:9: invalid capture index
+%1(a)	false	vm_pattern_limits.lua:9: invalid capture index
+(a)%2	false	vm_pattern_limits.lua:9: invalid capture index
+z(a%1)	true	nil
+[a-c]+[a-c]()%1?$	true	nil
+[^a]*(((%s*%%?%1%bab)%d(%a-[^a]*[ab]?))%bab-)%d	false	vm_pattern_limits.lua:9: invalid capture index
+pattern of 67 bytes	false	vm_pattern_limits.lua:9: too many captures
+34
+pattern of 66 bytes	false	vm_pattern_limits.lua:9: too many captures
+34
+pattern of 100000 bytes	false	vm_pattern_limits.lua:9: too many captures
+pattern of 6001 bytes	true	1	101
+pattern of 6001 bytes	true	1	101
+pattern of 6001 bytes	true	1	101

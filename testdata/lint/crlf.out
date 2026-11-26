@@ -1,0 +1,11 @@
+exit 1
+crlf.moon
+
+line 2: accessing global `missing`
+==================================
+> b = missing
+
+line 1: assigned but unused `a`
+===============================
+> a = 1
+

@@ -1,0 +1,3 @@
+{[35] "assign", {{[35] "ref", "moon"}}, {{[41] "chain", {[41] "ref", "require"}, {"call", {{[49] "string", """, "moon"}}}}}}
+{[57] "foreach", {"k", "v"}, {{[67] "chain", {[67] "ref", "pairs"}, {"call", {{[73] "ref", "moon"}}}}}, {{[81] "assign", {{[81] "chain", {[81] "ref", "_G"}, {"index", {[84] "ref", "k"}}}}, {{[88] "ref", "v"}}}}}
+{[91] "ref", "moon"}

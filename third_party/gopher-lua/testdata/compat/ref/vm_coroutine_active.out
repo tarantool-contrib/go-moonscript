@@ -1,0 +1,11 @@
+a in b	normal
+true	true	false	cannot resume normal coroutine
+dead	dead
+in c	normal	normal	running
+true	true	true	false	cannot resume normal coroutine
+dead	dead	dead
+true	false	vm_coroutine_active.lua:32: cannot resume normal coroutine
+true	1
+suspended
+true	2
+dead

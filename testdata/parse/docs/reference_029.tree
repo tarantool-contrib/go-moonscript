@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "some_values"}}, {{[14] "table", {{{"key_literal", "name"}, {[24] "string", """, "Bill"}}, {{"key_literal", "age"}, {[39] "number", "200"}}, {{[48] "string", """, "favorite food"}, {[65] "string", """, "rice"}}}}}}

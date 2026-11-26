@@ -1,0 +1,2 @@
+exit 1
+/usr/bin/lua5.1: (error object is not a string)

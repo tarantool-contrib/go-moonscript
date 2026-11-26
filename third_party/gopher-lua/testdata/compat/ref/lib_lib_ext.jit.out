@@ -1,0 +1,32 @@
+false	false	true
+false
+false
+nil	1
+nil	
+	no file '/nonexistent/nonexistent.lua'
+	no file '/nonexistent2/nonexistent/init.lua'
+nil	
+	no file '/n/a.b.c.lua'
+nil	
+	no file '/n/a.Z.lua'
+nil	
+	no file '/n/a/b.lua'
+/etc
+nil	nil	
+nil	
+	no file '2'
+true
+userdata	true	false
+true	true	true
+0	2	1	true
+20	20	1
+false	false	false	function expected, got number
+false	false	false	false	index out of range
+0	2	true	1	false	0	true	nil	nil
+0	true	2
+0	false	true	2
+x	y	nil	nil
+nil	p	v
+70|70|19|10|%E|%O|+0000|15|01|02/10/70|15:01:01|Tue Feb 10 15:01:01 1970|Feb
+%Ea|%Oa|%Ed|%Ej|%EE|%EOy|%Ey|%|%
+%E	x%O

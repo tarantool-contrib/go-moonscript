@@ -1,0 +1,4 @@
+moon: spec/inputs/stub.moon:9: (12) attempt to call upvalue '_fn_0' (a number value)
+stack traceback:
+	spec/inputs/stub.moon:9: (12) in function 'fn'
+	spec/inputs/stub.moon:10: (15) in main chunk

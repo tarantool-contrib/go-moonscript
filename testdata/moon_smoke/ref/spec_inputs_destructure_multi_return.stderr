@@ -1,0 +1,3 @@
+moon: spec/inputs/destructure_multi_return.moon:2: (1) attempt to call global 'two_values' (a nil value)
+stack traceback:
+	spec/inputs/destructure_multi_return.moon:2: (1) in main chunk

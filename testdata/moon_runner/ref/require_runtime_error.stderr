@@ -1,0 +1,5 @@
+moon: ./lib/util.moon:14: (41) util failed: oops
+stack traceback:
+	[C]: in function 'error'
+	./lib/util.moon:14: (41) in function 'fail'
+	require_runtime_error.moon:3: (3) in main chunk

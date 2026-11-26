@@ -1,0 +1,20 @@
+false	true
+2	true	true
+5	6
+9	8
+nil	1
+nil	attempt to load chunk with wrong mode
+nil	attempt to load chunk with wrong mode
+nil	attempt to load chunk with wrong mode
+nil	attempt to load chunk with wrong mode
+3
+nil	attempt to load chunk with wrong mode
+nil	table
+function	true
+false	lib_base_ext.jit.lua:20: 42
+false	nil
+true
+true	table
+false	true
+3	v	m
+true	0	false	0	true

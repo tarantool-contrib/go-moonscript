@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "numbers"}}, {{[10] "table", {{{[12] "number", "1"}}, {{[14] "number", "2"}}, {{[16] "number", "3"}}, {{[18] "number", "4"}}}}}}
+{[21] "assign", {{[21] "ref", "sqrts"}}, {{[28] "tblcomprehension", {{[30] "ref", "i"}, {[32] "chain", {[32] "ref", "math"}, {"dot", "sqrt"}, {"call", {{[42] "ref", "i"}}}}}, {{"foreach", {"i"}, {"unpack", {[55] "ref", "numbers"}}}}}}}

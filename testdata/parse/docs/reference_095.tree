@@ -1,0 +1,2 @@
+{[1] "do", {{[6] "assign", {{[6] "ref", "var"}}, {{[11] "string", """, "hello"}}}, {[22] "chain", {[22] "ref", "print"}, {"call", {{[27] "ref", "var"}}}}}}
+{[32] "chain", {[32] "ref", "print"}, {"call", {{[37] "ref", "var"}}}}

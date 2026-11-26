@@ -1,0 +1,3 @@
+moon: docs/standard_lib_003.moon:12: (18) attempt to call global 'run_with_scope' (a nil value)
+stack traceback:
+	docs/standard_lib_003.moon:12: (18) in main chunk

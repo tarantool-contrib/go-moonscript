@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "b"}}, {{[4] "chain", {[4] "ref", "BackPack"}, {"call", {}}}}}
+{[15] "chain", {[15] "ref", "assert"}, {"call", {{"exp", {[21] "chain", {[21] "ref", "b"}, {"dot", "__class"}}, "==", {[34] "ref", "BackPack"}}}}}
+{[45] "chain", {[45] "ref", "print"}, {"call", {{[50] "chain", {[50] "ref", "BackPack"}, {"dot", "size"}}}}}

@@ -1,0 +1,5 @@
+exit 1
+stages.moon:2:1: assigning to constant `insert` [constant_assign]
+stages.moon:4:3: assigned but unused `unused_var` [unused]
+stages.moon:5:1: accessing global `missing_global` [global_access]
+stages.moon:7:3: assigning to constant `insert` [constant_assign]

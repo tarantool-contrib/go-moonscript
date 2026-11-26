@@ -1,0 +1,2 @@
+{[1] "chain", {[1] "ref", "require"}, {"call", {{[8] "string", """, "moon.all"}}}}
+{[20] "chain", {[20] "ref", "p"}, {"call", {{[21] "table", {{{"key_literal", "hello"}, {[30] "string", """, "world"}}}}}}}

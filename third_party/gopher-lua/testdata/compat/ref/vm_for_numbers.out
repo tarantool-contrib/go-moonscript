@@ -1,0 +1,28 @@
+false	vm_for_numbers.lua:7: 'for' initial value must be a number
+false	vm_for_numbers.lua:8: 'for' limit must be a number
+false	vm_for_numbers.lua:9: 'for' step must be a number
+false	vm_for_numbers.lua:10: 'for' limit must be a number
+false	vm_for_numbers.lua:11: 'for' step must be a number
+false	vm_for_numbers.lua:12: 'for' initial value must be a number
+false	vm_for_numbers.lua:13: 'for' initial value must be a number
+false	vm_for_numbers.lua:14: 'for' limit must be a number
+1	number
+2	number
+3	number
+true
+16	number
+17	number
+true
+1
+1.5
+2
+true
+3
+2
+1
+true
+10
+true
+false	vm_for_numbers.lua:20: 'for' initial value must be a number
+false	vm_for_numbers.lua:21: 'for' limit must be a number
+false	vm_for_numbers.lua:22: 'for' step must be a number

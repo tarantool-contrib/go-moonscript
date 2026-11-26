@@ -1,0 +1,7 @@
+exit 1
+stages.moon
+
+line 4: assigned but unused `unused_var`
+========================================
+>   unused_var = 1
+

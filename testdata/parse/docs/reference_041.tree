@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "thing"}}, {{[8] "table", {{{"key_literal", "color"}, {[19] "string", """, "red"}}, {{"key_literal", "name"}, {[33] "string", """, "fast"}}, {{"key_literal", "width"}, {[49] "number", "123"}}}}}}
+{[57] "assign", {{[57] "ref", "thing_copy"}}, {{[69] "tblcomprehension", {{[71] "ref", "k"}, {[73] "ref", "v"}}, {{"foreach", {"k", "v"}, {[85] "chain", {[85] "ref", "pairs"}, {"call", {{[91] "ref", "thing"}}}}}}}}}

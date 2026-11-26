@@ -1,0 +1,15 @@
+exit 1
+classes.moon
+
+line 8: assigned but unused `tmp`
+=================================
+>     tmp = @x
+
+line 4: assigned but unused `unused_in_ctor`
+============================================
+>     unused_in_ctor = x
+
+line 14: assigned but unused `count`
+====================================
+>     count = select "#", ...
+

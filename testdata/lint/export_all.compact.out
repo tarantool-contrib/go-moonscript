@@ -1,0 +1,2 @@
+exit 1
+export_all.moon:8:3: assigned but unused `lower` [unused]

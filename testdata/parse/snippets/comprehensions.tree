@@ -1,0 +1,6 @@
+{[1] "assign", {{[1] "ref", "a"}}, {{[4] "comprehension", {[6] "ref", "x"}, {{"foreach", {"x"}, {"unpack", {[18] "ref", "y"}}}, {"when", {[24] "ref", "x"}}}}}}
+{[28] "assign", {{[28] "ref", "b"}}, {{[31] "tblcomprehension", {{[33] "ref", "k"}, {[35] "ref", "v"}}, {{"foreach", {"k", "v"}, {[49] "chain", {[49] "ref", "pairs"}, {"call", {{[55] "ref", "t"}}}}}}}}}
+{[59] "assign", {{[59] "ref", "c"}}, {{[62] "comprehension", {[64] "ref", "x"}, {{"for", "i", {{[72] "number", "1"}, {[74] "number", "10"}}}}}}}
+{[78] "assign", {{[78] "ref", "d"}}, {{[81] "comprehension", {[83] "ref", "x"}, {{"foreach", {"x"}, {"unpack", {[95] "chain", {[95] "ref", "y"}, {"slice", {[97] "number", "2"}, ""}}}}}}}}
+{[102] "assign", {{[102] "ref", "e"}}, {{[105] "tblcomprehension", {{[107] "ref", "x"}}, {{"foreach", {"x"}, {"unpack", {[119] "ref", "y"}}}}}}}
+{[122] "assign", {{[122] "ref", "f"}}, {{[125] "comprehension", {[127] "ref", "x"}, {{"foreach", {"x"}, {"unpack", {[139] "ref", "a"}}}, {"foreach", {"y"}, {"unpack", {[151] "ref", "b"}}}, {"when", {"exp", {[157] "ref", "x"}, "==", {[162] "ref", "y"}}}}}}}

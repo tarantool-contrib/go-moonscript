@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "b"}}, {{[4] "number", "1"}}}
+{[7] "assign", {{[7] "ref", "next_number"}}, {{"switch", {[27] "ref", "b"}, {{"case", {{[36] "number", "1"}}, {{[43] "number", "2"}}}, {"case", {{[51] "number", "2"}}, {{[58] "number", "3"}}}, {"else", {{[71] "chain", {[71] "ref", "error"}, {"call", {{[76] "string", """, "can't count that high!"}}}}}}}}}}

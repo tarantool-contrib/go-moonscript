@@ -1,0 +1,1 @@
+{[1] "class", "Point", "", {{"props", {{"key_literal", "new"}, {[19] "fndef", {{{"table", {{{"key_literal", "x"}, {[24] "self", "x"}}, {{"key_literal", "y"}, {[31] "self", "y"}}}}}}, {}, "fat", {}}}}}}

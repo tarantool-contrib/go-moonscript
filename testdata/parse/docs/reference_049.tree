@@ -1,0 +1,3 @@
+{[1] "for", "i", {{[8] "number", "10"}, {[12] "number", "20"}}, {{[18] "chain", {[18] "ref", "print"}, {"call", {{[23] "ref", "i"}}}}}}
+{[27] "for", "k", {{[34] "number", "1"}, {[37] "number", "15"}, {[40] "number", "2"}}, {{[73] "chain", {[73] "ref", "print"}, {"call", {{[78] "ref", "k"}}}}}}
+{[82] "foreach", {"key", "value"}, {{[99] "chain", {[99] "ref", "pairs"}, {"call", {{[105] "ref", "object"}}}}}, {{[115] "chain", {[115] "ref", "print"}, {"call", {{[120] "ref", "key"}, {[125] "ref", "value"}}}}}}

@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "add_numbers"}}, {{[14] "fndef", {{"x"}, {"y"}}, {}, "slim", {{[23] "exp", {[23] "ref", "x"}, "+", {[27] "ref", "z"}}}}}}
+{[36] "chain", {[36] "ref", "print"}, {"call", {{[41] "chain", {[41] "ref", "add_numbers"}, {"call", {{[53] "number", "10"}, {[57] "number", "0"}}}}}}}

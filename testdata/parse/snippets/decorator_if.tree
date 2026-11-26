@@ -1,0 +1,2 @@
+{"decorated", {[1] "assign", {{[1] "ref", "x"}}, {{[4] "number", "1"}}}, {"if", {[9] "ref", "y"}}}
+{"decorated", {[12] "chain", {[12] "ref", "print"}, {"call", {{[17] "ref", "x"}}}}, {"if", {[22] "ref", "a"}, {[29] "ref", "b"}}}

@@ -1,0 +1,3 @@
+failed to parse at line 5, column 7:
+  a = - x
+        ^

@@ -1,0 +1,1 @@
+return self.__class:hello(1, 2, 3, 4)

@@ -1,0 +1,407 @@
+do
+  local a, b
+  do
+    local _obj_0 = hello
+    a, b = _obj_0[1], _obj_0[2]
+  end
+  local c
+  do
+    local _obj_0 = hello
+    a, b, c = _obj_0[1][1], _obj_0[2], _obj_0[3][1]
+  end
+  local hello, world
+  do
+    local _obj_0 = value
+    hello, world = _obj_0.hello, _obj_0.world
+  end
+end
+do
+  local no, thing
+  do
+    local _obj_0 = world
+    no, thing = _obj_0.yes, _obj_0[1]
+  end
+  local a, b, c, d
+  do
+    local _obj_0 = yeah
+    a, b, c, d = _obj_0.a, _obj_0.b, _obj_0.c, _obj_0.d
+  end
+  a = one[1]
+  local _scrap_0 = two
+  b = one[1]
+  c = nil
+  d = one[1]
+  local e = two
+  local x = one
+  local y
+  y = two[1]
+  local xx, yy = 1, 2
+  do
+    local _obj_0 = {
+      xx,
+      yy
+    }
+    yy, xx = _obj_0[1], _obj_0[2]
+  end
+  local f, g
+  do
+    local _obj_0 = tbl
+    a, b, c, d, e, f, g = _obj_0[1], _obj_0.b, _obj_0[2], _obj_0.d, _obj_0[3], _obj_0.f, _obj_0[4]
+  end
+end
+do
+  local futurists = {
+    sculptor = "Umberto Boccioni",
+    painter = "Vladimir Burliuk",
+    poet = {
+      name = "F.T. Marinetti",
+      address = {
+        "Via Roma 42R",
+        "Bellagio, Italy 22021"
+      }
+    }
+  }
+  local name, street, city
+  name, street, city = futurists.poet.name, futurists.poet.address[1], futurists.poet.address[2]
+end
+do
+  self.world = x[1]
+  do
+    local _obj_0 = x
+    a.b, c.y, func().z = _obj_0[1], _obj_0[2], _obj_0[3]
+  end
+  self.world = x.world
+end
+do
+  local thing = {
+    {
+      1,
+      2
+    },
+    {
+      3,
+      4
+    }
+  }
+  for _index_0 = 1, #thing do
+    local _des_0 = thing[_index_0]
+    local x, y
+    x, y = _des_0[1], _des_0[2]
+    print(x, y)
+  end
+end
+do
+  do
+    local _with_0 = thing
+    local a, b
+    a, b = _with_0[1], _with_0[2]
+    print(a, b)
+  end
+end
+do
+  local thing = nil
+  do
+    local _des_0 = thing
+    if _des_0 then
+      local a
+      a = _des_0[1]
+      print(a)
+    else
+      print("nothing")
+    end
+  end
+  local thang = {
+    1,
+    2
+  }
+  do
+    local _des_0 = thang
+    if _des_0 then
+      local a, b
+      a, b = _des_0[1], _des_0[2]
+      print(a, b)
+    end
+  end
+  do
+    local _des_0 = thing
+    if _des_0 then
+      local a, b
+      a, b = _des_0[1], _des_0[2]
+      print(a, b)
+    else
+      do
+        local _des_1 = thang
+        if _des_1 then
+          local c, d
+          c, d = _des_1[1], _des_1[2]
+          print(c, d)
+        else
+          print("NO")
+        end
+      end
+    end
+  end
+end
+do
+  local z = "yeah"
+  local a, b, c
+  a, b, c = z[1], z[2], z[3]
+end
+do
+  local a, b, c
+  do
+    local _obj_0 = z
+    a, b, c = _obj_0[1], _obj_0[2], _obj_0[3]
+  end
+end
+local _scrap_0
+_scrap_0 = function(z)
+  local a, b, c
+  a, b, c = z[1], z[2], z[3]
+end
+do
+  local z = "oo"
+  local _scrap_1
+  _scrap_1 = function(k)
+    local a, b, c
+    a, b, c = z[1], z[2], z[3]
+  end
+end
+local a, b
+do
+  local _accum_0 = { }
+  local _len_0 = 1
+  local _list_0 = {
+    2,
+    3
+  }
+  for _index_0 = 1, #_list_0 do
+    local i = _list_0[_index_0]
+    _accum_0[_len_0] = i * i
+    _len_0 = _len_0 + 1
+  end
+  a, b = _accum_0[1], _accum_0[2]
+end
+local c, d
+do
+  local _accum_0 = { }
+  local _len_0 = 1
+  local _list_0 = {
+    1,
+    2
+  }
+  for _index_0 = 1, #_list_0 do
+    local v = _list_0[_index_0]
+    _accum_0[_len_0] = v * 2
+    _len_0 = _len_0 + 1
+  end
+  c, d = _accum_0[1], _accum_0[2]
+end
+local left, right
+if cond then
+  do
+    local _obj_0 = {
+      left = 1,
+      right = 2
+    }
+    left, right = _obj_0.left, _obj_0.right
+  end
+else
+  do
+    local _obj_0 = {
+      left = 3
+    }
+    left, right = _obj_0.left, _obj_0.right
+  end
+end
+local p, q
+do
+  do
+    local _obj_0 = {
+      10,
+      20
+    }
+    p, q = _obj_0[1], _obj_0[2]
+  end
+end
+local val
+local _exp_0 = x
+if 2 == _exp_0 then
+  val = ({
+    val = "two"
+  }).val
+end
+local t
+do
+  local _with_0 = something()
+  _with_0.x = 5
+  t = _with_0[1]
+end
+local u, v
+if cond then
+  do
+    local _obj_0 = {
+      7,
+      8
+    }
+    u, v = _obj_0[1], _obj_0[2]
+  end
+end
+local n, m
+if cond then
+  local _destruct_0
+  n, _destruct_0 = 1, {
+    m = 2
+  }
+  m = _destruct_0.m
+end
+local k
+do
+  local _tbl_0 = { }
+  for w in thing:gmatch("%w") do
+    _tbl_0[w] = true
+  end
+  k = _tbl_0.k
+end
+local inner
+if cond then
+  inner = ({
+    a = {
+      "deep"
+    }
+  }).a[1]
+end
+local lit
+lit = ({
+  42
+})[1]
+local single
+if cond then
+  do
+    local _obj_0 = {
+      single = 1
+    }, {
+      single = 2
+    }
+    single = _obj_0.single
+  end
+end
+local grab
+grab = function(...)
+  local first_arg
+  do
+    local _obj_0 = ...
+    first_arg = _obj_0.first_arg
+  end
+end
+local nothing
+do
+  local _obj_0 = nil
+  nothing = _obj_0[1]
+end
+local negated
+do
+  local _obj_0 = not thing
+  negated = _obj_0.negated
+end
+local len
+do
+  local _obj_0 = #thing
+  len = _obj_0.len
+end
+obj.a, obj["b"], self.prop, self.__class.cls_prop = t.x, t.y, t.z, t.w
+local basic
+basic = function(_arg_0)
+  local a, b
+  a, b = _arg_0.a, _arg_0.b
+  return a + b
+end
+local two
+two = function(_arg_0, _arg_1)
+  local x1, y1
+  x1, y1 = _arg_0.x, _arg_0.y
+  local x2, y2
+  x2, y2 = _arg_1.x, _arg_1.y
+  return x1 * x2 + y1 * y2
+end
+local with_default
+with_default = function(_arg_0)
+  if _arg_0 == nil then
+    _arg_0 = {
+      a = 1,
+      b = 2
+    }
+  end
+  local a, b
+  a, b = _arg_0.a, _arg_0.b
+  return a + b
+end
+local nested
+nested = function(_arg_0)
+  local x, y, first
+  x, y, first = _arg_0.pos.x, _arg_0.pos.y, _arg_0[1]
+  return x + y + first
+end
+local positional
+positional = function(_arg_0)
+  local first, second
+  first, second = _arg_0[1], _arg_0[2]
+  return first .. second
+end
+local mixed
+mixed = function(name, _arg_0, rest, ...)
+  local width, height
+  width, height = _arg_0.width, _arg_0.height
+  if rest == nil then
+    rest = 1
+  end
+  return print(name, width, height, rest, ...)
+end
+local bound
+bound = function(self, _arg_0)
+  local count
+  count = _arg_0.count
+  return self.total + count
+end
+local Point
+do
+  local _class_0
+  local _base_0 = { }
+  _base_0.__index = _base_0
+  _class_0 = setmetatable({
+    __init = function(self, _arg_0)
+      self.x, self.y = _arg_0.x, _arg_0.y
+    end,
+    __base = _base_0,
+    __name = "Point"
+  }, {
+    __index = _base_0,
+    __call = function(cls, ...)
+      local _self_0 = setmetatable({}, _base_0)
+      cls.__init(_self_0, ...)
+      return _self_0
+    end
+  })
+  _base_0.__class = _class_0
+  Point = _class_0
+end
+local shadowed = "outer"
+local shadow_fn
+shadow_fn = function(_arg_0)
+  local shadowed
+  shadowed = _arg_0.shadowed
+  return shadowed
+end
+local ordered
+ordered = function(self, _arg_0, b, c)
+  local a
+  a = _arg_0.a
+  if b == nil then
+    b = a
+  end
+  if c == nil then
+    c = b
+  end
+  self.c = c
+  return a + b + self.c
+end

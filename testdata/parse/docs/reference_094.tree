@@ -1,0 +1,1 @@
+{[1] "with", {"assign", {{[5] "ref", "str"}}, {{[11] "string", """, "Hello"}}}, {{[22] "chain", {[22] "ref", "print"}, {"call", {{[27] "string", """, "original:"}, {[40] "ref", "str"}}}}, {[47] "chain", {[47] "ref", "print"}, {"call", {{[52] "string", """, "upper:"}, {[62] "chain", {"colon", "upper"}, {"call", {}}}}}}}}

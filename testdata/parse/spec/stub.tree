@@ -1,0 +1,5 @@
+{[3] "assign", {{[3] "ref", "x"}}, {{[6] "table", {{{"key_literal", "val"}, {[15] "number", "100"}}, {{"key_literal", "hello"}, {[28] "fndef", {}, {}, "fat", {{[36] "chain", {[36] "ref", "print"}, {"call", {{[41] "self", "val"}}}}}}}}}}}
+{[50] "assign", {{[50] "ref", "fn"}}, {{[54] "chain", {[54] "ref", "x"}, {"colon", "val"}}}}
+{[61] "chain", {[61] "ref", "print"}, {"call", {{[66] "chain", {[66] "ref", "fn"}, {"call", {}}}}}}
+{[71] "chain", {[71] "ref", "print"}, {"call", {{[76] "chain", {[76] "ref", "x"}, {"colon", "val"}, {"call", {}}}}}}
+{[129] "assign", {{[129] "ref", "x"}}, {{[132] "chain", {[132] "ref", "hello"}, {"call", {"..."}}, {"colon", "world"}}}}

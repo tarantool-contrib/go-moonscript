@@ -1,0 +1,19 @@
+exit 1
+stages.moon
+
+line 2: assigning to constant `insert`
+======================================
+> insert = 5
+
+line 4: assigned but unused `unused_var`
+========================================
+>   unused_var = 1
+
+line 5: accessing global `missing_global`
+=========================================
+> missing_global 10
+
+line 7: assigning to constant `insert`
+======================================
+>   import insert from table
+

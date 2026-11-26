@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "tuples"}}, {{[9] "table", {{{[14] "table", {{{[15] "string", """, "hello"}}, {{[23] "string", """, "world"}}}}}, {{[35] "table", {{{[36] "string", """, "egg"}}, {{[42] "string", """, "head"}}}}}}}}}
+{[54] "foreach", {{"table", {{{[59] "ref", "left"}}, {{[64] "ref", "right"}}}}}, {{"unpack", {[76] "ref", "tuples"}}}, {{[85] "chain", {[85] "ref", "print"}, {"call", {{[90] "ref", "left"}, {[96] "ref", "right"}}}}}}

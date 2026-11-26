@@ -1,0 +1,12 @@
+false	number
+false	number
+false	number
+false	boolean
+false	string
+false	nil
+true	1
+false	string
+newindex	7	k	1
+true	nil
+newindex	8	1	2
+true	1

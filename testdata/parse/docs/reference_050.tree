@@ -1,0 +1,1 @@
+{[1] "foreach", {"item"}, {{"unpack", {[14] "chain", {[14] "ref", "items"}, {"slice", {[20] "number", "2"}, {[22] "number", "4"}}}}}, {{[27] "chain", {[27] "ref", "print"}, {"call", {{[32] "ref", "item"}}}}}}

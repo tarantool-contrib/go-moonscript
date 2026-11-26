@@ -1,0 +1,13 @@
+# Keeps the actions of .github/workflows (pinned by commit) at their latest
+# releases: a weekly pull request per update, grouped into one. The module
+# has no dependencies outside the standard library (gopher-lua is vendored
+# in third_party/).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

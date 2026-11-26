@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "some_instance_method"}}, {{[23] "fndef", {{"..."}}, {}, "fat", {{[32] "chain", "self.__class", {"call", {"..."}}}}}}}

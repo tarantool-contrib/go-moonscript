@@ -1,0 +1,18 @@
+# Units the suites do not run, with the reasons: <suite> TAB <unit> TAB <reason>.
+# Read by internal/luasuites and scripts/gen-luasuites-ref.sh.
+lua5.1-tests	all.lua	the suite's driver; run51.lua runs each file the way it does
+lua5.1-tests	checktable.lua	helper of the internal tests (needs the testC library), not a test
+lua5.1-tests	main.lua	tests lua.c, the standalone interpreter (options, LUA_INIT, stdin), which our VM does not have
+harness	241-standalone.t	tests lua.c, the standalone interpreter (options, LUA_INIT, messages), which our VM does not have
+harness	242-luac.t	tests luac, the bytecode compiler, which our VM does not have
+harness-jit	241-standalone.t	tests luajit's command line (options, -b, -j), which our VM does not have
+harness-jit	242-luac.t	tests luac, the bytecode compiler, which our VM does not have
+harness-jit	402-ffi.t	tests the ffi library, which our VM does not have
+harness-jit	403-jit.t	tests the jit.* modules (JIT compiler control), which our VM does not have
+harness-jit	411-luajit.t	tests luajit's command line (-b, -j), which our VM does not have
+luajit-tests	lang/api_call.lua	needs libctest, a C library of test functions (C API)
+luajit-tests	lang/catch_cpp.lua	needs libcpptest, a C++ library (C++ exceptions through Lua)
+luajit-tests	lang/catch_wrap.lua	needs libcpptest, a C++ library (C++ exceptions through Lua)
+luajit-tests	lang/hook_active.lua	needs libctest, a C library of test functions (C API)
+luajit-tests	lang/lightud.lua	needs libctest, a C library of test functions (light userdata from C)
+luajit-tests	lang/stackov.lua	recursion to a stack overflow with a growing vararg list: about 120 s on our VM (quadratic), and the VM reports "registry overflow" with a 7+7-level traceback where the test wants LuaJIT's "stack overflow" and 11+10 levels

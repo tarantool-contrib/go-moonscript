@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "table", {{{[2] "ref", "a"}}, {{[4] "ref", "b"}}}}}, {{[9] "ref", "c"}}}
+{[12] "assign", {{[12] "table", {{{"key_literal", "x"}, {[15] "ref", "x"}}, {{"key_literal", "y"}, {[19] "table", {{{[21] "ref", "z"}}}}}}}}, {{[26] "ref", "w"}}}

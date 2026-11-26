@@ -1,0 +1,15 @@
+exit 1
+many_names.moon
+
+line 6: assigned but unused `tt`, `yy`, `xx`, `ee`, `aa`, `ff`, `ss`, `vv`, `pp`, `uu`, `zz`, `ww`, `rr`, `qq`, `dd`, `gg`, `oo`, `mm`, `hh`, `ll`, `nn`, `ii`, `jj`, `kk`, `bb`
+================================================================================================================================================================================
+>   aa, bb, cc, dd, ee, ff, gg, hh, ii, jj, kk, ll, mm, nn, oo, pp, qq, rr, ss, tt, uu, vv, ww, xx, yy, zz = 0
+
+line 1: assigned but unused `beta`, `eta`, `zeta`, `lambda`, `iota`, `theta`, `epsilon`, `mu`, `kappa`, `gamma`, `alpha`, `delta`
+=================================================================================================================================
+> alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, lambda, mu = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+
+line 2: assigned but unused `fifteen`, `four`, `twelve`, `nine`, `two`, `one`, `seventeen`, `seven`, `fourteen`, `sixteen`, `ten`, `six`, `eight`, `thirteen`, `three`
+======================================================================================================================================================================
+> one, two, three, four, five, six, seven, eight, nine, ten, eleven, twelve, thirteen, fourteen, fifteen, sixteen, seventeen = 1
+

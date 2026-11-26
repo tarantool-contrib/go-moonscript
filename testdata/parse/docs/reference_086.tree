@@ -1,0 +1,4 @@
+{[1] "declare_glob", "*"}
+{[10] "assign", {{[10] "ref", "first"}}, {{[17] "fndef", {}, {}, "slim", {{[23] "chain", {[23] "ref", "print"}, {"call", {{[28] "ref", "data"}}}}, {[36] "chain", {[36] "ref", "second"}, {"call", {}}}}}}}
+{[45] "assign", {{[45] "ref", "second"}}, {{[53] "fndef", {}, {}, "slim", {{[59] "chain", {[59] "ref", "first"}, {"call", {}}}}}}}
+{[67] "assign", {{[67] "ref", "data"}}, {{[73] "table", {}}}}

@@ -1,0 +1,28 @@
+function	nil
+1,1,2,3,4	2,3,4,5,5
+1,2,3	1,2,3,nil,2,3	1,2,3
+true		nil,nil,nil,nil,nil,nil,nil,5,nil,nil,nil,nil
+nil,nil,nil,nil,1,2,3,nil,nil,nil,nil,nil	nil,nil,nil,nil,1,2,3,nil,nil,nil,nil,nil	nil,nil,nil,nil,nil,nil,1,nil,nil,nil,nil,nil
+nil,nil,1,2,1,2,3,nil,nil,nil,nil,nil	nil,nil,nil,nil,1,1,1,nil,nil,nil,nil,nil	nil,nil,nil,nil,1,1,2,nil,nil,nil,nil,nil
+nil,nil,nil,nil,1,2,1,2,nil,nil,nil,nil	nil,nil,nil,nil,1,2,3,nil,nil,nil,nil,nil	nil,nil,nil,nil,1,2,3,nil,nil,nil,nil,nil
+nil,nil,nil,nil,nil,nil,3,nil,nil,nil,nil,nil
+true	1
+false	table expected, got string
+table expected, got number	number expected, got string
+true	true	nil
+function	true	true
+table	nil	0
+table	nil	0
+table	nil	0
+table	nil	0
+table	nil	0
+table	nil	0
+table	nil	0
+false	false	false	false	table overflow
+number expected
+10	10
+function	true
+0	nil	0
+a	b	1
+nil	idx	true
+false	false	table expected, got number

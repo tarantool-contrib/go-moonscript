@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "table", {{{"key_literal", "numbers"}, {[13] "table", {{{[15] "ref", "first"}}, {{[22] "ref", "second"}}}}}, {{"key_literal", "properties"}, {[45] "table", {{{"key_literal", "color"}, {[58] "ref", "color"}}}}}}}}, {{[72] "ref", "obj2"}}}

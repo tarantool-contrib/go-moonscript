@@ -1,0 +1,19 @@
+exit 1
+control.moon
+
+line 5: assigned but unused `in_when`
+=====================================
+>     in_when = 1
+
+line 9: assigned but unused `in_switch_else`
+============================================
+>     in_switch_else = 2
+
+line 12: assigned but unused `in_unless`
+========================================
+>   in_unless = 1
+
+line 28: accessing global `c_global`
+====================================
+> t.a.b = c_global
+

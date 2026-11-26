@@ -1,0 +1,8 @@
+unary	true
+not	true
+pow	true
+blocks	true
+index 30000	ok	true
+sum 30000	ok	30001
+constant sum 30000	ok	30001
+calls 30000	ok	true

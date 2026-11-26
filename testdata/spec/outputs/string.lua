@@ -1,0 +1,45 @@
+local hi = "hello"
+local hello = "what the heckyes"
+print(hi)
+local umm = 'umm'
+local here, another = "yeah", 'world'
+local aye = "YU'M"
+you('"hmmm" I said')
+print(aye, you)
+another = [[ hello world ]]
+local hi_there = [[  hi there
+]]
+local well = [==[ "helo" ]==]
+local hola = [===[  eat noots]===]
+local mm = [[well trhere]]
+local oo = ""
+local x = "\\"
+x = "a\\b"
+x = "\\\n"
+x = "\""
+local a = "hello " .. tostring(hello) .. " hello"
+local b = tostring(hello) .. " hello"
+local c = "hello " .. tostring(5 + 1)
+local d = tostring(hello(world))
+local e = tostring(1) .. " " .. tostring(2) .. " " .. tostring(3)
+local f = [[hello #{world} world]]
+a = 'hello #{hello} hello'
+b = '#{hello} hello'
+c = 'hello #{hello}'
+local _scrap_0 = "hello";
+("hello"):format(1);
+("hello"):format(1, 2, 3);
+("hello"):format(1, 2, 3)(1, 2, 3);
+("hello"):world();
+("hello"):format().hello(1, 2, 3);
+("hello"):format(1, 2, 3)
+something("hello"):world()
+something(("hello"):world())
+x = 10 / (tostring(b) .. ".5")
+local y = 1 + (tostring(n) .. "0") * 2
+local cmp = a == "v" .. tostring(b)
+local joined = "a" .. "b" .. tostring(c)
+local mixed = (tostring(a) .. "b") * 2 - ("c" .. tostring(d))
+local prefix = ("id: " .. tostring(id) .. ", ") .. rest
+local data_url = ("data:image/" .. tostring(kind) .. ";base64,") .. encode_base64(image_bytes)
+local line = line .. ((" " .. tostring(join) .. " ") .. el)

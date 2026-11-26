@@ -1,0 +1,1 @@
+{[1] "with", {[5] "chain", {[5] "ref", "Person"}, {"call", {}}}, {{[16] "assign", {{[16] "chain", {"dot", "name"}}}, {{[23] "string", """, "Oswald"}}}, {[35] "chain", {"colon", "add_relative"}, {"call", {{[48] "ref", "my_dad"}}}}, {[58] "chain", {"colon", "save"}, {"call", {}}}, {[67] "chain", {[67] "ref", "print"}, {"call", {{[72] "chain", {"dot", "name"}}}}}}}

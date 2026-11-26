@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "ref", "i"}}, {{[4] "number", "100"}}}
+{[36] "assign", {{[36] "ref", "my_func"}}, {{[45] "fndef", {}, {}, "slim", {{[51] "assign", {{[51] "ref", "i"}}, {{[54] "number", "10"}}}, {[60] "while", {"exp", {[65] "ref", "i"}, ">", {[69] "number", "0"}}, {{[76] "chain", {[76] "ref", "print"}, {"call", {{[81] "ref", "i"}}}}, {[88] "update", {[88] "ref", "i"}, "-=", {[92] "number", "1"}}}}}}}}
+{[96] "chain", {[96] "ref", "my_func"}, {"call", {}}}
+{[106] "chain", {[106] "ref", "print"}, {"call", {{[111] "ref", "i"}}}}

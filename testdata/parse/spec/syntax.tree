@@ -1,0 +1,122 @@
+{[21] "assign", {{[21] "ref", "a"}}, {{"exp", {[24] "number", "1"}, "+", {[28] "number", "2"}, "*", {[31] "number", "3"}, "/", {[35] "number", "6"}}}}
+{[39] "assign", {{[39] "ref", "a"}, {[41] "ref", "bunch"}, {[48] "ref", "go"}, {[52] "ref", "here"}}, {{[59] "ref", "another"}, {[68] "ref", "world"}}}
+{[76] "chain", {[76] "ref", "func"}, {"call", {{[80] "ref", "arg1"}, {[86] "ref", "arg2"}, {[92] "ref", "another"}, {[101] "ref", "arg3"}}}}
+{[108] "assign", {{[108] "ref", "here"}, {[113] "ref", "we"}}, {{[118] "fndef", {}, {}, "slim", {}}, {[125] "ref", "yeah"}}}
+{[131] "assign", {{[131] "ref", "the"}, {[135] "ref", "different"}}, {{[147] "fndef", {}, {}, "slim", {{[153] "ref", "approach"}}}, {[163] "ref", "yeah"}}}
+{[170] "chain", {[170] "ref", "dad"}, {"call", {}}}
+{[176] "chain", {[176] "ref", "dad"}, {"call", {{[180] "ref", "lord"}}}}
+{[186] "chain", {[186] "ref", "hello"}, {"call", {{[192] "ref", "one"}, {[196] "ref", "two"}}}, {"call", {}}}
+{[203] "chain", {"parens", {"exp", {[204] "number", "5"}, "+", {[207] "number", "5"}}}, {"call", {{[211] "ref", "world"}}}}
+{[219] "chain", {[219] "ref", "fun"}, {"call", {{[223] "ref", "a"}}}, {"call", {{[226] "ref", "b"}}}}
+{[230] "chain", {[230] "ref", "fun"}, {"call", {{[234] "ref", "a"}}}, {"call", {{[236] "ref", "b"}}}}
+{[240] "chain", {[240] "ref", "fun"}, {"call", {{[244] "ref", "a"}}}, {"call", {{[246] "ref", "b"}, {[249] "chain", {[249] "ref", "bad"}, {"call", {{[253] "ref", "hello"}}}}}}}
+{[261] "chain", {[261] "ref", "hello"}, {"call", {{[266] "chain", {[266] "ref", "world"}, {"call", {{[272] "chain", {[272] "ref", "what"}, {"call", {{[277] "chain", {[277] "ref", "are"}, {"call", {{[281] "chain", {[281] "ref", "you"}, {"call", {{[285] "chain", {[285] "ref", "doing"}, {"call", {{[291] "ref", "here"}}}}}}}}}}}}}}}}}}}
+{[299] "chain", {[299] "ref", "what"}, {"call", {{[304] "ref", "the"}}}, {"index", {[309] "number", "3243"}}, {"call", {{[314] "ref", "world"}, {[321] "chain", {[321] "ref", "yeck"}, {"call", {{[326] "ref", "heck"}}}}}}}
+{[333] "chain", {[333] "ref", "hairy"}, {"index", {[339] "ref", "hands"}}, {"index", {[346] "ref", "are"}}, {"call", {{[351] "ref", "gross"}}}, {"call", {{[357] "chain", {[357] "ref", "okay"}, {"call", {{[362] "chain", {[362] "ref", "okay"}, {"index", {[368] "ref", "world"}}}}}}}}}
+{[376] "chain", {"parens", {"exp", {[377] "chain", {[377] "ref", "get"}, {"index", {[381] "ref", "something"}}}, "+", {[393] "number", "5"}}}, {"index", {[397] "ref", "years"}}}
+{[405] "assign", {{[405] "ref", "i"}, {[407] "ref", "x"}}, {{[411] "number", "200"}, {[416] "number", "300"}}}
+{[422] "assign", {{[422] "ref", "yeah"}}, {{"exp", {[428] "parens", {"exp", {[430] "number", "1"}, "+", {[433] "number", "5"}}}, "*", {[438] "number", "3"}}}}
+{[441] "assign", {{[441] "ref", "yeah"}}, {{"exp", {[447] "parens", {"exp", {[449] "parens", {"exp", {[450] "number", "1"}, "+", {[452] "number", "5"}}}, "*", {[455] "number", "3"}}}, "/", {[458] "number", "2"}}}}
+{[460] "assign", {{[460] "ref", "yeah"}}, {{"exp", {[466] "parens", {"exp", {[468] "parens", {"exp", {[469] "number", "1"}, "+", {[471] "number", "5"}}}, "*", {[474] "number", "3"}}}, "/", {[477] "number", "2"}, "+", {[480] "ref", "i"}, "%", {[484] "number", "100"}}}}
+{[490] "assign", {{[490] "ref", "whoa"}}, {{"exp", {[496] "parens", {"exp", {[498] "number", "1"}, "+", {[500] "number", "2"}}}, "*", {[504] "parens", {"exp", {[506] "number", "3"}, "+", {[508] "number", "4"}}}, "*", {[512] "parens", {"exp", {[514] "number", "4"}, "+", {[516] "number", "5"}}}}}}
+{[520] "fndef", {}, {}, "slim", {{[525] "if", {[527] "ref", "something"}, {{[542] "return", {"explist", {[548] "number", "1"}, {[551] "number", "2"}, {[553] "number", "4"}}}}}, {[558] "chain", {[558] "ref", "print"}, {"call", {{[563] "string", """, "hello"}}}}}}
+{[573] "fndef", {}, {}, "slim", {{[578] "if", {[580] "ref", "hello"}, {{[591] "explist", {[591] "string", """, "heloo"}, {[599] "string", """, "world"}}}, {"else", {{[619] "explist", {[619] "ref", "no"}, {[622] "ref", "way"}}}}}}}
+{[629] "fndef", {}, {}, "slim", {{[631] "explist", {[631] "number", "1"}, {[634] "number", "2"}, {[636] "number", "34"}}}}
+{[640] "return", {"explist", {"exp", {[646] "number", "5"}, "+", {[650] "fndef", {}, {}, "slim", {{[656] "exp", {[656] "number", "4"}, "+", {[660] "number", "2"}}}}}}}
+{[664] "return", {"explist", {"exp", {[670] "number", "5"}, "+", {[674] "parens", {[676] "fndef", {}, {}, "slim", {{[681] "number", "4"}}}}, "+", {[686] "number", "2"}}}}
+{[690] "chain", {[690] "ref", "print"}, {"call", {{"exp", {[695] "number", "5"}, "+", {[699] "fndef", {}, {}, "slim", {{[707] "number", "34"}, {[711] "chain", {[711] "ref", "good"}, {"call", {{[715] "ref", "nads"}}}}}}}}}}
+{[723] "chain", {[723] "ref", "something"}, {"call", {{[732] "string", "'", "else"}, {[740] "string", """, "ya"}}}}
+{[747] "chain", {[747] "ref", "something"}, {"call", {{"string", "'", "else"}}}}
+{[763] "chain", {[763] "ref", "something"}, {"call", {{"string", """, "else"}}}}
+{[780] "exp", {[780] "chain", {[780] "ref", "something"}, {"call", {{"string", "[[", "hey"}}}}, "*", {[798] "number", "2"}}
+{[801] "exp", {[801] "chain", {[801] "ref", "something"}, {"call", {{"string", "[======[", "hey"}}}}, "*", {[831] "number", "2"}}
+{[836] "explist", {[836] "chain", {[836] "ref", "something"}, {"call", {{"string", "'", "else"}}}}, {[852] "number", "2"}}
+{[855] "explist", {[855] "chain", {[855] "ref", "something"}, {"call", {{"string", """, "else"}}}}, {[871] "number", "2"}}
+{[874] "explist", {[874] "chain", {[874] "ref", "something"}, {"call", {{"string", "[[", "else"}}}}, {[892] "number", "2"}}
+{[896] "chain", {[896] "ref", "something"}, {"call", {{[905] "string", "'", "else"}, {[913] "number", "2"}}}}
+{[916] "chain", {[916] "ref", "something"}, {"call", {{[925] "string", """, "else"}, {[933] "number", "2"}}}}
+{[936] "chain", {[936] "ref", "something"}, {"call", {{[945] "string", "[[", "else"}, {[955] "number", "2"}}}}
+{[959] "chain", {[959] "ref", "here"}, {"call", {{[964] "ref", "we"}}}, {"call", {{"string", """, "go"}}}, {"index", {[972] "number", "12123"}}}
+{[993] "assign", {{[993] "ref", "something"}}, {{"table", {{{"key_literal", "test"}, {[1012] "number", "12323"}}, {{"key_literal", "what"}, {[1026] "fndef", {}, {}, "slim", {{[1029] "chain", {[1029] "ref", "print"}, {"call", {{[1035] "string", """, "hello world"}}}}}}}}}}}
+{[1051] "chain", {[1051] "ref", "print"}, {"call", {{[1056] "chain", {[1056] "ref", "something"}, {"dot", "test"}}}}}
+{[1073] "assign", {{[1073] "ref", "frick"}}, {{[1080] "table", {{{"key_literal", "hello"}, {[1087] "string", """, "world"}}}}}}
+{[1097] "assign", {{[1097] "ref", "argon"}}, {{"table", {{{"key_literal", "num"}, {[1111] "number", "100"}}, {{"key_literal", "world"}, {[1124] "fndef", {{"self"}}, {}, "slim", {{[1139] "chain", {[1139] "ref", "print"}, {"call", {{[1144] "chain", {[1144] "ref", "self"}, {"dot", "num"}}}}}, {[1158] "return", {"explist", {[1164] "table", {{{"key_literal", "something"}, {[1183] "fndef", {}, {}, "slim", {{[1186] "chain", {[1186] "ref", "print"}, {"call", {{[1192] "string", """, "hi from something"}}}}}}}}}}}}}}, {{"key_literal", "somethin"}, {[1230] "fndef", {{"self"}, {"str"}}, {}, "slim", {{[1250] "chain", {[1250] "ref", "print"}, {"call", {{[1255] "string", """, "string is"}, {[1268] "ref", "str"}}}}, {[1277] "return", {"explist", {[1283] "table", {{{"key_literal", "world"}, {[1290] "fndef", {{"a"}, {"b"}}, {}, "slim", {{[1299] "chain", {[1299] "ref", "print"}, {"call", {{[1305] "string", """, "sum"}, {"exp", {[1312] "ref", "a"}, "+", {[1316] "ref", "b"}}}}}}}}}}}}}}}}}}}
+{[1320] "chain", {[1320] "ref", "something"}, {"dot", "what"}, {"call", {}}}
+{[1337] "chain", {[1337] "ref", "argon"}, {"colon", "world"}, {"call", {}}, {"dot", "something"}, {"call", {}}}
+{[1364] "chain", {[1364] "ref", "argon"}, {"colon", "somethin"}, {"call", {{"string", """, "200"}}}, {"dot", "world"}, {"call", {{[1390] "number", "1"}, {[1392] "number", "2"}}}}
+{[1396] "assign", {{[1396] "ref", "x"}}, {{[1399] "minus", {[1401] "number", "434"}}}}
+{[1406] "assign", {{[1406] "ref", "x"}}, {{[1409] "minus", {[1411] "chain", {[1411] "ref", "hello"}, {"call", {{[1416] "chain", {[1416] "ref", "world"}, {"call", {{[1422] "chain", {[1422] "ref", "one"}, {"call", {{[1426] "ref", "two"}}}}}}}}}}}}}
+{[1432] "assign", {{[1432] "ref", "hi"}}, {{[1436] "minus", {[1438] "string", """, "herfef"}}}}
+{[1448] "assign", {{[1448] "ref", "x"}}, {{[1451] "minus", {[1453] "comprehension", {[1454] "ref", "x"}, {{"foreach", {"x"}, {[1464] "ref", "x"}}}}}}}
+{"decorated", {[1469] "chain", {[1469] "ref", "print"}, {"call", {{[1474] "string", """, "hello"}}}}, {"if", {[1485] "ref", "cool"}}}
+{"decorated", {[1491] "chain", {[1491] "ref", "print"}, {"call", {{[1496] "string", """, "hello"}}}}, {"unless", {[1511] "ref", "cool"}}}
+{"decorated", {[1517] "chain", {[1517] "ref", "print"}, {"call", {{[1522] "string", """, "hello"}}}}, {"unless", {"exp", {[1537] "number", "1212"}, "and", {[1546] "number", "3434"}}}}
+{"decorated", {[1561] "chain", {[1561] "ref", "print"}, {"call", {{[1566] "string", """, "hello"}}}}, {"comprehension", {{"for", "i", {{[1581] "number", "1"}, {[1583] "number", "10"}}}}}}
+{[1587] "chain", {[1587] "ref", "print"}, {"call", {{[1592] "string", """, "nutjob"}}}}
+{[1603] "if", {[1605] "ref", "hello"}, {{[1616] "number", "343"}}}
+{"decorated", {[1622] "chain", {[1622] "ref", "print"}, {"call", {{[1627] "string", """, "what"}}}}, {"if", {[1637] "ref", "cool"}, {[1647] "ref", "whack"}}}
+{[1655] "assign", {{[1655] "ref", "arg"}}, {{[1660] "table", {{"..."}}}}}
+{[1668] "assign", {{[1668] "ref", "x"}}, {{[1671] "fndef", {{"..."}}, {}, "slim", {{[1683] "chain", {[1683] "ref", "dump"}, {"call", {{[1687] "table", {{"..."}}}}}}}}}}
+{[1696] "assign", {{[1696] "ref", "x"}}, {{[1699] "not", {[1703] "ref", "true"}}}}
+{[1710] "assign", {{[1710] "ref", "y"}}, {{[1713] "not", {[1717] "parens", {"exp", {[1718] "number", "5"}, "+", {[1720] "number", "5"}}}}}}
+{[1725] "assign", {{[1725] "ref", "y"}}, {{[1728] "length", {[1730] "string", """, "hello"}}}}
+{[1739] "assign", {{[1739] "ref", "x"}}, {{[1742] "length", {[1744] "table", {{{[1745] "length", {[1746] "table", {}}}}, {{[1749] "length", {[1750] "table", {{{[1751] "number", "1"}}}}}}, {{[1754] "length", {[1755] "table", {{{[1756] "number", "1"}}, {{[1758] "number", "2"}}}}}}}}}}}
+{[1763] "explist", {[1763] "ref", "hello"}, {[1769] "ref", "world"}}
+{[1777] "chain", {[1777] "ref", "something"}, {"colon", "hello"}, {"call", {{[1793] "ref", "what"}}}, {"call", {{[1798] "ref", "a"}, {[1801] "ref", "b"}}}}
+{[1803] "chain", {[1803] "ref", "something"}, {"colon", "hello"}, {"call", {{[1818] "ref", "what"}}}}
+{[1824] "chain", {[1824] "ref", "something"}, {"dot", "hello"}, {"colon", "world"}, {"call", {{[1845] "ref", "a"}, {[1848] "ref", "b"}}}}
+{[1850] "chain", {[1850] "ref", "something"}, {"dot", "hello"}, {"colon", "world"}, {"call", {{[1872] "number", "1"}, {[1874] "number", "2"}, {[1876] "number", "3"}}}, {"call", {{[1878] "ref", "a"}, {[1881] "ref", "b"}}}}
+{[1885] "assign", {{[1885] "ref", "x"}}, {{[1888] "number", "1232"}}}
+{[1894] "update", {[1894] "ref", "x"}, "+=", {"exp", {[1898] "number", "10"}, "+", {[1903] "number", "3"}}}
+{[1906] "update", {[1906] "ref", "j"}, "-=", {[1910] "string", """, "hello"}}
+{[1919] "update", {[1919] "ref", "y"}, "*=", {[1923] "number", "2"}}
+{[1926] "update", {[1926] "ref", "y"}, "/=", {[1930] "number", "100"}}
+{[1935] "update", {[1935] "ref", "m"}, "%=", {[1939] "number", "2"}}
+{[1942] "update", {[1942] "ref", "hello"}, "..=", {[1951] "string", """, "world"}}
+{[1961] "update", {[1961] "self_class", "something"}, "+=", {[1975] "number", "10"}}
+{[1979] "update", {[1979] "self", "something"}, "+=", {[1992] "number", "10"}}
+{[1997] "update", {[1997] "self_class", "then"}, "+=", {[2006] "number", "10"}}
+{[2010] "update", {[2010] "self", "then"}, "+=", {[2018] "number", "10"}}
+{[2023] "update", {[2023] "chain", {[2023] "ref", "a"}, {"index", {[2025] "string", """, "hello"}}}, "+=", {[2036] "number", "10"}}
+{[2040] "update", {[2040] "chain", {[2040] "ref", "a"}, {"index", {[2042] "string", """, "hello", {"interpolate", {[2050] "chain", {[2050] "ref", "tostring"}, {"call", {{[2058] "ref", "ff"}}}}}}}}, "+=", {[2067] "number", "10"}}
+{[2071] "update", {[2071] "chain", {[2071] "ref", "a"}, {"index", {[2073] "ref", "four"}}, {"dot", "x"}}, "+=", {[2083] "number", "10"}}
+{[2088] "update", {[2088] "ref", "count"}, "-=", {[2096] "length", {"exp", {[2098] "ref", "datum"}, "+", {[2105] "number", "1"}}}}
+{[2108] "update", {[2108] "ref", "count"}, "-=", {[2116] "length", {[2118] "ref", "datum"}}}
+{[2124] "update", {[2124] "ref", "total"}, "*=", {[2132] "minus", {"exp", {[2134] "ref", "x"}, "+", {[2137] "number", "1"}}}}
+{[2140] "update", {[2140] "ref", "flag"}, "and=", {[2149] "not", {"exp", {[2153] "ref", "a"}, "or", {[2158] "ref", "b"}}}}
+{[2162] "assign", {{[2162] "ref", "x"}}, {{[2165] "number", "0"}}}
+{"decorated", {[2168] "parens", {[2169] "if", {"exp", {[2171] "chain", {[2171] "ref", "ntype"}, {"call", {{[2178] "ref", "v"}}}}, "==", {[2183] "string", """, "fndef"}}, {{[2196] "update", {[2196] "ref", "x"}, "+=", {[2201] "number", "1"}}}}}, {"comprehension", {{"foreach", {"v"}, {"unpack", {[2215] "ref", "values"}}}}}}
+{[2224] "assign", {{[2224] "ref", "hello"}}, {{"table", {{{"key_literal", "something"}, {[2244] "ref", "world"}}, {{"key_literal", "if"}, {[2256] "string", """, "hello"}}, {{"key_literal", "else"}, {[2272] "number", "3434"}}, {{"key_literal", "function"}, {[2289] "string", """, "okay"}}, {{"key_literal", "good"}, {[2304] "number", "230203"}}}}}}
+{[2314] "chain", {[2314] "ref", "div"}, {"call", {{[2317] "table", {{{"key_literal", "class"}, {[2324] "string", """, "cool"}}}}}}}
+{[2333] "exp", {[2333] "number", "5"}, "+", {[2336] "chain", {[2336] "ref", "what"}, {"call", {{[2341] "ref", "wack"}}}}}
+{[2347] "chain", {[2347] "ref", "what"}, {"call", {{"exp", {[2351] "ref", "whack"}, "+", {[2359] "number", "5"}}}}}
+{[2363] "exp", {[2363] "number", "5"}, "-", {[2366] "chain", {[2366] "ref", "what"}, {"call", {{[2371] "ref", "wack"}}}}}
+{[2377] "chain", {[2377] "ref", "what"}, {"call", {{"exp", {[2381] "ref", "whack"}, "-", {[2389] "number", "5"}}}}}
+{[2393] "assign", {{[2393] "ref", "x"}}, {{"exp", {[2396] "ref", "hello"}, "-", {[2404] "ref", "world"}, "-", {[2412] "ref", "something"}}}}
+{[2424] "chain", {"parens", {[2425] "fndef", {{"something", {[2437] "with", {[2442] "ref", "what"}, {{[2450] "chain", {"colon", "cool"}, {"call", {{[2455] "number", "100"}}}}}}}}, {}, "slim", {{[2466] "chain", {[2466] "ref", "print"}, {"call", {{[2471] "ref", "something"}}}}}}}, {"call", {}}}
+{[2485] "if", {[2487] "ref", "something"}, {{[2500] "number", "03589"}}, {"else", {{[2539] "number", "3434"}}}}
+{[2546] "if", {[2548] "ref", "something"}, {{[2561] "ref", "yeah"}}, {"elseif", {[2574] "string", """, "ymmm"}, {{[2585] "chain", {[2585] "ref", "print"}, {"call", {{[2590] "string", """, "cool"}}}}}}, {"else", {{[2607] "ref", "okay"}}}}
+{[2648] "assign", {{[2648] "ref", "x"}}, {{[2651] "ref", "notsomething"}}}
+{[2665] "assign", {{[2665] "ref", "y"}}, {{[2668] "ref", "ifsomething"}}}
+{[2681] "assign", {{[2681] "ref", "z"}}, {{"exp", {[2684] "ref", "x"}, "and", {[2690] "ref", "b"}}}}
+{[2693] "assign", {{[2693] "ref", "z"}}, {{[2696] "chain", {[2696] "ref", "x"}, {"call", {{[2698] "ref", "andb"}}}}}}
+{[2729] "while", {"exp", {[2734] "number", "10"}, ">", {[2739] "chain", {[2739] "ref", "something"}, {"call", {{"table", {{{"key_literal", "something"}, {[2762] "string", """, "world"}}}}}}}}, {{[2775] "chain", {[2775] "ref", "print"}, {"call", {{[2780] "string", """, "yeah"}}}}}}
+{[2789] "assign", {{[2789] "ref", "x"}}, {{"table", {{{"key_literal", "okay"}, {[2800] "ref", "sure"}}}}}}
+{[2807] "chain", {[2807] "ref", "yeah"}, {"call", {{"table", {{{"key_literal", "okay"}, {[2819] "ref", "man"}}, {{"key_literal", "sure"}, {[2831] "ref", "sir"}}}}}}}
+{[2837] "chain", {[2837] "ref", "hello"}, {"call", {{[2842] "string", """, "no comma"}, {"table", {{{"key_literal", "yeah"}, {[2860] "ref", "dada"}}, {{"key_literal", "another"}, {[2875] "ref", "world"}}}}}}}
+{[2883] "chain", {[2883] "ref", "hello"}, {"call", {{[2888] "string", """, "comma"}, {"table", {{{"key_literal", "something"}, {[2909] "ref", "hello_world"}}, {{"key_literal", "frick"}, {[2929] "ref", "you"}}}}}}}
+{[2957] "chain", {[2957] "ref", "another"}, {"call", {{[2964] "ref", "hello"}, {[2971] "ref", "one"}, {[2979] "ref", "two"}, {[2983] "ref", "three"}, {[2990] "ref", "four"}, {[2996] "table", {{{"key_literal", "yeah"}, {[3002] "ref", "man"}}}}, {"table", {{{"key_literal", "okay"}, {[3014] "ref", "yeah"}}}}}}}
+{[3025] "update", {[3025] "ref", "a"}, "+=", {"exp", {[3029] "number", "3"}, "-", {[3033] "number", "5"}}}
+{[3036] "update", {[3036] "ref", "a"}, "*=", {"exp", {[3040] "number", "3"}, "+", {[3044] "number", "5"}}}
+{[3047] "update", {[3047] "ref", "a"}, "*=", {[3051] "number", "3"}}
+{[3054] "update", {[3054] "ref", "a"}, ">>=", {[3059] "number", "3"}}
+{[3062] "update", {[3062] "ref", "a"}, "<<=", {[3067] "number", "3"}}
+{[3070] "update", {[3070] "ref", "a"}, "/=", {[3074] "chain", {[3074] "ref", "func"}, {"call", {{[3079] "string", """, "cool"}}}}}
+{[3093] "assign", {{[3093] "chain", {[3093] "ref", "x"}, {"dot", "then"}}}, {{[3101] "string", """, "hello"}}}
+{[3110] "assign", {{[3110] "chain", {[3110] "ref", "x"}, {"dot", "while"}, {"dot", "true"}}}, {{[3124] "string", """, "hello"}}}
+{[3138] "update", {[3138] "ref", "x"}, "or=", {[3143] "string", """, "hello"}}
+{[3152] "update", {[3152] "ref", "x"}, "and=", {[3158] "string", """, "hello"}}
+{[3172] "assign", {{[3172] "ref", "z"}}, {{"exp", {[3175] "ref", "a"}, "-", {[3178] "ref", "b"}}}}
+{[3180] "assign", {{[3180] "ref", "z"}}, {{[3183] "chain", {[3183] "ref", "a"}, {"call", {{[3185] "minus", {[3187] "ref", "b"}}}}}}}
+{[3189] "assign", {{[3189] "ref", "z"}}, {{"exp", {[3192] "ref", "a"}, "-", {[3196] "ref", "b"}}}}
+{[3199] "assign", {{[3199] "ref", "z"}}, {{"exp", {[3202] "ref", "a"}, "-", {[3205] "ref", "b"}}}}

@@ -1,0 +1,6 @@
+{[1] "for", "i", {{[7] "number", "1"}, {[9] "number", "10"}}, {{[14] "chain", {[14] "ref", "print"}, {"call", {{[19] "ref", "i"}}}}}}
+{[22] "for", "i", {{[28] "number", "10"}, {[31] "number", "1"}, {[33] "minus", {[34] "number", "1"}}}, {{[38] "chain", {[38] "ref", "print"}, {"call", {{[44] "ref", "i"}}}}}}
+{[47] "foreach", {"k", "v"}, {{[58] "chain", {[58] "ref", "pairs"}, {"call", {{[64] "ref", "t"}}}}}, {{[69] "chain", {[69] "ref", "print"}, {"call", {{[74] "ref", "k"}}}}}}
+{[77] "foreach", {"x"}, {{"unpack", {[87] "ref", "t"}}}, {{[91] "chain", {[91] "ref", "print"}, {"call", {{[97] "ref", "x"}}}}}}
+{[100] "while", {[105] "ref", "true"}, {{[113] "break"}}}
+{[119] "while", {[124] "ref", "x"}, {{[129] "continue"}}}

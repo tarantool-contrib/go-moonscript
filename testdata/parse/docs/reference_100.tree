@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "obj2"}}, {{[7] "table", {{{"key_literal", "numbers"}, {[20] "table", {{{[22] "number", "1"}}, {{[24] "number", "2"}}, {{[26] "number", "3"}}, {{[28] "number", "4"}}}}}, {{"key_literal", "properties"}, {[44] "table", {{{"key_literal", "color"}, {[57] "string", """, "green"}}, {{"key_literal", "height"}, {[77] "number", "13.5"}}}}}}}}}
+{[90] "assign", {{[90] "table", {{{"key_literal", "numbers"}, {[99] "table", {{{[101] "ref", "first"}}, {{[107] "ref", "second"}}}}}}}}, {{[118] "ref", "obj2"}}}
+{[124] "chain", {[124] "ref", "print"}, {"call", {{[129] "ref", "first"}, {[136] "ref", "second"}, {[144] "ref", "color"}}}}

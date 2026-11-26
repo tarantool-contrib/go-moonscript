@@ -1,0 +1,2 @@
+{[1] "chain", {[1] "ref", "func_a"}, {"call", {}}}
+{[9] "chain", {[9] "ref", "func_b"}, {"call", {}}}

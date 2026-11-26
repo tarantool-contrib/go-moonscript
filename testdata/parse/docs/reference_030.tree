@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "profile"}}, {{"table", {{{"key_literal", "height"}, {[20] "string", """, "4 feet"}}, {{"key_literal", "shoe_size"}, {[43] "number", "13"}}, {{"key_literal", "favorite_foods"}, {[65] "table", {{{[67] "string", """, "ice cream"}}, {{[79] "string", """, "donuts"}}}}}}}}}

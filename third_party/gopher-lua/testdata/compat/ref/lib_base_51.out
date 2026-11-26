@@ -1,0 +1,31 @@
+1	nil
+42	number
+table
+a
+false	attempt to call a string value	nil	nil
+true	called	nil	nil
+false	false	false	bad argument #2 to ? (nil or table expected)	nil	nil	nil
+false	cannot change a protected metatable	nil	nil	nil
+true	table: 0x?	nil	nil	nil
+false	false	nil
+false	false	false	false	bad argument #2 to ? (table expected, got number)	nil	nil	nil
+true	true	true	false	bad argument #1 to ? (number expected, got string)	nil	nil
+false	'setfenv' cannot change environment of given object	nil	nil	nil
+true	nil	nil	nil	nil
+true	5
+false	false	A	false	bad argument #1 to ? (number expected, got string)	nil	nil
+false	false	wrong number of arguments to 'insert'	nil	nil
+false	false	invalid value (nil) at index 3 in table for 'concat'	nil	nil	nil	nil	nil
+false	false	bad argument #2 to ? (function expected, got number)	nil	nil	nil
+number	true	true
+nil	3
+found
+nil	7
+60
+3	0	false	bad argument #1 to ? (table expected, got string)	nil	nil
+false	false	bad argument #1 to ? (table expected, got number)	nil	nil	nil
+1	-1	true
+one,two,three
+3	0
+7
+false	true	A	nil	nil

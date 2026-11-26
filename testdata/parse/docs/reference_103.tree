@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "table", {{{"key_literal", "mix"}, {[6] "ref", "mix"}}, {{"key_literal", "max"}, {[12] "ref", "max"}}, {{"key_literal", "random"}, {[21] "ref", "rand"}}}}}, {{[30] "ref", "math"}}}

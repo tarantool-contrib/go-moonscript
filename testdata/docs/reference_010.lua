@@ -1,0 +1,1 @@
+return print("x:", sum(10, 20), "y:", sum(30, 40))

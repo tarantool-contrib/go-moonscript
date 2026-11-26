@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "name"}}, {{[7] "string", """, "Dan"}}}
+{[14] "switch", {[20] "ref", "name"}, {{"case", {{[32] "string", """, "Robert"}}, {{[46] "chain", {[46] "ref", "print"}, {"call", {{[51] "string", """, "You are Robert"}}}}}}, {"case", {{[75] "string", """, "Dan"}, {[82] "string", """, "Daniel"}}, {{[96] "chain", {[96] "ref", "print"}, {"call", {{[101] "string", """, "Your name, it's Dan"}}}}}}, {"else", {{[135] "chain", {[135] "ref", "print"}, {"call", {{[140] "string", """, "I don't know about your name"}}}}}}}}

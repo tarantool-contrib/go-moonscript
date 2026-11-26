@@ -1,0 +1,12 @@
+k	4	kept	table	table	table
+v	4	true	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	42	true	0
+kv	2	true	x
+cycle	1
+mode v	1	nil
+no mode	3
+mode k	1
+mode 1	2
+pairs	11	true
+#	4	true	nil
+reuse	101	50	t
+weak mt	nil	nil

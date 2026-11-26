@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "numbers"}}, {{[10] "table", {{{[12] "number", "4"}}, {{[14] "number", "3"}}, {{[16] "number", "5"}}, {{[18] "number", "6"}}, {{[20] "number", "7"}}, {{[22] "number", "2"}}, {{[24] "number", "3"}}}}}}
+{[27] "assign", {{[27] "ref", "sum"}}, {{[32] "chain", {[32] "ref", "fold"}, {"call", {{[37] "ref", "numbers"}, {[46] "fndef", {{"a"}, {"b"}}, {}, "slim", {{[55] "exp", {[55] "ref", "a"}, "+", {[59] "ref", "b"}}}}}}}}}

@@ -1,0 +1,12 @@
+function	2
+true
+nil
+nil	attempt to load chunk with wrong mode
+2	3
+5
+6
+global	global
+3
+3
+nil	attempt to load chunk with wrong mode
+false	false

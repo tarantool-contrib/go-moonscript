@@ -1,0 +1,3 @@
+moon: spec/inputs/string.moon:11: (7) attempt to call global 'you' (a nil value)
+stack traceback:
+	spec/inputs/string.moon:11: (7) in main chunk

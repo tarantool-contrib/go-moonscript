@@ -1,0 +1,2 @@
+{[2] "assign", {{[2] "ref", "print"}}, {{[9] "fndef", {}, {}, "slim", {}}}}
+{[14] "if", {[16] "ref", "false"}, {{[25] "ref", "true"}, {[32] "ref", "true"}, {[39] "ref", "true"}, {[46] "ref", "true"}, {[53] "chain", {[53] "ref", "print"}, {"call", {{[58] "ref", "hello"}}}}}, {"else", {{[72] "ref", "true"}, {[79] "ref", "true"}, {[86] "ref", "true"}, {[93] "ref", "true"}, {[100] "chain", {[100] "ref", "print"}, {"call", {{[105] "string", """, "hello world"}}}}, {[122] "chain", {[122] "ref", "print"}, {"call", {{[127] "chain", {[127] "ref", "doesnt"}, {"dot", "exist"}}}}}}}}

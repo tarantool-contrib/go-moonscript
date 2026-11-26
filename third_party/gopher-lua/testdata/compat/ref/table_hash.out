@@ -1,0 +1,17 @@
+boolean:false=F boolean:true=T function:function: ADDR=fn number:-0.5=neg number:-1=n number:1099511627776=big number:1=a number:2.5=f number:2=b string:x=1 string:y=2 table:table: ADDR=tbl	2
+1	2	a	b	f	n	T	F	fn	nil	tbl	big
+zero	zero
+minus zero
+keys	1
+50	2550	nil	2	nil	100
+75	1325	-1	nil	-5
+100	nil
+string:p=10 string:q=20 string:r=30
+u	1
+nil
+nil
+9000	13504500	1234	77	10
+6000	nil
+string:a=1 string:b=2 string:c=3 string:d=4 string:e=5 string:f=6 string:g=7 string:h=8 string:i=9 string:j=10 string:k=11
+nil	2	2
+true	40	nil	60	number:1=10 number:2=20 number:3=30 number:4=40 number:6=60

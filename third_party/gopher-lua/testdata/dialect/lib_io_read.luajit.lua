@@ -1,0 +1,18 @@
+-- file:read formats under DialectLuaJIT: with or without '*', "L" keeps the
+-- end of line (output recorded from luajit 2.1 in ref/)
+local name = os.tmpname()
+local f = assert(io.open(name, "w"))
+f:write("one\ntwo\n3 4\nrest")
+f:close()
+f = assert(io.open(name))
+print(f:read("l"), f:read("*L"), f:read("n", "*n"), f:read("L"), f:read("a"), f:read("a"), f:read("l"))
+local function try(...)
+  local ok, err = pcall(f.read, f, ...)
+  return ok, (string.gsub(err, "^.-bad argument", "bad argument"):gsub("to '%?'", "to ?"):gsub("to %(anonymous%)", "to ?"))
+end
+print(try("x"))
+print(try("*x"))
+print(try({}))
+f:close()
+os.remove(name)
+print(math.mod, string.gfind, table.setn, type(table.foreach), type(table.foreachi), type(gcinfo))

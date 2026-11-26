@@ -1,0 +1,4 @@
+exit 1
+many_names.moon:6:3: assigned but unused `tt`, `yy`, `xx`, `ee`, `aa`, `ff`, `ss`, `vv`, `pp`, `uu`, `zz`, `ww`, `rr`, `qq`, `dd`, `gg`, `oo`, `mm`, `hh`, `ll`, `nn`, `ii`, `jj`, `kk`, `bb` [unused]
+many_names.moon:1:1: assigned but unused `beta`, `eta`, `zeta`, `lambda`, `iota`, `theta`, `epsilon`, `mu`, `kappa`, `gamma`, `alpha`, `delta` [unused]
+many_names.moon:2:1: assigned but unused `fifteen`, `four`, `twelve`, `nine`, `two`, `one`, `seventeen`, `seven`, `fourteen`, `sixteen`, `ten`, `six`, `eight`, `thirteen`, `three` [unused]

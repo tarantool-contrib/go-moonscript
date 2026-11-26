@@ -1,0 +1,4 @@
+Usage: moon [-h] [--coverage] [-d] [--execute <execute>] [--version]
+       [<script>] [<args>] ...
+
+Error: option '--help' does not take arguments

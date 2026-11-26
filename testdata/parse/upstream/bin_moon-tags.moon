@@ -1,0 +1,221 @@
+#!/usr/bin/env moon
+
+HEADER = [[
+!_TAG_FILE_FORMAT	2	/extended format/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	leaf corcoran	/leafot@gmail.com/
+!_TAG_PROGRAM_NAME	MoonTags	//
+!_TAG_PROGRAM_URL	https://github.com/leafo/moonscript	/GitHub repository/
+!_TAG_PROGRAM_VERSION	0.0.1	//
+]]
+
+-- see `ctags --list-kinds` for examples of kinds
+-- see `ctags --list-fields`
+
+argparse = require "argparse"
+
+parser = argparse "moon-tags", "Generate ctags style tags file for MoonScript files"
+parser\argument("files", "MoonScript files to generate tags for")\args "+"
+parser\flag "--include-line", "Include line number field for each tag"
+parser\flag "--lapis", "Support extracting lapis routes"
+parser\flag "--no-header", "Don't print the header"
+
+args = parser\parse [v for _, v in ipairs _G.arg]
+
+TAGS = {} -- the final output of tags
+
+import P, R, S, C, Cc, Cg, Cb, Ct, Cs, V from require "lpeg"
+
+Break = P"\r"^-1 * P"\n"
+Stop = Break + -1
+AlphaNum = R "az", "AZ", "09", "__"
+Name = C R("az", "AZ", "__") * AlphaNum^0
+
+-- captures an indentation, returns indent depth
+Indent = C(S"\t "^0) / (str) ->
+  with sum = 0
+    for v in str\gmatch "[\t ]"
+      switch v
+        when " "
+          sum += 1
+        when "\t"
+          sum += 4
+
+mark = (name) -> (...) -> {name, ...}
+
+-- quote delimited string, no interpolation parsing since we don't have the
+-- full grammar
+simple_string = (delim) ->
+  inner = P("\\#{delim}") + P"\\\\" + (1 - P delim)
+  C(P delim) * C(inner^0) * P(delim) / mark "string"
+
+-- consome the rest of the file
+until_end = (1 - Stop)^0
+whitespace = S"\t " -- not including newline
+ignore_line = Ct until_end -- tag it for empty line
+
+SingleString = simple_string "'"
+DoubleString = simple_string '"'
+String = SingleString + DoubleString
+
+-- we have to do this double Ct to capture both the full line and the grouped captures
+Type = (name) -> Cg Cc(name), "type"
+Line = (type_name, p) -> Ct C Ct Cg(Indent, "indent") * p * Type type_name
+
+method = P { P"=>" + P(1 - Stop) * V(1) }
+func = P { P"->" + P"=>" + P(1 - Stop) * V(1) }
+
+self_prefix = Cg(P("@") * Cc(true), "self")
+
+-- this matches end-of-file return table convention for module files to figure
+-- out what names are exported
+export_list = Ct P"{" * P {
+  P"}" + ((P":" * Name) + (P(1) - P"}")) * V(1)
+}
+
+eof_exports = P { export_list * S(" \t\r\n")^0 * P(-1) + P(1) * V(1) }
+
+-- convert a parsed string to the value the string represents
+StringVal = C(String) / (str) -> loadstring("return " .. str)()
+
+class_line = Line "class", P"class" * whitespace^1 * Cg(Name, "tag") * until_end
+class_property = Line "property", self_prefix^-1 * Cg(Name, "tag") * P":" * whitespace^0 * Cg(String, "value")^0 * until_end
+class_method = Line("method", P("@")^-1 * Cg(Name, "tag") * P":" * method) * until_end
+function_def = Line("function", Cg(Name, "tag") * whitespace^0 * P"=" * func) * until_end
+lapis_route = Line "lapis-route", P"[" * Cg(Name + StringVal, "tag") * P":" * whitespace^0 * Cg(String, "route") * whitespace^0 * P("]:") * until_end
+
+line_types = class_line + class_method + class_property + function_def
+
+if args.lapis
+  line_types += lapis_route
+
+parse_lines = Ct P {
+  (line_types + ignore_line) * (P(-1) + Break * V(1))
+}
+
+escape_tagaddress = (line_text) ->
+  replacements = S([[\/.$^]]) / [[\%0]]+ P("\t") / [[\t]] + P("\r") / [[\r]] + P("\n") / [[\n]]
+  Cs((replacements + 1)^0)\match line_text
+
+import types from require "tableshape"
+
+class_field = types.partial {
+  "self": true
+  tag: types.string\tag "name"
+  value: types.partial {
+    "string"
+    types.string
+    types.string\tag "value" -- TODO: will need to un-escape this
+  }
+}
+
+for fname in *args.files
+  file = assert io.open fname
+  contents = assert file\read "*a"
+  exports = {e, true for e in *eof_exports\match(contents) or {}}
+
+  lines = assert parse_lines\match contents
+
+  class_stack = {}
+
+  push_class = (cls) ->
+    assert cls.type == "class", "not a class match"
+    -- remove classes that are longer in scope due to indentation
+    for i=#class_stack,1,-1
+      top = class_stack[i]
+
+      if cls.indent <= top.indent
+        table.remove class_stack, i
+      else
+        break
+
+    table.insert class_stack, cls
+
+  -- find the class this property is associated with based on change in indent
+  -- the expeted indent is written to `step` on the first proprety
+  find_class = (property) ->
+    for i=#class_stack,1,-1
+      top = class_stack[i]
+      step = property.indent - top.indent
+
+      if step > 0
+        if top.step == nil
+          top.step = step
+
+        if step == top.step
+          return top
+
+  for line_no, line in ipairs lines
+    continue unless next line
+
+    {line_text, properties} = line
+
+    fields = {"language:moon"}
+    if args.include_line
+      table.insert fields, 1, "line:#{line_no}"
+
+    switch properties.type
+      when "lapis-route"
+        if cls = find_class properties
+          prefix = if cls.fields
+            cls.fields.name
+
+          table.insert TAGS, {
+            "#{prefix or ""}#{properties.tag}"
+            fname
+            "/^#{escape_tagaddress line_text}/;\""
+            "f"
+            table.concat fields, " "
+          }
+
+      when "property"
+        -- this is necessary to register the correct indent level for the class
+        cls = find_class properties
+
+        -- record the fields into the class object so they can be referenced by
+        -- other tags. Note this is code-order dependent
+        if cls and args.lapis
+          if field = class_field properties
+            cls.fields or= {}
+            cls.fields[field.name] = field.value
+
+      when "function"
+        if exports[properties.tag] and properties.indent == 0
+          table.insert TAGS, {
+            properties.tag
+            fname
+            -- note we don't use $ here
+            "/^#{escape_tagaddress line_text}/;\""
+            "f"
+            table.concat fields, " "
+          }
+
+      when "method"
+        if cls = find_class properties
+          table.insert fields, "class:#{cls.tag}"
+
+          table.insert TAGS, {
+            properties.tag
+            fname
+            -- note we don't use $ here
+            "/^#{escape_tagaddress line_text}/;\""
+            "f"
+            table.concat fields, " "
+          }
+      when "class"
+        push_class properties
+
+        table.insert TAGS, {
+          properties.tag
+          fname
+          "/^#{escape_tagaddress line_text}$/;\""
+          "c"
+          table.concat fields, " "
+        }
+
+unless args.no_header
+  print HEADER
+
+tag_lines = [table.concat(t, "\t") for t in *TAGS]
+table.sort tag_lines
+print table.concat tag_lines, "\n"

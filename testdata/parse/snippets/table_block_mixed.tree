@@ -1,0 +1,1 @@
+{[1] "chain", {[1] "ref", "f"}, {"call", {{[2] "ref", "a"}, {[8] "ref", "b"}, {[10] "ref", "c"}, {"table", {{{"key_literal", "d"}, {[17] "number", "1"}}}}}}}

@@ -1,0 +1,3 @@
+{[16] "assign", {{[16] "ref", "my_module"}}, {{"table", {{{"key_literal", "state"}, {[36] "number", "100"}}, {{"key_literal", "add"}, {[47] "fndef", {{"value"}}, {}, "fat", {{[63] "exp", {[63] "chain", {[63] "ref", "self"}, {"dot", "state"}}, "+", {[75] "ref", "value"}}}}}}}}}
+{[83] "import", {{"colon", "add"}}, {[99] "ref", "my_module"}}
+{[111] "chain", {[111] "ref", "print"}, {"call", {{[116] "chain", {[116] "ref", "add"}, {"call", {{[120] "number", "22"}}}}}}}

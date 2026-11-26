@@ -1,0 +1,1 @@
+print in_dir_global

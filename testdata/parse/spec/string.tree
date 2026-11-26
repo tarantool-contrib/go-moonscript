@@ -1,0 +1,45 @@
+{[2] "assign", {{[2] "ref", "hi"}}, {{[6] "string", """, "hello"}}}
+{[15] "assign", {{[15] "ref", "hello"}}, {{[22] "string", """, "what the heckyes"}}}
+{[42] "chain", {[42] "ref", "print"}, {"call", {{[47] "ref", "hi"}}}}
+{[52] "assign", {{[52] "ref", "umm"}}, {{[57] "string", "'", "umm"}}}
+{[65] "assign", {{[65] "ref", "here"}, {[70] "ref", "another"}}, {{[80] "string", """, "yeah"}, {[88] "string", "'", "world"}}}
+{[98] "assign", {{[98] "ref", "aye"}}, {{[103] "string", """, "YU'M"}}}
+{[111] "chain", {[111] "ref", "you"}, {"call", {{[114] "string", "'", ""hmmm" I said"}}}}
+{[132] "chain", {[132] "ref", "print"}, {"call", {{[137] "ref", "aye"}, {[142] "ref", "you"}}}}
+{[148] "assign", {{[148] "ref", "another"}}, {{[157] "string", "[[", " hello world "}}}
+{[178] "assign", {{[178] "ref", "hi_there"}}, {{[188] "string", "[[", "  hi there
+"}}}
+{[207] "assign", {{[207] "ref", "well"}}, {{[213] "string", "[==[", " "helo" "}}}
+{[232] "assign", {{[232] "ref", "hola"}}, {{[238] "string", "[===[", "  eat noots"}}}
+{[263] "assign", {{[263] "ref", "mm"}}, {{[267] "string", "[[", "well trhere"}}}
+{[285] "assign", {{[285] "ref", "oo"}}, {{[289] "string", """}}}
+{[294] "assign", {{[294] "ref", "x"}}, {{[297] "string", """, "\\"}}}
+{[303] "assign", {{[303] "ref", "x"}}, {{[306] "string", """, "a\\b"}}}
+{[314] "assign", {{[314] "ref", "x"}}, {{[317] "string", """, "\\\n"}}}
+{[325] "assign", {{[325] "ref", "x"}}, {{[328] "string", """, "\""}}}
+{[340] "assign", {{[340] "ref", "a"}}, {{[343] "string", """, "hello ", {"interpolate", {[353] "ref", "hello"}}, " hello"}}}
+{[367] "assign", {{[367] "ref", "b"}}, {{[370] "string", """, {"interpolate", {[374] "ref", "hello"}}, " hello"}}}
+{[388] "assign", {{[388] "ref", "c"}}, {{[391] "string", """, "hello ", {"interpolate", {"exp", {[401] "number", "5"}, "+", {[403] "number", "1"}}}}}}
+{[407] "assign", {{[407] "ref", "d"}}, {{[410] "string", """, {"interpolate", {[414] "chain", {[414] "ref", "hello"}, {"call", {{[419] "ref", "world"}}}}}}}}
+{[428] "assign", {{[428] "ref", "e"}}, {{[431] "string", """, {"interpolate", {[435] "number", "1"}}, " ", {"interpolate", {[440] "number", "2"}}, " ", {"interpolate", {[445] "number", "3"}}}}}
+{[450] "assign", {{[450] "ref", "f"}}, {{[453] "string", "[[", "hello #{world} world"}}}
+{[484] "assign", {{[484] "ref", "a"}}, {{[487] "string", "'", "hello #{hello} hello"}}}
+{[511] "assign", {{[511] "ref", "b"}}, {{[514] "string", "'", "#{hello} hello"}}}
+{[532] "assign", {{[532] "ref", "c"}}, {{[535] "string", "'", "hello #{hello}"}}}
+{[559] "string", """, "hello"}
+{[567] "chain", {"string", """, "hello"}, {"colon", "format"}, {"call", {{[581] "number", "1"}}}}
+{[584] "chain", {"string", """, "hello"}, {"colon", "format"}, {"call", {{[599] "number", "1"}, {[601] "number", "2"}, {[603] "number", "3"}}}}
+{[606] "chain", {"string", """, "hello"}, {"colon", "format"}, {"call", {{[621] "number", "1"}, {[623] "number", "2"}, {[625] "number", "3"}}}, {"call", {{[627] "number", "1"}, {[630] "number", "2"}, {[632] "number", "3"}}}}
+{[635] "chain", {"string", """, "hello"}, {"colon", "world"}, {"call", {}}}
+{[650] "chain", {"string", """, "hello"}, {"colon", "format"}, {"call", {}}, {"dot", "hello"}, {"call", {{[671] "number", "1"}, {[674] "number", "2"}, {[676] "number", "3"}}}}
+{[678] "chain", {"string", """, "hello"}, {"colon", "format"}, {"call", {{[692] "number", "1"}, {[695] "number", "2"}, {[697] "number", "3"}}}}
+{[700] "chain", {[700] "ref", "something"}, {"call", {{"string", """, "hello"}}}, {"colon", "world"}, {"call", {}}}
+{[724] "chain", {[724] "ref", "something"}, {"call", {{[733] "chain", {"string", """, "hello"}, {"colon", "world"}, {"call", {}}}}}}
+{[818] "assign", {{[818] "ref", "x"}}, {{"exp", {[821] "number", "10"}, "/", {[826] "string", """, {"interpolate", {[830] "ref", "b"}}, ".5"}}}}
+{[837] "assign", {{[837] "ref", "y"}}, {{"exp", {[840] "number", "1"}, "+", {[844] "string", """, {"interpolate", {[848] "ref", "n"}}, "0"}, "*", {[854] "number", "2"}}}}
+{[858] "assign", {{[858] "ref", "cmp"}}, {{"exp", {[863] "ref", "a"}, "==", {[868] "string", """, "v", {"interpolate", {[873] "ref", "b"}}}}}}
+{[878] "assign", {{[878] "ref", "joined"}}, {{"exp", {[886] "string", """, "a"}, "..", {[893] "string", """, "b", {"interpolate", {[898] "ref", "c"}}}}}}
+{[903] "assign", {{[903] "ref", "mixed"}}, {{"exp", {[910] "string", """, {"interpolate", {[914] "ref", "a"}}, "b"}, "*", {[920] "number", "2"}, "-", {[924] "string", """, "c", {"interpolate", {[929] "ref", "d"}}}}}}
+{[1006] "assign", {{[1006] "ref", "prefix"}}, {{"exp", {[1014] "string", """, "id: ", {"interpolate", {[1022] "ref", "id"}}, ", "}, "..", {[1031] "ref", "rest"}}}}
+{[1038] "assign", {{[1038] "ref", "data_url"}}, {{"exp", {[1048] "string", """, "data:image/", {"interpolate", {[1063] "ref", "kind"}}, ";base64,"}, "..", {[1080] "chain", {[1080] "ref", "encode_base64"}, {"call", {{[1095] "ref", "image_bytes"}}}}}}}
+{[1109] "update", {[1109] "ref", "line"}, "..=", {"exp", {[1117] "string", """, " ", {"interpolate", {[1122] "ref", "join"}}, " "}, "..", {[1132] "ref", "el"}}}

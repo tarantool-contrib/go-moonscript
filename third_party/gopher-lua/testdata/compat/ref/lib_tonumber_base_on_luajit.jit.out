@@ -1,0 +1,46 @@
+1	2	8	16	36	10
+2	2	8	16	36	10
+3	2	8	16	36	10
+4	2	8	16	36	10
+5	2	8	16	36	10
+6	2	8	16	36	10
+7	nil	nil	16	42804	16
+8	nil	nil	31	42819	31
+9	nil	nil	16	42804	16
+10	nil	nil	nil	33	nil
+11	nil	nil	nil	nil	nil
+12	nil	nil	nil	1204	nil
+13	nil	nil	482	1802	100
+14	nil	nil	255	555	nil
+15	nil	nil	255	555	nil
+16	nil	nil	255	555	nil
+17	nil	nil	nil	nil	nil
+18	nil	nil	nil	1295	nil
+19	nil	nil	nil	1295	nil
+20	nil	nil	nil	1261	nil
+21	3	9	17	37	11
+22	nil	10	18	38	12
+23	nil	2	2	2	2
+24	nil	nil	nil	nil	1.5
+25	nil	nil	nil	nil	nil
+26	nil	nil	266	1306	nil
+27	nil	nil	nil	nil	nil
+28	nil	nil	nil	nil	nil
+29	nil	nil	nil	nil	nil
+30	nil	nil	nil	nil	nil
+31	nil	nil	nil	nil	nil
+32	nil	nil	nil	nil	nil
+33	2	8	16	36	nil
+34	1	1	1	1	nil
+35	nil	nil	1.844674407371e+19	1.844674407371e+19	nil
+36	65536	2.8147497671066e+14	1.844674407371e+19	1.844674407371e+19	1e+16
+37	nil	nil	1.844674407371e+19	1.844674407371e+19	nil
+38	nil	nil	nil	1.844674407371e+19	nil
+39	1.844674407371e+19	1.844674407371e+19	1.844674407371e+19	1.844674407371e+19	1.1111111111111e+64
+40	1.844674407371e+19	1.844674407371e+19	1.844674407371e+19	1.844674407371e+19	1.1111111111111e+63
+41	nil	511	1911	9331	777
+16	nil	2777	nil
+10	35
+false	false	false	false	true	true
+false	false	false
+nil	nil	nil	16	10

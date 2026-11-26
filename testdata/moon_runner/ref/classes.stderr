@@ -1,0 +1,4 @@
+moon: classes.moon:16: (90) attempt to call field 'upper' (a nil value)
+stack traceback:
+	classes.moon:16: (90) in function 'speak'
+	classes.moon:23: (131) in main chunk

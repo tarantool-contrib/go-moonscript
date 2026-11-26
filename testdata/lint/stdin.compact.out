@@ -1,0 +1,5 @@
+exit 1
+stdin:2:1: assigning to constant `insert` [constant_assign]
+stdin:4:3: assigned but unused `unused_var` [unused]
+stdin:5:1: accessing global `missing_global` [global_access]
+stdin:7:3: assigning to constant `insert` [constant_assign]

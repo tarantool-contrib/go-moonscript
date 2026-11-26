@@ -1,0 +1,2 @@
+{[1] "if", {[3] "ref", "x"}, {{[8] "assign", {{[8] "ref", "y"}}, {{[11] "string", "[[", "no indent
+    here"}}}, {[38] "chain", {[38] "ref", "z"}, {"call", {}}}}}

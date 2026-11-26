@@ -1,0 +1,10 @@
+{[21] "assign", {{[21] "ref", "f"}}, {{[24] "fndef", {{"..."}}, {}, "slim", {{[33] "length", {[35] "table", {{"..."}}}}}}}}
+{[42] "assign", {{[42] "ref", "dont_bubble"}}, {{[55] "fndef", {}, {}, "slim", {{[61] "comprehension", {[62] "ref", "x"}, {{"foreach", {"x"}, {[72] "chain", {"parens", {[74] "fndef", {{"..."}}, {}, "slim", {{[81] "chain", {[81] "ref", "print"}, {"call", {"..."}}}}}}, {"call", {{[93] "string", """, "hello"}}}}}}}}}}}
+{[104] "assign", {{[104] "ref", "k"}}, {{[107] "comprehension", {[109] "ref", "x"}, {{"foreach", {"x"}, {[119] "chain", {"parens", {[121] "fndef", {{"..."}}, {}, "slim", {{[128] "chain", {[128] "ref", "print"}, {"call", {"..."}}}}}}, {"call", {{[140] "string", """, "hello"}}}}}}}}}
+{[151] "assign", {{[151] "ref", "j"}}, {{[154] "for", "i", {{[161] "number", "1"}, {[163] "number", "10"}}, {{[168] "fndef", {{"..."}}, {}, "slim", {{[176] "chain", {[176] "ref", "print"}, {"call", {"..."}}}}}}}}}
+{[202] "assign", {{[202] "ref", "m"}}, {{[205] "fndef", {{"..."}}, {}, "slim", {{[217] "comprehension", {[218] "ref", "x"}, {{"foreach", {"x"}, {"unpack", {[230] "table", {{"..."}}}}}, {"when", {"exp", {[240] "chain", {[240] "ref", "f"}, {"call", {"..."}}}, ">", {[249] "number", "4"}}}}}}}}}
+{[254] "assign", {{[254] "ref", "x"}}, {{[257] "foreach", {"i"}, {{"unpack", {[268] "table", {{"..."}}}}}, {{[276] "ref", "i"}}}}}
+{[279] "assign", {{[279] "ref", "y"}}, {{[282] "comprehension", {[284] "ref", "x"}, {{"foreach", {"x"}, {"unpack", {[296] "table", {{"..."}}}}}}}}}
+{[303] "assign", {{[303] "ref", "z"}}, {{[306] "comprehension", {[308] "ref", "x"}, {{"foreach", {"x"}, {[318] "ref", "hallo"}}, {"when", {"exp", {[329] "chain", {[329] "ref", "f"}, {"call", {"..."}}}, ">", {[338] "number", "4"}}}}}}}
+{[344] "assign", {{[344] "ref", "a"}}, {{[347] "for", "i", {{[354] "number", "1"}, {[356] "number", "10"}}, {"..."}}}}
+{[367] "assign", {{[367] "ref", "b"}}, {{[370] "for", "i", {{[377] "number", "1"}, {[379] "number", "10"}}, {{[384] "fndef", {}, {}, "slim", {{[386] "chain", {[386] "ref", "print"}, {"call", {"..."}}}}}}}}}

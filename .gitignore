@@ -1,0 +1,5 @@
+# binaries and coverage profiles built in the tree
+/moonc
+/moon
+*.test
+/coverage.out

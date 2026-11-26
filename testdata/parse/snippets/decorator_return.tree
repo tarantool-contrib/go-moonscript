@@ -1,0 +1,1 @@
+{"decorated", {[1] "return", {"explist", {[7] "number", "1"}}}, {"if", {[12] "ref", "x"}}}

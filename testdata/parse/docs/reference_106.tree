@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "num"}, {[5] "table", {{{"key_literal", "message"}, {[15] "ref", "message"}}}}}, {{[18] "chain", {[18] "ref", "get_result"}, {"call", {}}}}}
+{[31] "chain", {[31] "ref", "print"}, {"call", {{[36] "ref", "num"}, {[41] "ref", "message"}}}}

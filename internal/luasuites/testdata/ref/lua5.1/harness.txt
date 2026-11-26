@@ -1,0 +1,1770 @@
+### 000-sanity.t exit=0
+1..9
+ok 1 -
+ok 3 - concatenation
+ok 4 - var
+ok 5 - var incr
+ok 6 - expr
+ok 7 - call f
+ok 8 - call g
+ok 9 - local
+### 001-if.t exit=0
+1..6
+ok 1
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6
+### 002-table.t exit=0
+1..8
+ok 1
+ok 2
+ok 3
+ok 4 - len
+ok 5
+ok 6
+ok 7
+ok 8
+### 011-while.t exit=0
+1..11
+ok 1 - while empty
+ok 2 - while 
+ok 3
+ok 4
+ok 5 - with break
+ok 6
+ok 7 - break
+ok 8
+ok 9
+ok 10
+ok 11
+### 012-repeat.t exit=0
+1..8
+ok 1 - repeat
+ok 2
+ok 3
+ok 4
+ok 5 - with break
+ok 6
+ok 7 - break
+ok 8 - scope
+### 014-fornum.t exit=0
+1..36
+ok 1 - for 1.0, 3.0, 0.5
+ok 2 - for 1.0, 3.0, 0.5
+ok 3 - for 1.0, 3.0, 0.5
+ok 4 - for 1.0, 3.0, 0.5
+ok 5 - for 1.0, 3.0, 0.5
+ok 6 - for 1.0, 3.0, 0.5 lex
+ok 7 - for 1.0, 3.0, 0.5 lex
+ok 8 - for 1.0, 3.0, 0.5 lex
+ok 9 - for 1.0, 3.0, 0.5 lex
+ok 10 - for 1.0, 3.0, 0.5 lex
+ok 11 - for 1.0, 3.0, 0.5 !lex
+ok 12 - for 1.0, 3.0, 0.5 !lex
+ok 13 - for 1.0, 3.0, 0.5 !lex
+ok 14 - for 1.0, 3.0, 0.5 !lex
+ok 15 - for 1.0, 3.0, 0.5 !lex
+ok 16 - for 3, 5
+ok 17 - for 3, 5
+ok 18 - for 3, 5
+ok 19 - for 5, 1, -1
+ok 20 - for 5, 1, -1
+ok 21 - for 5, 1, -1
+ok 22 - for 5, 1, -1
+ok 23 - for 5, 1, -1
+ok 24 - for 5, 5
+ok 25 - for 5, 5, -1
+ok 26 - for 5, 3
+ok 27 - for 5, 7, -1
+ok 28 - for 5, 7, 0
+ok 29 - for break
+ok 30 - for break
+ok 31 - break
+ok 32 - with functions
+ok 33 - with functions
+ok 34 - with functions
+ok 35 - with functions
+ok 36 - for & upval
+### 015-forlist.t exit=0
+1..18
+ok 1 - for ipairs
+ok 2 - for ipairs
+ok 3 - for ipairs
+ok 4 - for ipairs
+ok 5 - for ipairs
+ok 6 - for ipairs
+ok 7 - for pairs
+ok 8 - for pairs
+ok 9 - for pairs
+ok 10 - for ipairs (hash)
+ok 11 - for pairs (hash)
+ok 12 - for pairs (hash)
+ok 13 - for break
+ok 14 - for break
+ok 15 - break
+ok 16 - for & upval
+ok 17 - for & upval
+ok 18 - for & upval
+### 090-tap.t exit=0
+1..3
+ok 1 - truthy
+ok 2 - 42 == 42
+ok 3 - pass
+### 091-profile.t exit=0
+ok 1 - variable _VERSION
+ok 2
+ok 3 - require 'profile'
+1..3
+### 101-boolean.t exit=0
+ok 1 - -true
+ok 2 - #true
+ok 3 - not false
+ok 4 - true + 10
+ok 5 - true - 2
+ok 6 - true * 3.14
+ok 7 - true / -7
+ok 8 - true % 4
+ok 9 - true ^ 3
+ok 10 - true .. 'end'
+ok 11 - true == true
+ok 12 - true ~= false
+ok 13 - true == 1
+ok 14 - true ~= 1
+ok 15 - true < false
+ok 16 - true <= false
+ok 17 - true > false
+ok 18 - true >= false
+ok 19 - true < 0
+ok 20 - true <= 0
+ok 21 - true > 0
+ok 22 - true >= 0
+ok 23 - index
+ok 24 - index
+1..24
+### 102-function.t exit=0
+ok 1 - -f
+ok 2
+ok 3 - #f
+ok 4
+ok 5 - not f
+ok 6
+ok 7 - f + 10
+ok 8
+ok 9 - f - 2
+ok 10
+ok 11 - f * 3.14
+ok 12
+ok 13 - f / -7
+ok 14
+ok 15 - f % 4
+ok 16
+ok 17 - f ^ 3
+ok 18
+ok 19 - f .. 'end'
+ok 20
+ok 21 - f == f
+ok 22
+ok 23 - f ~= g
+ok 24
+ok 25
+ok 26
+ok 27 - f == 1
+ok 28
+ok 29 - f ~= 1
+ok 30
+ok 31 - f < g
+ok 32
+ok 33 - f <= g
+ok 34
+ok 35 - f > g
+ok 36
+ok 37 - f >= g
+ok 38
+ok 39 - f < 0
+ok 40
+ok 41 - f <= 0
+ok 42
+ok 43 - f > 0
+ok 44
+ok 45 - f >= 0
+ok 46
+ok 47 - index
+ok 48
+ok 49 - index
+ok 50
+ok 51
+1..51
+### 103-nil.t exit=0
+ok 1 - -nil
+ok 2 - #nil
+ok 3 - not nil
+ok 4 - nil + 10
+ok 5 - nil - 2
+ok 6 - nil * 3.14
+ok 7 - nil / -7
+ok 8 - nil % 4
+ok 9 - nil ^ 3
+ok 10 - nil .. 'end'
+ok 11 - nil == nil
+ok 12 - nil ~= nil
+ok 13 - nil == 1
+ok 14 - nil ~= 1
+ok 15 - nil < nil
+ok 16 - nil <= nil
+ok 17 - nil > nil
+ok 18 - nil >= nil
+ok 19 - nil < 0
+ok 20 - nil <= 0
+ok 21 - nil > 0
+ok 22 - nil >= 0
+ok 23 - index
+ok 24 - index
+1..24
+### 104-number.t exit=0
+ok 1 - -1
+ok 2 - not 1
+ok 3 - 10 + 2
+ok 4 - 2 - 10.5
+ok 5 - 2 * 3
+ok 6 - 3.14 * 1
+ok 7 - -7 / 0.5
+ok 8 - 1.0 / 0.0
+ok 9 - -25 % 3
+ok 10 - 1 % 0
+ok 11 - 10 + true
+ok 12 - 2 - nil
+ok 13 - 2 * {}
+ok 14 - 3.14 * false
+ok 15 - -7 / {}
+ok 16 - 3 ^ true
+ok 17 - -25 % false
+ok 18 - 10 + 'text'
+ok 19 - 2 - 'text'
+ok 20 - 2 * 'text'
+ok 21 - 3.14 * 'text'
+ok 22 - -7 / 'text'
+ok 23 - 25 % 'text'
+ok 24 - 3 ^ 'text'
+ok 25 - 10 + '2'
+ok 26 - 2 - '10.5'
+ok 27 - 2 * '3'
+ok 28 - 3.14 * '1'
+ok 29 - -7 / '0.5'
+ok 30 - -25 % '3'
+ok 31 - 3 ^ '3'
+ok 32 - 1 .. 'end'
+ok 33 - 1 .. 2
+ok 34 - 1 .. true
+ok 35 - 1.0 == 1
+ok 36 - 1 ~= 2
+ok 37 - 1 == true
+ok 38 - 1 ~= nil
+ok 39 - 1 == '1'
+ok 40 - 1 ~= '1'
+ok 41 - 1 < 0
+ok 42 - 1 <= 0
+ok 43 - 1 > 0
+ok 44 - 1 >= 0
+ok 45 - 1 < false
+ok 46 - 1 <= nil
+ok 47 - 1 > true
+ok 48 - 1 >= {}
+ok 49 - 1 < '0'
+ok 50 - 1 <= '0'
+ok 51 - 1 > '0'
+ok 52 - 1 >= '0'
+ok 53 - index
+ok 54 - index
+1..54
+### 105-string.t exit=0
+ok 1 - -'1'
+ok 2 - -'text'
+ok 3 - #'text'
+ok 4 - not 'text'
+ok 5 - '10' + 2
+ok 6 - '2' - 10.5
+ok 7 - '2' * 3
+ok 8 - '3.14' * 1
+ok 9 - '-7' / 0.5
+ok 10 - '-25' % 3
+ok 11 - '3' ^ 3
+ok 12 - '10' + true
+ok 13 - '2' - nil
+ok 14 - '2' * {}
+ok 15 - '3.14' * false
+ok 16 - '-7' / {}
+ok 17 - '-25' % false
+ok 18 - '3' ^ true
+ok 19 - '10' + 'text'
+ok 20 - '2' - 'text'
+ok 21 - '3.14' * 'text'
+ok 22 - '-7' / 'text'
+ok 23 - '-25' % 'text'
+ok 24 - '3' ^ 'text'
+ok 25 - '10' + '2'
+ok 26 - '2' - '10.5'
+ok 27 - '2' * '3'
+ok 28 - '3.14' * '1'
+ok 29 - '-7' / '0.5'
+ok 30 - '-25' % '3'
+ok 31 - '3' ^ '3'
+ok 32 - '1' .. 'end'
+ok 33 - '1' .. 2
+ok 34 - '1' .. true
+ok 35 - 'foo\0bar' <= 'foo\0baz'
+ok 36 - 'foo\0bar' ~= 'foo'
+ok 37 - 'foo\0bar' >= 'foo'
+ok 38 - '1.0' == '1'
+ok 39 - '1' ~= '2'
+ok 40 - '1' == true
+ok 41 - '1' ~= nil
+ok 42 - '1' == 1
+ok 43 - '1' ~= 1
+ok 44 - '1' < '0'
+ok 45 - '1' <= '0'
+ok 46 - '1' > '0'
+ok 47 - '1' >= '0'
+ok 48 - '1' < false
+ok 49 - '1' <= nil
+ok 50 - '1' > true
+ok 51 - '1' >= {}
+ok 52 - '1' < 0
+ok 53 - '1' <= 0
+ok 54 - '1' > 0
+ok 55 - '1' >== 0
+ok 56 - index
+ok 57 - index
+1..57
+### 106-table.t exit=0
+ok 1 - -{}
+ok 2 - #{}
+ok 3
+ok 4 - not {}
+ok 5 - {} + 10
+ok 6 - {} - 2
+ok 7 - {} * 3.14
+ok 8 - {} / 7
+ok 9 - {} % 4
+ok 10 - {} ^ 3
+ok 11 - {} .. 'end'
+ok 12 - {} == {}
+ok 13 - t1 == t1
+ok 14 - t1 == t2
+ok 15 - t1 ~= t2
+ok 16 - {} == 1
+ok 17 - {} ~= 1
+ok 18 - t1 < t2
+ok 19 - t1 <= t2
+ok 20 - t1 > t2
+ok 21 - t1 >= t2
+ok 22 - {} < 0
+ok 23 - {} <= 0
+ok 24 - {} > 0
+ok 25 - {} >= 0
+ok 26 - index
+ok 27 - index
+ok 28 - table index is nil
+ok 29 - table index is NaN
+1..29
+### 107-thread.t exit=0
+ok 1 - -co
+ok 2 - #co
+ok 3 - not co
+ok 4 - co + 10
+ok 5 - co - 2
+ok 6 - co * 3.14
+ok 7 - co / 7
+ok 8 - co % 4
+ok 9 - co ^ 3
+ok 10 - co .. 'end'
+ok 11 - co == co
+ok 12 - co1 ~= co2
+ok 13 - co == 1
+ok 14 - co ~= 1
+ok 15 - co1 < co2
+ok 16 - co1 <= co2
+ok 17 - co1 > co2
+ok 18 - co1 >= co2
+ok 19 - co < 0
+ok 20 - co <= 0
+ok 21 - co > 0
+ok 22 - co >= 0
+ok 23 - index
+ok 24 - index
+ok 25
+1..25
+### 108-userdata.t exit=0
+ok 1 - -u
+ok 2 - #u
+ok 3 - not u
+ok 4 - u + 10
+ok 5 - u - 2
+ok 6 - u * 3.14
+ok 7 - u / 7
+ok 8 - u % 4
+ok 9 - u ^ 3
+ok 10 - u .. 'end'
+ok 11 - u == u
+ok 12 - u ~= v
+ok 13 - u == 1
+ok 14 - u ~= 1
+ok 15 - u < v
+ok 16 - u <= v
+ok 17 - u > v
+ok 18 - u >= v
+ok 19 - u < 0
+ok 20 - u <= 0
+ok 21 - u > 0
+ok 22 - u >= 0
+ok 23 - index
+ok 24 - index
+ok 25
+1..25
+### 200-examples.t exit=0
+1..5
+ok 1 - factorial (recursive)
+ok 2 - factorial (recursive)
+ok 3 - factorial (loop)
+ok 4 - factorial (iter)
+ok 5 - man or boy
+### 201-assign.t exit=0
+ok 1 - global variable
+ok 2
+ok 3 - no _ENV
+ok 4
+ok 5 - check eval
+ok 6
+ok 7 - check swap
+ok 8
+ok 9 - check padding
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15
+ok 16
+ok 17 - adjust with function
+ok 18
+ok 19
+ok 20
+ok 21 - padding with function
+ok 22
+ok 23
+ok 24 - local variable
+ok 25
+ok 26 - local variable
+ok 27
+ok 28
+ok 29
+ok 30 - param & result of function
+ok 31
+ok 32
+ok 33 - assignment list swap values
+ok 34
+ok 35
+ok 36
+1..36
+### 202-expr.t exit=0
+ok 1 - modulo
+ok 2 - relational op (by reference)
+ok 3
+ok 4 - relational op
+ok 5
+ok 6
+ok 7 - relational op
+ok 8 - relational op
+ok 9 - logical op
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15 - logical op
+ok 16
+ok 17
+ok 18
+ok 19
+ok 20
+ok 21
+ok 22
+ok 23 - logical not
+ok 24
+ok 25
+ok 26
+ok 27
+ok 28
+ok 29
+ok 30
+ok 31 - concatenation
+ok 32
+ok 33
+ok 34
+ok 35 - coercion
+ok 36
+ok 37
+ok 38
+ok 39
+ok 40 - no coercion
+ok 41 - for tonumber
+ok 42 - for tonumber
+ok 43 - for tonumber
+1..43
+### 203-lexico.t exit=0
+ok 1
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15
+ok 16
+ok 17
+ok 18
+ok 19
+ok 20
+ok 21
+ok 22
+ok 23
+ok 24
+ok 25
+ok 26
+ok 27
+ok 28
+ok 29
+ok 30
+ok 31
+1..31
+### 204-grammar.t exit=0
+ok 1 - empty statement
+ok 2
+ok 3
+ok 4 - orphan break
+ok 5 - break anywhere
+ok 6 - break anywhere
+ok 7 - constructor { }
+ok 8 - expr ( )
+ok 9 - expr ( )
+ok 10 - function end
+ok 11 - do end
+ok 12 - for end
+ok 13 - if end
+ok 14 - while end
+ok 15 - repeat until
+ok 16 - function parameter list
+ok 17 - function argument list
+ok 18 - for init
+ok 19 - for do
+ok 20 - if then
+ok 21 - while do
+1..21
+### 211-scope.t exit=0
+1..10
+ok 1 - scope
+ok 2
+ok 3
+ok 4
+ok 5 - scope
+ok 6
+ok 7 - scope
+ok 8
+ok 9
+ok 10
+### 212-function.t exit=0
+1..68
+ok 1 - add
+ok 2 - f
+ok 3
+ok 4
+ok 5 - inCount
+ok 6
+ok 7
+ok 8
+ok 9 - maximum
+ok 10
+ok 11 - call by value
+ok 12
+ok 13
+ok 14
+ok 15
+ok 16 - call by ref
+ok 17
+ok 18
+ok 19 - vararg
+ok 20
+ok 21
+ok 22
+ok 23
+ok 24
+ok 25
+ok 26
+ok 27
+ok 28
+ok 29
+ok 30
+ok 31
+ok 32 - var args
+ok 33
+ok 34
+ok 35
+ok 36
+ok 37
+ok 38
+ok 39
+ok 40
+ok 41
+ok 42
+ok 43
+ok 44
+ok 45
+ok 46
+ok 47 - varargs
+ok 48
+ok 49
+ok 50 - var args
+ok 51
+ok 52
+ok 53
+ok 54
+ok 55
+ok 56
+ok 57
+ok 58
+ok 59
+ok 60 - invalid var args
+ok 61 - tail call
+ok 62
+ok 63 - no tail call
+ok 64
+ok 65 - no tail call
+ok 66
+ok 67 - sub name
+ok 68
+### 213-closure.t exit=0
+1..15
+ok 1 - inc
+ok 2
+ok 3 - newCounter
+ok 4
+ok 5
+ok 6
+ok 7
+ok 8 - ten closures
+ok 9
+ok 10
+ok 11 - add
+ok 12
+ok 13
+ok 14
+ok 15
+### 214-coroutine.t exit=0
+ok 1 - foo1
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6 - basics
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12
+ok 13 - main thread
+ok 14 - basics
+ok 15
+ok 16
+ok 17 - basics
+ok 18 - basics
+ok 19
+ok 20
+ok 21
+ok 22 - no coroutine.isyieldable
+ok 23 - no coroutine.close
+1..23
+### 221-table.t exit=0
+1..25
+ok 1
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15
+ok 16
+ok 17
+ok 18
+ok 19
+ok 20
+ok 21
+ok 22
+ok 23
+ok 24
+ok 25
+### 222-constructor.t exit=0
+1..16
+ok 1 - list-style init
+ok 2
+ok 3
+ok 4
+ok 5 - record-style init
+ok 6
+ok 7 - ctor
+ok 8
+ok 9
+ok 10 - mix record-style and list-style init
+ok 11 - ctor
+ok 12
+ok 13 - ctor
+ok 14
+ok 15
+ok 16
+### 223-iterator.t exit=0
+1..8
+ok 1 - list_iter
+ok 2 - values
+ok 3 - emul ipairs
+ok 4 - emul ipairs
+ok 5 - with next
+ok 6 - permutations
+ok 7 - permutations with wrap
+ok 8 - fibo
+### 231-metatable.t exit=0
+ok 1 - metatable
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6 - protected metatable
+ok 7
+ok 8 - metatable for string
+ok 9 - metatable for nil
+ok 10 - metatable for boolean
+ok 11 - metatable for number
+ok 12 - metatable for function
+ok 13 - __tostring
+ok 14 - __tostring no-output
+ok 15
+ok 16
+ok 17 - __tostring too-many-output
+ok 18 - __tostring invalid
+ok 19 - __len 5.1
+ok 20 - __concat
+ok 21 - cplx __add
+ok 22
+ok 23
+ok 24
+ok 25
+ok 26 - cplx __sub
+ok 27
+ok 28
+ok 29
+ok 30
+ok 31 - cplx __mul
+ok 32
+ok 33
+ok 34
+ok 35
+ok 36 - cplx __div
+ok 37
+ok 38
+ok 39
+ok 40
+ok 41 - cplx __unm
+ok 42 - __len 5.1
+ok 43 - cplx __eq
+ok 44
+ok 45
+ok 46
+ok 47 - cplx __lt
+ok 48
+ok 49
+ok 50 - cplx __lt __le
+ok 51
+ok 52
+ok 53 - cplx __call (without args)
+ok 54
+ok 55 - cplx __call (with args)
+ok 56
+ok 57
+ok 58
+ok 59
+ok 60
+ok 61 - table-access
+ok 62
+ok 63
+ok 64
+ok 65 - table-access
+ok 66
+ok 67
+ok 68
+ok 69 - tables with default values
+ok 70
+ok 71
+ok 72
+ok 73 - tables with default values
+ok 74
+ok 75
+ok 76
+ok 77 - tables with default values
+ok 78
+ok 79
+ok 80
+ok 81 - tracking table accesses
+ok 82
+ok 83
+ok 84 - tracking table accesses
+ok 85
+ok 86
+ok 87 - read-only tables
+ok 88
+ok 89 - declaring global variables
+ok 90
+ok 91 - __newindex
+1..91
+### 232-object.t exit=0
+1..18
+ok 1 - object
+ok 2
+ok 3 - object
+ok 4 - object
+ok 5
+ok 6 - classe
+ok 7
+ok 8
+ok 9 - inheritance
+ok 10
+ok 11
+ok 12 - multiple inheritance
+ok 13
+ok 14 - multiple inheritance (patched)
+ok 15
+ok 16 - privacy
+ok 17 - single-method approach
+ok 18
+### 301-basic.t exit=0
+ok 1 - function assert
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6 - function assert(false, msg)
+ok 7 - function assert(false)
+ok 8 - function assert(false, 42) --> invalid
+ok 9 - function collectgarbage 'stop/restart/collect'
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14 - function collectgarbage 'count'
+ok 15 - function collectgarbage (invalid)
+ok 16 - function dofile
+ok 17 - function dofile (no file)
+ok 18 - function dofile (syntax error)
+ok 19 - function error(msg)
+ok 20 - function error(msg, 0)
+ok 21 - function error(42)
+ok 22 - function error({})
+ok 23 - function error()
+ok 24 - function gcinfo
+ok 25 - function getfenv
+ok 26
+ok 27
+ok 28
+ok 29
+ok 30
+ok 31
+ok 32
+ok 33 - function getfenv (negative)
+ok 34 - function getfenv (too depth)
+ok 35 - boolean has no metatable by default
+ok 36 - function has no metatable by default
+ok 37 - nil has no metatable by default
+ok 38 - number has no metatable by default
+ok 39 - table has no metatable by default
+ok 40 - thread has no metatable by default
+ok 41 - string has a metatable
+ok 42 - string has a shared metatable
+ok 43 - function ipairs
+ok 44
+ok 45
+ok 46
+ok 47
+ok 48
+ok 49
+ok 50
+ok 51
+ok 52
+ok 53
+ok 54 - function load(reader)
+ok 55
+ok 56
+ok 57 - function load(pathological reader)
+not ok 58 # TODO # not with 5.1
+ok 59 - function load(syntax error)
+ok 60
+ok 61 - when reader returns nothing
+ok 62 - reader function must return a string
+ok 63
+ok 64 - function loadfile
+ok 65
+ok 66 - function loadfile (no file)
+ok 67
+ok 68 - function loadfile (syntax error)
+ok 69
+ok 70 - function loadstring
+ok 71
+ok 72 - function loadstring
+ok 73
+ok 74 - function loadstring (syntax error)
+ok 75
+ok 76 - function newproxy(false)
+ok 77 - without metatable
+ok 78 - function newproxy(true)
+ok 79 - with metatable
+ok 80 - function newproxy(proxy)
+ok 81
+ok 82 - function newproxy({})
+ok 83 - function next (array)
+ok 84
+ok 85
+ok 86
+ok 87 - function next (no arg)
+ok 88 - function next (invalid key)
+ok 89 - function next (unorderer)
+ok 90
+ok 91
+ok 92 - function next (empty table)
+ok 93 - function pairs
+ok 94
+ok 95
+ok 96
+ok 97
+ok 98
+ok 99
+ok 100 - function pcall
+ok 101
+ok 102
+ok 103
+ok 104
+ok 105 - function rawequal -> true
+ok 106
+ok 107
+ok 108
+ok 109
+ok 110
+ok 111 - function rawequal -> false
+ok 112
+ok 113
+ok 114
+ok 115
+ok 116
+ok 117
+ok 118
+ok 119
+ok 120
+ok 121
+ok 122 - no rawlen
+ok 123 - function rawget
+ok 124 - function rawset
+ok 125
+ok 126 - function rawset (table index is nil)
+ok 127 - function select
+ok 128
+ok 129
+ok 130
+ok 131
+ok 132
+ok 133
+ok 134
+ok 135 - function select (out of range)
+ok 136 - function select (out of range)
+ok 137 - function setfenv
+ok 138
+ok 139
+ok 140 - function setfenv
+ok 141
+ok 142 - function setfenv
+ok 143
+ok 144
+ok 145
+ok 146 - function setfenv
+ok 147
+ok 148
+ok 149
+ok 150 - function setfenv(0)
+ok 151 - function setfenv (negative)
+ok 152 - function setfenv (too depth)
+ok 153 - function setfenv (bad arg)
+ok 154 - function setfenv (forbidden)
+ok 155 - setmetatable
+ok 156
+ok 157
+ok 158
+ok 159 - function setmetatable (bad arg)
+ok 160 - function setmetatable (bad arg)
+ok 161 - function type
+ok 162
+ok 163
+ok 164
+ok 165
+ok 166
+ok 167
+ok 168
+ok 169 - function type
+ok 170
+ok 171
+ok 172
+ok 173
+ok 174 - function type (no arg)
+ok 175 - function tonumber
+ok 176
+ok 177
+ok 178
+ok 179
+ok 180
+ok 181
+ok 182
+ok 183
+ok 184 - function tonumber (no arg)
+ok 185 - function tonumber (bad base)
+ok 186 - function tostring
+ok 187
+ok 188
+ok 189
+ok 190
+ok 191
+ok 192
+ok 193 - function tostring (no arg)
+ok 194 - function unpack
+ok 195
+ok 196
+ok 197
+ok 198
+ok 199
+ok 200 - no warn
+ok 201 - function xpcall
+ok 202
+ok 203
+ok 204
+ok 205
+ok 206
+ok 207 - function xpcall
+ok 208 - function xpcall
+1..208
+### 303-package.t exit=0
+ok 1
+ok 2
+ok 3
+ok 4 - table package.loaders
+ok 5 - no package.searchers
+ok 6 - table package.loaded
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15 - table package.preload
+ok 16
+ok 17 - function require & package.preload
+ok 18 - loadlib
+ok 19
+ok 20 - # skip no lpeg path
+ok 21 - no package.searchpath
+ok 22 - function require
+ok 23
+ok 24
+ok 25
+ok 26 - function require (no module)
+ok 27 - function require (syntax error)
+ok 28 - function require (arg)
+ok 29 - function require & module
+ok 30
+ok 31 - function package.seeall
+ok 32 - function module & seeall
+ok 33
+ok 34
+ok 35 - function module
+ok 36
+ok 37
+1..37
+### 304-string.t exit=0
+ok 1 - metatable
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15
+ok 16
+ok 17
+ok 18
+ok 19
+ok 20
+ok 21
+ok 22
+ok 23
+ok 24
+ok 25
+ok 26
+ok 27
+ok 28 - function byte
+ok 29
+ok 30
+ok 31
+ok 32
+ok 33
+ok 34
+ok 35 - method s:byte
+ok 36 - function char
+ok 37
+ok 38 - function char (bad arg)
+ok 39 - function char (invalid)
+ok 40 - function dump
+ok 41
+ok 42
+ok 43 - function dump (C function)
+ok 44 - function find (mode plain)
+ok 45
+ok 46
+ok 47
+ok 48
+ok 49
+ok 50
+ok 51
+ok 52
+ok 53
+ok 54 - function find (with regex & captures)
+ok 55
+ok 56
+ok 57
+ok 58
+ok 59
+ok 60
+ok 61 - function find (invalid frontier)
+ok 62 - function format
+ok 63
+ok 64
+ok 65
+ok 66 - function format %q
+ok 67 - function format %q
+ok 68 - function format %q
+ok 69 - function format %q
+ok 70 - function format %q
+ok 71 - function format ('%q', nil)
+ok 72 - function format ('%q', {})
+ok 73 - function format (%5s)
+ok 74 - function format (too many arg)
+ok 75 - function format (%%)
+ok 76
+ok 77 - function format (too few arg)
+ok 78 - function format (bad arg)
+ok 79 - function format (invalid conversion)
+ok 80 - function format (invalid format)
+ok 81 - function format (invalid format)
+ok 82 - function format (invalid format)
+ok 83 - function format (invalid format)
+ok 84 - function gmatch
+ok 85
+ok 86
+ok 87
+ok 88 - function gsub
+ok 89
+ok 90
+not ok 91 - function gsub (invalid replacement string) # TODO # not with 5.1
+ok 92
+ok 93
+ok 94
+ok 95
+ok 96
+ok 97
+ok 98
+ok 99
+ok 100
+ok 101
+ok 102
+ok 103
+ok 104
+ok 105
+ok 106
+ok 107
+ok 108 - function gsub (malformed pattern)
+ok 109
+ok 110
+ok 111
+ok 112
+ok 113
+ok 114 - function gsub (invalid index)
+ok 115 - function gsub (bad type)
+ok 116 - function gsub (invalid value)
+ok 117 - gsub trim
+ok 118
+ok 119 - function len
+ok 120
+ok 121
+ok 122
+ok 123 - function lower
+ok 124
+ok 125 - function match
+ok 126
+ok 127
+ok 128
+ok 129
+ok 130
+ok 131
+ok 132
+ok 133
+ok 134 - function match (back ref)
+ok 135
+ok 136 - function match invalid capture
+ok 137 - function match invalid capture
+ok 138 - no string.pack
+ok 139 - no string.packsize
+ok 140 - function rep
+ok 141
+ok 142
+ok 143
+ok 144 - function reverse
+ok 145
+ok 146
+ok 147 - function sub
+ok 148
+ok 149
+ok 150
+ok 151 - function upper
+ok 152
+ok 153
+ok 154 - no string.unpack
+1..154
+### 305-utf8.t exit=0
+1..1
+ok 1 - no has_utf8
+### 306-table.t exit=0
+ok 1 - function concat
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6 - function concat (number)
+ok 7 - function concat (out of range)
+ok 8 - function concat (non-string)
+ok 9 - function insert
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+not ok 15 - function insert (out of bounds) # TODO # not with 5.1
+not ok 16 - function insert (out of bounds) # TODO # not with 5.1
+ok 17 - function insert (too many arg)
+ok 18 - function foreach (hash)
+ok 19 - function foreach (array)
+ok 20 - function foreachi
+ok 21 - function getn
+ok 22
+ok 23 - function maxn
+ok 24
+ok 25
+ok 26
+ok 27 - no table.move
+ok 28 - no table.pack
+ok 29 - function remove
+ok 30
+ok 31
+ok 32
+ok 33
+ok 34
+ok 35
+not ok 36 - function remove (out of bounds) # TODO # not with 5.1
+ok 37 - function setn
+ok 38 - function sort
+ok 39 - function sort
+ok 40 - function sort
+ok 41 - function sort (all permutations)
+not ok 42 - function sort (bad func) # TODO # not with 5.1
+ok 43 - no table.unpack
+1..43
+### 307-math.t exit=0
+ok 1 - function abs (float)
+ok 2
+ok 3 - function abs (integer)
+ok 4
+ok 5 - function acos
+ok 6 - function asin
+ok 7 - function atan
+ok 8 - function atan2
+ok 9 - function ceil
+ok 10
+ok 11
+ok 12 - function cos
+ok 13 - function cosh
+ok 14 - function deg
+ok 15 - function exp
+ok 16 - function floor
+ok 17
+ok 18
+ok 19 - function fmod (float)
+ok 20
+ok 21
+ok 22 - function fmod (integer)
+ok 23
+ok 24
+ok 25 - function frexp
+ok 26 - variable huge
+ok 27 - function ldexp
+ok 28 - function log
+ok 29 - function log10
+ok 30 - function max
+ok 31
+ok 32
+ok 33 - function max 0
+ok 34 - no maxinteger
+ok 35 - function min
+ok 36
+ok 37
+ok 38 - function min 0
+ok 39 - no mininteger
+ok 40 - function mod (alias fmod)
+ok 41 - function modf
+ok 42
+ok 43 - variable pi
+ok 44 - function pow
+ok 45 - function rad
+ok 46 - function random no arg
+ok 47 - function random 1 arg
+ok 48 - function random 2 arg
+ok 49 - function random 2 arg
+ok 50 - function random empty interval
+ok 51 - function random empty interval
+ok 52 - function random empty interval
+ok 53 - function random too many arg
+ok 54 - function randomseed
+ok 55 - function sin
+ok 56 - function sinh
+ok 57 - function sqrt
+ok 58 - function tan
+ok 59 - function tanh
+ok 60 - no math.tointeger
+ok 61 - no math.type
+ok 62 - no math.ult
+1..62
+### 308-io.t exit=0
+ok 1 - variable stdin
+ok 2 - variable stdout
+ok 3 - variable stderr
+ok 4 - metatable
+ok 5
+ok 6
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12
+ok 13
+ok 14
+ok 15
+ok 16
+ok 17
+ok 18
+ok 19
+ok 20
+ok 21
+ok 22
+ok 23
+ok 24
+ok 25 - close (std)
+ok 26
+ok 27 - function flush
+ok 28 - function open
+ok 29
+ok 30 - function open
+ok 31 - function close
+ok 32 - function close (closed)
+not ok 33 - function open (bad mode) # TODO # not with 5.1
+ok 34 - function type
+ok 35
+ok 36
+ok 37
+ok 38
+ok 39 - function input
+ok 40
+ok 41
+ok 42
+ok 43 - function output
+ok 44
+ok 45
+ok 46
+ok 47 - popen (read)
+ok 48
+ok 49
+ok 50 - popen (write)
+ok 51
+ok 52 - function lines(filename)
+ok 53 - function lines(no filename)
+ok 54 - function tmpfile
+ok 55 - method close (std)
+ok 56
+ok 57 - method close
+ok 58 - method flush
+ok 59 - method flush (closed)
+ok 60 - method read (closed)
+ok 61 - method read
+ok 62
+ok 63
+ok 64 - method read (invalid)
+ok 65 - method read *l
+ok 66
+ok 67
+ok 68 - method read *n
+ok 69
+ok 70 - method read *n
+ok 71 - method read *n
+ok 72
+ok 73 - method read *a
+ok 74
+ok 75 - method read number
+ok 76
+ok 77 - method lines
+ok 78
+ok 79
+ok 80 - method seek (closed)
+ok 81 - method seek (invalid)
+ok 82 - method seek
+ok 83 - method setvbuf 'no'
+ok 84 - method setvbuf 'full'
+ok 85 - method setvbuf 'line'
+ok 86 - method write (closed)
+ok 87 - method write
+1..87
+### 309-os.t exit=0
+ok 1 - function clock
+ok 2
+ok 3 - function date
+ok 4
+ok 5
+ok 6
+ok 7
+ok 8
+ok 9
+ok 10
+ok 11
+ok 12 - function date
+ok 13 - function date
+not ok 14 # TODO # not with 5.1
+not ok 15 - function date (invalid) # TODO # not with 5.1
+ok 16 - function difftime
+ok 17 - function execute -> shell is available
+ok 18 - function execute __IMPROBABLE__
+ok 19 - function execute
+ok 20 - function exit called with execute
+ok 21 - exit called with popen
+ok 22
+ok 23 - exit code
+ok 24 - exit called with popen
+ok 25
+ok 26 - exit code
+ok 27 - function getenv
+ok 28 - function getenv
+ok 29 - function remove
+ok 30 - function remove
+ok 31
+ok 32 - function rename
+ok 33 - function rename
+ok 34
+ok 35 - function setlocale
+ok 36
+ok 37 - function setlocale (unknown locale)
+ok 38 - function time
+ok 39 - function time
+ok 40 - function time
+ok 41 - function time (missing field)
+ok 42 - function time (bad field)
+not ok 43 - function time (not integer) # TODO # only with integer
+not ok 44 - function time (invalid) # TODO # only with 5.3
+ok 45 - function tmpname
+ok 46
+1..46
+### 310-debug.t exit=0
+ok 1 - function getfenv
+ok 2
+ok 3
+ok 4
+ok 5
+ok 6 - function getfenv (thread)
+ok 7
+ok 8 - function getinfo (function)
+ok 9 -  .func
+ok 10 - function getinfo (function, opt)
+ok 11
+ok 12 - function getinfo (level)
+ok 13 -  .func
+ok 14 - function getinfo (too depth)
+ok 15 - function getinfo (bad arg)
+ok 16 - function getinfo (bad opt)
+ok 17 - function getlocal (level)
+ok 18
+ok 19 - function getlocal (out of range)
+ok 20 - function getmetatable
+ok 21
+ok 22
+ok 23
+ok 24
+ok 25
+ok 26 - function getregistry
+ok 27
+ok 28 - function getupvalue
+ok 29 - function gethook
+ok 30
+ok 31
+ok 32 - function gethook
+ok 33
+ok 34
+ok 35 - function gethook(thread)
+ok 36 - function setlocal (level)
+ok 37 - function setlocal (level)
+ok 38 - function setlocal (out of range)
+ok 39 - no debug.setcstacklimit
+ok 40 - function setfenv
+ok 41
+ok 42
+ok 43
+ok 44
+ok 45
+ok 46 - function setfenv (thread)
+ok 47
+ok 48
+ok 49 - function setfenv (forbidden)
+ok 50 - function setmetatable
+ok 51
+ok 52
+ok 53 - function setupvalue
+ok 54
+ok 55 - no getuservalue
+ok 56 - no setuservalue
+ok 57 - function traceback
+ok 58 - function traceback with message
+ok 59 - function traceback
+ok 60 - no upvalueid
+ok 61 - no upvaluejoin
+1..61
+### 311-bit32.t exit=0
+1..1
+ok 1 - no has_bit32
+### 314-regex.t exit=0
+1..162
+ok 1 - basic match
+ok 2 - nested match
+ok 3 - nested match
+ok 4 - nested match
+ok 5 - opt
+ok 6 - opt
+ok 7 - empty capture
+ok 8 - backreference
+ok 9 - backreference
+ok 10 - repeated dot capture
+ok 11 - not escaped
+ok 12 - character class
+ok 13 - anchored character class
+ok 14 - negated character class
+ok 15 - anchored optional character class
+ok 16 - negated optional character class
+ok 17 - anchored negated character class
+ok 18 - anchored negated character class
+ok 19 - character range
+ok 20 - character range
+ok 21 - character range
+ok 22 - character range
+ok 23 - character range
+ok 24 - negated character range
+ok 25 - negated character range
+ok 26 - unescaped hyphen
+ok 27 - escaped hyphen
+ok 28 - escaped hyphen
+ok 29 - negated escaped hyphen
+ok 30 - negated escaped hyphen
+ok 31 - escaped hyphen in range
+ok 32 - escaped hyphen in range
+ok 33 - escaped hyphen in range
+ok 34 - escaped hyphen in range
+ok 35 - escaped hyphen in range
+ok 36 - escaped hyphen in range
+ok 37 - negated escaped hyphen in range
+ok 38 - negated escaped hyphen in range
+ok 39 - negated escaped hyphen in range
+ok 40 - negated escaped hyphen in range
+ok 41 - escaped backslash
+ok 42 - escaped close bracket
+ok 43 - unescaped backslash (or no closing brace)
+ok 44 - literal match with backslash
+ok 45 - literal match with question mark
+ok 46 - two enumerated ranges
+ok 47 - two enumerated ranges
+ok 48 - dot (.)
+ok 49 - dot (.)
+ok 50 - dot (.)
+ok 51 - whitespace (%s)
+ok 52 - whitespace (%s)
+ok 53 - not whitespace (%S)
+ok 54 - not whitespace (%S)
+ok 55 - start and end of string (^)
+ok 56 - start and end of string (^)
+ok 57 - start and end of string (^)
+ok 58 - start and end of string (^)
+ok 59 - start and end of string ($)
+ok 60 - start and end of string ($)
+ok 61 - start and end of string ($)
+ok 62 - start and end of string (^)
+ok 63 - end of string ($)
+ok 64 - end of string ($)
+ok 65 - newline (\n)
+ok 66 - newline (\n)
+ok 67 - newline (\n)
+ok 68 - newline (\n)
+ok 69 - newline (\n)
+ok 70 - horizontal tab (\t)
+ok 71 - horizontal tab (\t)
+ok 72 - horizontal tab (\t)
+ok 73 - horizontal tab (\t)
+ok 74 - horizontal tab (\t)
+ok 75 - return (\r)
+ok 76 - return (\r)
+ok 77 - return (\r)
+ok 78 - return (\r)
+ok 79 - return (\r)
+ok 80 - formfeed (\f)
+ok 81 - formfeed (\f)
+ok 82 - formfeed (\f)
+ok 83 - formfeed (\f)
+ok 84 - formfeed (\f)
+ok 85 - dec (\0)
+ok 86 - dec (\0)
+ok 87 - dec (\0)
+ok 88 - dec (\0)
+ok 89 - dec (\0)
+ok 90 - escaped (useless)
+ok 91 - not escaped
+ok 92 - escaped
+ok 93 - escaped (useless)
+ok 94 - not escaped
+ok 95 - escaped
+ok 96 - escaped
+ok 97 - escaped
+ok 98 - escaped
+ok 99 - not escaped
+ok 100 - escaped
+ok 101 - escaped
+ok 102 - escaped
+ok 103 - escaped
+ok 104 - escaped
+ok 105 - not escaped
+ok 106 - escaped
+ok 107 - escaped
+ok 108 - escaped
+ok 109 - escaped
+ok 110 - word character
+ok 111 - word character
+ok 112 - not word character
+ok 113 - not word character
+ok 114 - digit
+ok 115 - digit
+ok 116 - not digit
+ok 117 - not digit
+ok 118 - lowercase letter
+ok 119 - lowercase letter
+ok 120 - not lowercase letter
+ok 121 - not lowercase letter
+ok 122 - uppercase letter
+ok 123 - uppercase letter
+ok 124 - not uppercase letter
+ok 125 - not uppercase letter
+ok 126 - all letter
+ok 127 - all letter
+ok 128 - not all letter
+ok 129 - not all letter
+not ok 130 - printable # TODO # printable. %g
+ok 131 - printable
+not ok 132 - not printable # TODO # not printable. %G
+ok 133 - not printable
+ok 134 - ponctuation
+ok 135 - ponctuation
+ok 136 - not ponctuation
+ok 137 - not ponctuation
+ok 138 - control character
+ok 139 - control character
+ok 140 - not control character
+ok 141 - not control character
+ok 142 - hexadecimal
+ok 143 - hexadecimal
+ok 144 - not hexadecimal
+ok 145 - not hexadecimal
+ok 146 - zero (deprecated)
+not ok 147 - zero # TODO # embedded nul. \0
+ok 148 - zero (deprecated)
+not ok 149 - zero # TODO # embedded nul. \0
+ok 150 - not zero (deprecated)
+not ok 151 - not zero # TODO # embedded nul. [^\0]
+ok 152 - not zero (deprecated)
+not ok 153 - not zero # TODO # embedded nul. [^\0]
+ok 154 - balanced
+ok 155 - balanced
+ok 156 - balanced
+ok 157 - balanced
+ok 158 - balanced
+ok 159 - frontier
+ok 160 - frontier
+ok 161 - frontier
+ok 162 - frontier
+### 320-stdin.t exit=0
+ok 1 - function dofile (stdin)
+ok 2 - function loadfile (stdin)
+ok 3
+ok 4 - function io.read *l
+ok 5
+ok 6
+ok 7 - function io.lines
+ok 8
+ok 9 - function io:read *number
+ok 10
+ok 11 - function debug.debug
+ok 12
+1..12
+### 401-bitop.t exit=0
+1..0 # SKIP only with LuaJIT
+### 402-ffi.t exit=0
+1..0 # SKIP only with LuaJIT
+### 403-jit.t exit=0
+1..0 # SKIP only with LuaJIT
+### 404-ext.t exit=0
+1..0 # SKIP only with LuaJIT 2.1
+### 411-luajit.t exit=0
+1..0 # SKIP only with LuaJIT

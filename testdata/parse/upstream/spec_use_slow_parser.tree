@@ -1,0 +1,3 @@
+{[281] "assign", {{[281] "ref", "slow"}}, {{[287] "chain", {[287] "ref", "dofile"}, {"call", {{[294] "string", """, "moonscript/parse/slow.lua"}}}}}}
+{[323] "assign", {{[323] "chain", {[323] "ref", "package"}, {"dot", "loaded"}, {"index", {[338] "string", """, "moonscript.parse.native"}}}}, {{[366] "ref", "slow"}}}
+{[372] "assign", {{[372] "chain", {[372] "ref", "package"}, {"dot", "preload"}, {"index", {[388] "string", """, "moonscript.parse.native"}}}}, {{[416] "fndef", {}, {}, "slim", {{[419] "ref", "slow"}}}}}

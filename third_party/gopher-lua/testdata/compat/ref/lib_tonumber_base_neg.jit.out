@@ -1,0 +1,13 @@
+1	-1	-1	-1	-1
+2	-2	-8	-16	-36
+3	-2	-8	-16	-36
+4	nil	nil	-16	-42804
+5	nil	nil	-255	-555
+6	nil	nil	-65530	-719830
+7	nil	nil	nil	nil
+8	nil	nil	nil	nil
+9	nil	nil	nil	nil
+10	nil	nil	-1.844674407371e+19	-1.844674407371e+19
+11	nil	nil	-1.844674407371e+19	-1.844674407371e+19
+12	nil	nil	nil	-35
+-1	-2777	true

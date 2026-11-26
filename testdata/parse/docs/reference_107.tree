@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "ref", "my_object"}}, {{[12] "table", {{{"key_literal", "value"}, {[23] "number", "1000"}}, {{"key_literal", "write"}, {[37] "fndef", {}, {}, "fat", {{[40] "chain", {[40] "ref", "print"}, {"call", {{[46] "string", """, "the value:"}, {[60] "self", "value"}}}}}}}}}}}
+{[71] "assign", {{[71] "ref", "run_callback"}}, {{[85] "fndef", {{"func"}}, {}, "slim", {{[98] "chain", {[98] "ref", "print"}, {"call", {{[103] "string", """, "running callback..."}}}}, {[128] "chain", {[128] "ref", "func"}, {"call", {}}}}}}}
+{[207] "chain", {[207] "ref", "run_callback"}, {"call", {{[219] "chain", {[219] "ref", "my_object"}, {"dot", "write"}}}}}
+{[310] "chain", {[310] "ref", "run_callback"}, {"call", {{[322] "chain", {[322] "ref", "my_object"}, {"colon", "write"}}}}}

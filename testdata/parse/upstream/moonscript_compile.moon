@@ -1,0 +1,558 @@
+
+util = require "moonscript.util"
+dump = require "moonscript.dump"
+transform = require "moonscript.transform"
+
+import NameProxy, LocalName from require "moonscript.transform.names"
+import Set from require "moonscript.data"
+import ntype, value_can_be_statement from require "moonscript.types"
+
+statement_compilers = require "moonscript.compile.statement"
+value_compilers = require "moonscript.compile.value"
+
+parse_errors = require "moonscript.parse.errors"
+
+import concat, insert from table
+import unpack, mtype from util
+
+indent_char = "  "
+
+local Line, DelayedLine, Lines, Block, RootBlock
+
+-- returns a function that converts a byte offset in str to a line number.
+-- faster than util.pos_to_line for repeated lookups on the same string
+line_locator = (str) ->
+  line_starts = {1}
+  for start in str\gmatch "\n()"
+    line_starts[#line_starts + 1] = start
+
+  (pos) ->
+    lo, hi = 1, #line_starts
+    while lo < hi
+      mid = math.ceil (lo + hi) / 2
+      if line_starts[mid] <= pos
+        lo = mid
+      else
+        hi = mid - 1
+    lo
+
+-- a buffer for building up lines
+class Lines
+  new: =>
+    @posmap = {}
+
+  mark_pos: (pos, line=#@) =>
+    @posmap[line] = pos unless @posmap[line]
+
+  -- append a line or lines to the buffer
+  add: (item) =>
+    switch mtype item
+      when Line
+        item\render self
+      when Block
+        item\render self
+      else -- also captures DelayedLine
+        @[#@ + 1] = item
+    @
+
+  flatten_posmap: (line_no=0, out={}) =>
+    posmap = @posmap
+    for i, l in ipairs @
+      switch mtype l
+        when "string", DelayedLine
+          line_no += 1
+          out[line_no] = posmap[i]
+
+          line_no += 1 for _ in l\gmatch"\n"
+          out[line_no] = posmap[i]
+        when Lines
+          _, line_no = l\flatten_posmap line_no, out
+        else
+          error "Unknown item in Lines: #{l}"
+
+    out, line_no
+
+  flatten: (indent=nil, buffer={}) =>
+    for i = 1, #@
+      l = @[i]
+      t = mtype l
+
+      if t == DelayedLine
+        l = l\render!
+        t = "string"
+
+      switch t
+        when "string"
+          insert buffer, indent if indent
+          insert buffer, l
+
+          -- insert breaks between ambiguous statements
+          if "string" == type @[i + 1]
+            if l\sub(-1)!=',' and l\sub(-3)!='end' and @[i + 1]\sub(1,1) == "("
+              insert buffer, ";"
+
+          insert buffer, "\n"
+        when Lines
+           l\flatten indent and indent .. indent_char or indent_char, buffer
+        else
+          error "Unknown item in Lines: #{l}"
+    buffer
+
+  -- like flatten, but pins each line to the line number of its marked source
+  -- position: pads with blank lines when the output is behind the source,
+  -- joins onto the current line when it's ahead. state tracks the current
+  -- output line, the last emitted chunk, and the resulting posmap
+  flatten_correlated: (line_for_pos, state, indent=nil, buffer={}) =>
+    posmap = @posmap
+
+    for i = 1, #@
+      l = @[i]
+      t = mtype l
+
+      if t == DelayedLine
+        l = l\render!
+        t = "string"
+
+      switch t
+        when "string"
+          target = posmap[i] and line_for_pos posmap[i]
+
+          -- same ambiguous statement check as flatten, between adjacent
+          -- strings of the same buffer. chunks meeting across nesting levels
+          -- never need a break: block openers can't end an expression
+          prev = @[i - 1]
+          ambiguous = l\sub(1,1) == "(" and "string" == type(prev) and
+            prev\sub(-1) != ',' and prev\sub(-3) != 'end'
+
+          if target and target > state.line
+            insert buffer, ";" if ambiguous
+            insert buffer, ("\n")\rep target - state.line
+            insert buffer, indent if indent
+            state.line = target
+          elseif state.started
+            insert buffer, ambiguous and "; " or " "
+
+          insert buffer, l
+          state.started = true
+
+          if target
+            state.posmap[state.line] or= posmap[i]
+
+          state.line += 1 for _ in l\gmatch "\n"
+        when Lines
+          l\flatten_correlated line_for_pos, state,
+            indent and indent .. indent_char or indent_char, buffer
+        else
+          error "Unknown item in Lines: #{l}"
+
+    buffer
+
+  __tostring: =>
+    -- strip non-array elements
+    strip = (t) ->
+      if "table" == type t
+        [strip v for v in *t]
+      else
+        t
+
+    "Lines<#{util.dump(strip @)\sub 1, -2}>"
+
+-- Buffer for building up a line
+-- A plain old table holding either strings or Block objects.
+-- Adding a line to a line will cause that line to be merged in.
+class Line
+  pos: nil
+
+  append_list: (items, delim) =>
+    for i = 1,#items
+      @append items[i]
+      if i < #items then insert self, delim
+    nil
+
+  append: (first, ...) =>
+    if Line == mtype first
+      -- print "appending line to line", first.pos, first
+      @pos = first.pos unless @pos -- bubble pos if there isn't one
+      @append value for value in *first
+    else
+      insert self, first
+
+    if ...
+      @append ...
+
+  -- todo: try to remove concats from here
+  render: (buffer) =>
+    current = {}
+
+    add_current = ->
+      buffer\add concat current
+      buffer\mark_pos @pos
+
+    for chunk in *@
+      switch mtype chunk
+        when Block
+          for block_chunk in *chunk\render Lines!
+            if "string" == type block_chunk
+              insert current, block_chunk
+            else
+              add_current!
+              buffer\add block_chunk
+              current = {}
+        else
+          insert current, chunk
+
+    if current[1]
+      add_current!
+
+    buffer
+
+  __tostring: =>
+    "Line<#{util.dump(@)\sub 1, -2}>"
+
+class DelayedLine
+  new: (fn) =>
+    @prepare = fn
+
+  prepare: ->
+
+  render: =>
+    @prepare!
+    concat @
+
+class Block
+  header: "do"
+  footer: "end"
+
+  export_all: false
+  export_proper: false
+
+  value_compilers: value_compilers
+  statement_compilers: statement_compilers
+
+  __tostring: =>
+    h = if "string" == type @header
+      @header
+    else
+      unpack @header\render {}
+
+    "Block<#{h}> <- " .. tostring @parent
+
+  new: (@parent, @header, @footer) =>
+    @_lines = Lines!
+
+    @_names = {}
+    @_state = {}
+
+    with transform
+      @transform = {
+        value: .Value\bind self
+        statement: .Statement\bind self
+      }
+
+    if @parent
+      @root = @parent.root
+      @indent = @parent.indent + 1
+      setmetatable @_state, { __index: @parent._state }
+    else
+      @root = self
+      @indent = 0
+
+  set: (name, value) =>
+    @_state[name] = value
+
+  get: (name) =>
+    @_state[name]
+
+  get_current: (name) =>
+    rawget @_state, name
+
+  extract_assign_name: (node) =>
+    is_local = false
+    real_name = switch mtype node
+      when LocalName
+        is_local = true
+        node\get_name self
+      when NameProxy
+        node\get_name self
+      when "table"
+        node[1] == "ref" and node[2]
+      when "string"
+        -- TOOD: some legacy transfomers might use string for ref
+        node
+
+    real_name, is_local
+
+  declare: (names) =>
+    undeclared = for name in *names
+      real_name, is_local = @extract_assign_name name
+      continue unless is_local or real_name and not @has_name real_name, true
+      -- this also puts exported names so they can be assigned a new value in
+      -- deeper scope
+      @put_name real_name
+      continue if @name_exported real_name
+      real_name
+
+    undeclared
+
+  whitelist_names: (names) =>
+    @_name_whitelist = Set names
+
+  name_exported: (name) =>
+    return true if @export_all
+    return true if @export_proper and name\match"^%u"
+
+  put_name: (name, ...) =>
+    value = ...
+    value = true if select("#", ...) == 0
+
+    name = name\get_name self if NameProxy == mtype name
+    @_names[name] = value
+
+  -- record names the current construct always binds fresh (loop variables,
+  -- local statements), so they shadow any binding in an enclosing scope
+  put_fresh_names: (names) =>
+    for name in *names
+      real_name = @extract_assign_name name
+      @put_name real_name if real_name
+
+  -- the value stored for a binding by put_name, following the same scope
+  -- visibility as has_name. constant bindings store a descriptor table
+  binding_value: (name) =>
+    val = @_names[name]
+    if val == nil and @parent
+      if not @_name_whitelist or @_name_whitelist[name]
+        return @parent\binding_value name
+    val
+
+  -- Check if a name is defined in the current or any enclosing scope
+  -- skip_exports: ignore names that have been exported using `export`
+  has_name: (name, skip_exports) =>
+    return true if not skip_exports and @name_exported name
+
+    yes = @_names[name]
+    if yes == nil and @parent
+      if not @_name_whitelist or @_name_whitelist[name]
+        @parent\has_name name, true
+    else
+      yes
+
+  is_local: (node) =>
+    t = mtype node
+
+    return @has_name(node, false) if t == "string"
+    return true if t == NameProxy or t == LocalName
+
+    if t == "table"
+      if node[1] == "ref" or (node[1] == "chain" and #node == 2)
+        return @is_local node[2]
+
+    false
+
+  free_name: (prefix, dont_put) =>
+    prefix = prefix or "moon"
+    searching = true
+    name, i = nil, 0
+    while searching
+      name = concat {"", prefix, i}, "_"
+      i = i + 1
+      searching = @has_name name, true
+
+    @put_name name if not dont_put
+    name
+
+  init_free_var: (prefix, value) =>
+    name = @free_name prefix, true
+    @stm {"assign", {name}, {value}}
+    name
+
+  -- expressions that need to be coerced into statements are assigned to this name
+  discard_name: =>
+    @_discard_name or= NameProxy "scrap"
+    @_discard_name
+
+  -- add something to the line buffer
+  add: (item, pos) =>
+    with @_lines
+      \add item
+      \mark_pos pos if pos
+    item
+
+  -- todo: pass in buffer as argument
+  render: (buffer) =>
+    buffer\add @header
+    buffer\mark_pos @pos
+
+    if @next
+      buffer\add @_lines
+      @next\render buffer
+    else
+      -- join an empty block into a single line
+      if #@_lines == 0 and "string" == type buffer[#buffer]
+        buffer[#buffer] ..= " " .. (unpack Lines!\add @footer)
+      else
+        buffer\add @_lines
+        buffer\add @footer
+        buffer\mark_pos @pos
+
+    buffer
+
+  block: (header, footer) =>
+    Block self, header, footer
+
+  line: (...) =>
+    with Line!
+      \append ...
+
+  is_stm: (node) =>
+    @statement_compilers[ntype node] != nil
+
+  is_value: (node) =>
+    t = ntype node
+    @value_compilers[t] != nil or t == "value"
+
+  -- compile name for assign
+  name: (node, ...) =>
+    if type(node) == "string"
+      node
+    else
+      @value node, ...
+
+  value: (node, ...) =>
+    node = @transform.value node
+    action = if type(node) != "table"
+      "raw_value"
+    else
+      node[1]
+
+    fn = @value_compilers[action]
+    unless fn
+      error {
+        "compile-error"
+        "Failed to find value compiler for: " .. dump.value node
+        node[-1]
+      }
+
+    out = fn self, node, ...
+
+    -- store the pos, creating a line if necessary
+    if type(node) == "table" and node[-1]
+      if type(out) == "string"
+        out = with Line! do \append out
+      out.pos = node[-1]
+
+    out
+
+  values: (values, delim) =>
+    delim = delim or ', '
+    with Line!
+      \append_list [@value v for v in *values], delim
+
+  stm: (node, ...) =>
+    return if not node -- skip blank statements
+
+    -- track the most recent position for errors raised without one
+    if type(node) == "table" and node[-1]
+      @root.last_pos = node[-1]
+
+    node = @transform.statement node
+
+    result = if fn = @statement_compilers[ntype(node)]
+      fn @, node, ...
+    else
+      if value_can_be_statement node
+        @value node
+      else
+        -- coerce value into statement
+        @stm {"assign", {@discard_name!}, {node}}
+
+    if result
+      if type(node) == "table" and type(result) == "table" and node[-1]
+        result.pos = node[-1]
+      @add result
+
+    nil
+
+  stms: (stms, ret) =>
+    error "deprecated stms call, use transformer" if ret
+    {:current_stms, :current_stm_i} = @
+
+    @current_stms = stms
+    for i=1,#stms
+      @current_stm_i = i
+      @stm stms[i]
+
+    @current_stms = current_stms
+    @current_stm_i = current_stm_i
+
+    nil
+
+class RootBlock extends Block
+  new: (@options={}) =>
+    super!
+
+  __tostring: => "RootBlock<>"
+
+  root_stms: (stms) =>
+    unless @options.implicitly_return_root == false
+      stms = transform.Statement.transformers.root_stms self, stms
+    @stms stms
+
+  render: =>
+    buffer = if @options.correlate
+      source = assert @options.source,
+        "correlate option requires the original code in the source option"
+
+      state = { line: 1, posmap: {} }
+      out = @_lines\flatten_correlated line_locator(source), state
+      @posmap = state.posmap
+      out
+    else
+      @_lines\flatten!
+
+    buffer[#buffer] = nil if buffer[#buffer] == "\n"
+    table.concat buffer
+
+format_error = (msg, pos, file_str) ->
+  msg = "failed to compile: " .. tostring msg
+  return msg unless pos
+  parse_errors.format file_str, pos, msg
+
+value = (value) ->
+  out = nil
+  with RootBlock!
+    \add \value value
+    out = \render!
+  out
+
+tree = (tree, options={}) ->
+  assert tree, "missing tree"
+
+  scope = (options.scope or RootBlock) options
+
+  runner = coroutine.create ->
+    scope\root_stms tree
+
+  success, err = coroutine.resume runner
+
+  unless success
+    error_msg, error_pos = if type(err) == "table"
+      switch err[1]
+        when "user-error", "compile-error"
+          unpack err, 2
+        else
+          concat {"Unknown error thrown: #{util.dump err}", debug.traceback runner}, "\n"
+    else
+      concat {err, debug.traceback runner}, "\n"
+
+    return nil, error_msg, error_pos or scope.last_pos
+
+  lua_code = scope\render!
+  posmap = scope.posmap or scope._lines\flatten_posmap!
+  lua_code, posmap
+
+-- mmmm
+with data = require "moonscript.data"
+  for name, cls in pairs {:Line, :Lines, :DelayedLine}
+    data[name] = cls
+
+{ :tree, :value, :format_error, :Block, :RootBlock }

@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "thing"}}, {{[8] "table", {{{[10] "number", "1"}}, {{[12] "number", "2"}}}}}}
+{[16] "assign", {{[16] "table", {{{[17] "ref", "a"}}, {{[19] "ref", "b"}}}}}, {{[23] "ref", "thing"}}}
+{[30] "chain", {[30] "ref", "print"}, {"call", {{[35] "ref", "a"}, {[38] "ref", "b"}}}}

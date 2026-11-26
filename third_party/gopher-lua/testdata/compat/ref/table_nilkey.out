@@ -1,0 +1,10 @@
+true	1	2	3
+false	table index is nil
+false	table index is NaN
+false	table index is nil
+false	table index is NaN
+false	table_nilkey.lua:8: table index is nil
+false	table_nilkey.lua:9: table index is NaN
+false	table_nilkey.lua:10: table index is NaN
+nil	nil	nil	nil
+2

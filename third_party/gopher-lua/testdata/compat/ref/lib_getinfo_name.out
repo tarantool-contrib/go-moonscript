@@ -1,0 +1,22 @@
+global	gf	global
+local	lf	local
+field	f	field
+method	m	method
+field	f	field
+field	?	field
+upvalue	up	upvalue
+global	nil	
+__index	nil	
+global	nil	
+global	gf	global
+generator	(for generator)	local
+main	nil	
+main chunk	nil	
+level 0	getinfo	field
+level 0 local	g	local
+function	nil	
+coroutine	nil	
+nested	
+nested field	fn	field
+__call	mm	local
+lib_getinfo_name.lua:46: attempt to call field 'nofunc' (a nil value)

@@ -1,0 +1,14 @@
+{1,2},,{2,3}	error
+x = {{1,2},,{2,3}}	error
+x = {1,,2}	error
+x = {,}	error
+x = {;}	error
+x = {1;;2}	error
+x = {1,;2}	error
+x = {1,}	ok
+x = {1;}	ok
+x = {a = 1,}	ok
+x = {1, a = 2; [3] = 3,}	ok
+x = {1,2,,}	error
+f(1,,2)	error
+3	4

@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "file"}}, {{"with", {[12] "chain", {[12] "ref", "File"}, {"call", {{[17] "string", """, "favorite_foods.txt"}}}}, {{[41] "chain", {"colon", "set_encoding"}, {"call", {{[54] "string", """, "utf8"}}}}}}}}

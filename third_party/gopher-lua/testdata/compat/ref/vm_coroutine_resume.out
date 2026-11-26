@@ -1,0 +1,26 @@
+R	true
+one	nil	nil
+R	true
+0	nil
+R	true
+x	nil
+R	true
+1	2
+R	true
+dead
+true	tail
+suspended
+true	back	2
+dead
+1	2
+f	x	nil
+
+4
+fin
+true	1
+true
+true	1	2	3
+dead
+gen	1
+gen	2
+gen	3

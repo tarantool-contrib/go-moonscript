@@ -1,0 +1,30 @@
+{[3] "number", "121"}
+{[7] "number", "121.2323"}
+{[16] "number", "121.2323e-1"}
+{[28] "number", "121.2323e13434"}
+{[43] "number", "2323E34"}
+{[51] "number", "0x12323"}
+{[60] "number", "0xfF2323"}
+{[69] "number", "0xabcdef"}
+{[78] "number", "0xABCDEF"}
+{[88] "number", ".2323"}
+{[94] "number", ".2323e-1"}
+{[103] "number", ".2323e13434"}
+{[117] "number", "1LL"}
+{[121] "number", "1ULL"}
+{[126] "number", "9332LL"}
+{[133] "number", "9332"}
+{[138] "number", "0x2aLL"}
+{[145] "number", "0x2aULL"}
+{[154] "string", "[[", " hello world "}
+{[173] "string", "[=[", " hello world "}
+{[193] "string", "[====[", " hello world "}
+{[220] "string", """, "another world"}
+{[237] "string", "'", "what world"}
+{[252] "string", """, "
+hello world
+"}
+{[269] "string", "'", "yeah
+what is going on
+here is something cool"}
+{[318] "ref", "nil"}

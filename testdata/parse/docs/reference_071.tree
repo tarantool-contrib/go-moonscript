@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "inv"}}, {{[6] "chain", {[6] "ref", "Inventory"}, {"call", {}}}}}
+{[18] "chain", {[18] "ref", "inv"}, {"colon", "add_item"}, {"call", {{[30] "string", """, "t-shirt"}}}}
+{[41] "chain", {[41] "ref", "inv"}, {"colon", "add_item"}, {"call", {{[53] "string", """, "pants"}}}}

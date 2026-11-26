@@ -1,0 +1,39 @@
+false	vm_error_levels.lua:9: x
+false	vm_error_levels.lua:10: x
+false	x
+false	vm_error_levels.lua:14: lvl2
+false	vm_error_levels.lua:21: lvl3
+false	vm_error_levels.lua:8: x
+false	x
+false	x
+false	x
+false	vm_error_levels.lua:27: x
+false	x
+false	vm_error_levels.lua:29: 42
+false	42
+false	vm_error_levels.lua:31: 1.5
+false	vm_error_levels.lua:32: 1e+100
+false	vm_error_levels.lua:33: inf
+string
+true
+number
+true
+table
+true
+false	nil
+false	nil
+false	true
+false	false
+false	nil
+false	msg
+false	vm_error_levels.lua:8: msg
+false	msg
+false	in co
+false	vm_error_levels.lua:47: in co2
+false	vm_error_levels.lua:49: in co3
+false	vm_error_levels.lua:52: tail
+false	tail2
+false	tail4
+false	vm_error_levels.lua:61: idx
+false	idx
+false	bad argument #1 to '?' (string expected, got no value)

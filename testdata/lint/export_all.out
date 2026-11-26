@@ -1,0 +1,7 @@
+exit 1
+export_all.moon
+
+line 8: assigned but unused `lower`
+===================================
+>   lower = 2
+

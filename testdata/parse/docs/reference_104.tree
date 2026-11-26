@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "table", {{{"key_literal", "x"}, {[4] "self", "x"}}, {{"key_literal", "y"}, {[11] "chain", {[11] "ref", "obj"}, {"dot", "y"}}}, {{"key_literal", "z"}, {[21] "chain", {[21] "ref", "obj"}, {"index", {[26] "string", """, "z"}}}}}}}, {{[33] "ref", "point"}}}

@@ -1,0 +1,12 @@
+-- go-moonscript: next with a key that is not in the table raises an error.
+print(pcall(next, {}, 'nokey'))
+print(pcall(next, {1,2}, 5))
+print(pcall(next, {a=1,b=2,c=3}, 'zz'))
+print(pcall(next, {1,2,3}, 0))
+print(pcall(next, {1,2,3}, 1.5))
+print(pcall(next, {1,2,3}, 3))
+print(pcall(next, {[0]=1}, 0))
+print(pcall(function() for k in pairs({a=1}) do end local f, s = pairs({a=1}) return f(s, 'b') end))
+local t = {a=1, b=2, c=3} local k = next(t) t[k] = nil print((pcall(next, t, k)))
+local t2 = {} for i = 1, 100 do t2[i * 7] = i end local n = 0 for k, v in pairs(t2) do t2[k] = nil n = n + 1 end print(n, next(t2))
+print(pcall(next, {nil, nil, 3}, 2))

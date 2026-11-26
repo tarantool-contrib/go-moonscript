@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "ref", "my_env"}}, {{[9] "table", {{{"key_literal", "secret_function"}, {[30] "fndef", {}, {}, "slim", {{[33] "chain", {[33] "ref", "print"}, {"call", {{[39] "string", """, "shhh this is secret"}}}}}}}, {{"key_literal", "say_hi"}, {[71] "fndef", {}, {}, "slim", {{[74] "chain", {[74] "ref", "print"}, {"call", {{[80] "string", """, "hi there!"}}}}}}}}}}}
+{[96] "assign", {{[96] "ref", "say_hi"}}, {{[104] "fndef", {}, {}, "slim", {{[107] "chain", {[107] "ref", "print"}, {"call", {{[113] "string", """, "I am a closure"}}}}}}}}
+{[132] "assign", {{[132] "ref", "fn"}}, {{[136] "fndef", {}, {}, "slim", {{[142] "chain", {[142] "ref", "secret_function"}, {"call", {}}}, {[161] "chain", {[161] "ref", "say_hi"}, {"call", {}}}}}}}
+{[170] "chain", {[170] "ref", "run_with_scope"}, {"call", {{[184] "ref", "fn"}, {[188] "ref", "my_env"}}}}

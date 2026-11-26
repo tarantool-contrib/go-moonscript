@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "draw"}}, {{[7] "fndef", {{{"table", {{{[10] "ref", "label"}}, {{"key_literal", "pos"}, {[21] "table", {{{[23] "ref", "x"}}, {{[25] "ref", "y"}}}}}}}}}, {}, "slim", {{[36] "chain", {[36] "ref", "print"}, {"call", {{[41] "ref", "label"}, {[48] "ref", "x"}, {[51] "ref", "y"}}}}}}}}
+{[55] "chain", {[55] "ref", "draw"}, {"call", {{[59] "table", {{{[61] "string", """, "origin"}}, {{"key_literal", "pos"}, {[76] "table", {{{[78] "number", "0"}}, {{[80] "number", "0"}}}}}}}}}}

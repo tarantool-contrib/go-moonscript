@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "sum"}}, {{[6] "fndef", {{"x"}, {"y"}}, {}, "slim", {{[16] "exp", {[16] "ref", "x"}, "+", {[20] "ref", "y"}}}}}}
+{[23] "chain", {[23] "ref", "print"}, {"call", {{[28] "string", """, "The sum is "}, {[43] "chain", {[43] "ref", "sum"}, {"call", {{[47] "number", "10"}, {[51] "number", "20"}}}}}}}

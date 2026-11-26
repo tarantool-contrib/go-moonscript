@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "obj"}}, {{[6] "table", {{{"key_literal", "hello"}, {[17] "string", """, "world"}}, {{"key_literal", "day"}, {[32] "string", """, "tuesday"}}, {{"key_literal", "length"}, {[52] "number", "20"}}}}}}
+{[59] "assign", {{[59] "table", {{{"key_literal", "hello"}, {[66] "ref", "hello"}}, {{"key_literal", "day"}, {[78] "ref", "the_day"}}}}}, {{[89] "ref", "obj"}}}
+{[94] "chain", {[94] "ref", "print"}, {"call", {{[99] "ref", "hello"}, {[106] "ref", "the_day"}}}}

@@ -1,0 +1,51 @@
+return nil [C]:-1
+line 25 errors.lua:25
+call nil [C]:-1
+call nil errors.lua:11
+line 11 errors.lua:11
+call nil [C]:-1
+return nil [C]:-1
+line 26 errors.lua:26
+call nil [C]:-1
+call nil errors.lua:15
+line 15 errors.lua:15
+line 16 errors.lua:16
+call nil errors.lua:15
+line 15 errors.lua:15
+line 16 errors.lua:16
+call nil errors.lua:15
+line 15 errors.lua:15
+call nil errors.lua:11
+line 11 errors.lua:11
+call nil [C]:-1
+return nil [C]:-1
+line 27 errors.lua:27
+call nil [C]:-1
+call nil errors.lua:27
+line 27 errors.lua:27
+call nil errors.lua:11
+line 11 errors.lua:11
+call nil [C]:-1
+call nil errors.lua:21
+line 21 errors.lua:21
+return nil errors.lua:21
+return nil [C]:-1
+line 28 errors.lua:28
+call nil [C]:-1
+call nil [C]:-1
+return nil [C]:-1
+line 29 errors.lua:29
+call nil [C]:-1
+return nil 6
+count 0
+line 41 6
+count 0
+line 42 6
+count 0
+call nil 6
+count 0
+false	errors.lua:11: boom
+false	errors.lua:11: deep
+false	handled: errors.lua:11: x
+false	nil
+false	hook error at 61	true	4	nil

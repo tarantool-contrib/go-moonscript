@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "ref", "hair"}}, {{[7] "string", """, "golden"}}}
+{[17] "assign", {{[17] "ref", "height"}}, {{[25] "number", "200"}}}
+{[30] "assign", {{[30] "ref", "person"}}, {{[38] "table", {{{"key_literal", "hair"}, {[46] "ref", "hair"}}, {{"key_literal", "height"}, {[55] "ref", "height"}}, {{"key_literal", "shoe_size"}, {[67] "number", "40"}}}}}}
+{[74] "chain", {[74] "ref", "print_table"}, {"call", {{[85] "table", {{{"key_literal", "hair"}, {[91] "ref", "hair"}}, {{"key_literal", "height"}, {[100] "ref", "height"}}}}}}}

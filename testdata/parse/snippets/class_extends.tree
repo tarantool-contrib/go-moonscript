@@ -1,0 +1,1 @@
+{[1] "class", "A", {[16] "ref", "B"}, {{"props", {{"key_literal", "f"}, {[23] "fndef", {}, {}, "fat", {{[26] "chain", {[26] "ref", "super"}, {"call", {}}}}}}}}}

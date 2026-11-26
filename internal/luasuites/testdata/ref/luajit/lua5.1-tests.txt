@@ -1,0 +1,46 @@
+### --setup exit=0
+RESULT	pass
+### api.lua exit=0
+NOTE	 >>> testC not active: skipping API tests <<<
+RESULT	pass
+### attrib.lua exit=0
+NOTE	 >>> cannot load dynamic library <<<
+RESULT	pass
+### big.lua exit=0
+RESULT	pass
+### calls.lua exit=0
+RESULT	pass
+### closure.lua exit=124
+### code.lua exit=0
+NOTE	 >>> testC not active: skipping opcode tests <<<
+RESULT	pass
+### constructs.lua exit=0
+RESULT	fail	constructs.lua:205	constructs.lua:205: attempt to call field 'mod' (a nil value)
+### db.lua exit=1
+### errors.lua exit=0
+RESULT	fail	errors.lua:75	errors.lua:75: assertion failed!
+### events.lua exit=0
+RESULT	pass
+### files.lua exit=0
+RESULT	pass
+### gc.lua exit=0
+RESULT	pass
+### literals.lua exit=0
+NOTE	 >>> pt_BR locale not available: skipping decimal point tests <<<
+RESULT	pass
+### locals.lua exit=0
+RESULT	pass
+### math.lua exit=0
+RESULT	fail	math.lua:103	math.lua:103: attempt to call field 'mod' (a nil value)
+### nextvar.lua exit=0
+RESULT	fail	nextvar.lua:204	nextvar.lua:204: attempt to call field 'mod' (a nil value)
+### pm.lua exit=0
+RESULT	fail	pm.lua:226	pm.lua:226: assertion failed!
+### sort.lua exit=0
+RESULT	pass
+### strings.lua exit=0
+RESULT	fail	strings.lua:105	strings.lua:105: assertion failed!
+### vararg.lua exit=0
+RESULT	fail	vararg.lua:6	vararg.lua:6: assertion failed!
+### verybig.lua exit=0
+RESULT	pass

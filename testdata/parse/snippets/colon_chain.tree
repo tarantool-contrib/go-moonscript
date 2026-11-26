@@ -1,0 +1,4 @@
+{[1] "chain", {[1] "ref", "a"}, {"colon", "b"}, {"call", {}}}
+{[6] "chain", {[6] "ref", "a"}, {"colon", "b"}, {"call", {{[9] "ref", "c"}}}}
+{[12] "chain", {[12] "ref", "a"}, {"dot", "b"}, {"colon", "c"}, {"call", {{[18] "number", "1"}}}, {"colon", "d"}, {"call", {}}}
+{[24] "chain", {[24] "ref", "a"}, {"colon", "b"}, {"call", {}}, {"dot", "c"}, {"colon", "d"}, {"call", {{[32] "string", """, "x"}}}}

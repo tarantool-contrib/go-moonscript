@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "y"}}, {{[4] "table", {{{[6] "chain", {[6] "ref", "my_func"}, {"call", {{[14] "number", "1"}, {[17] "number", "2"}, {[19] "number", "3"}, {[25] "number", "4"}, {[27] "number", "5"}}}}}, {{[32] "number", "5"}}, {{[34] "number", "6"}}, {{[36] "number", "7"}}}}}}

@@ -1,0 +1,115 @@
+name: CI
+
+# lint: golangci-lint (go vet, staticcheck, ...; formatting) and go vet over
+# every package but the vendored gopher-lua.
+# generate: the generated files (parse/parser_gen.go, runtime/lua), go.mod
+# and third_party/gopher-lua/moonscript.patch are up to date.
+# test: the test suite on the oldest and the newest supported Go, and
+# pristine gopher-lua's own suites against the patched copy; the race
+# detector and coverage on the newest.
+#
+# Weekly, everything runs again, against the latest patch release of each
+# Go version.
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOLANGCI_LINT_VERSION: v2.15.0
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27.x'
+
+      - name: go vet
+        run: go vet $(go list ./... | grep -v /third_party/)
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27.x'
+
+      - name: go mod tidy
+        run: go mod tidy -diff
+
+      - name: third_party/gopher-lua/moonscript.patch
+        run: scripts/gen-gopher-lua-patch.sh --check
+
+      - name: go generate
+        run: |
+          go generate ./...
+          git add -N .
+          git diff --exit-code --stat || {
+            echo "::error::generated files are out of date: run go generate ./... and commit the result"
+            git diff
+            exit 1
+          }
+
+  test:
+    name: test (Go ${{ matrix.go }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.26.x', '1.27.x']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: go test
+        run: go test ./...
+
+      - name: pristine gopher-lua suites against third_party/gopher-lua
+        run: scripts/check-gopher-lua-suite.sh
+
+      - name: go test -race, with coverage
+        if: matrix.go == '1.27.x'
+        run: |
+          go test -race -coverprofile=coverage.out \
+            -coverpkg=$(go list ./... | grep -v -e /third_party/ -e /internal/tools/ | paste -sd, -) ./...
+          {
+            echo '### Coverage'
+            echo
+            echo '```'
+            go tool cover -func=coverage.out | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.go == '1.27.x'
+        with:
+          name: coverage
+          path: coverage.out

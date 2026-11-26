@@ -1,0 +1,3 @@
+moon: docs/reference_101.moon:1: (3) attempt to call global 'File' (a nil value)
+stack traceback:
+	docs/reference_101.moon:1: (3) in main chunk

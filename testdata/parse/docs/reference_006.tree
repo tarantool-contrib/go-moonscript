@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "func_a"}}, {{[9] "fndef", {}, {}, "slim", {{[12] "chain", {[12] "ref", "print"}, {"call", {{[18] "string", """, "hello world"}}}}}}}}
+{[34] "assign", {{[34] "ref", "func_b"}}, {{[42] "fndef", {}, {}, "slim", {{[48] "assign", {{[48] "ref", "value"}}, {{[55] "number", "100"}}}, {[62] "chain", {[62] "ref", "print"}, {"call", {{[67] "string", """, "The value:"}, {[81] "ref", "value"}}}}}}}}

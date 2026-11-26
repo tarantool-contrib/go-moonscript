@@ -1,0 +1,35 @@
+exit 1
+imports.moon
+
+line 5: assigning to constant `remove`
+======================================
+> remove = nil
+
+line 6: assigning to constant `concat`
+======================================
+> concat ..= "x"
+
+line 9: assigning to constant `insert`
+======================================
+>   insert = 5
+
+line 13: assigning to constant `insert`
+=======================================
+>   import insert from require "other"
+
+line 17: assigning to constant `concat`
+=======================================
+>   import concat from table
+
+line 22: import overwrites existing binding `remove2`
+=====================================================
+>   import remove2 from table
+
+line 25: assigning to constant `insert`
+=======================================
+> {insert, z} = {1, 2}
+
+line 27: accessing global `obj`
+===============================
+> import \colon_name from obj
+

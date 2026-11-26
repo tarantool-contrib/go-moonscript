@@ -1,0 +1,2 @@
+{[1] "chain", {[1] "ref", "my_function"}, {"call", {{[12] "table", {{{"key_literal", "dance"}, {[19] "string", """, "Tango"}}, {{"key_literal", "partner"}, {[37] "string", """, "none"}}}}}}}
+{[46] "assign", {{[46] "ref", "y"}}, {{[49] "table", {{{"key_literal", "type"}, {[55] "string", """, "dog"}}, {{"key_literal", "legs"}, {[68] "number", "4"}}, {{"key_literal", "tails"}, {[78] "number", "1"}}}}}}

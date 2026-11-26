@@ -1,0 +1,1 @@
+{[2] "table", {{{"key_literal", "Statement"}, {[16] "chain", {[16] "ref", "require"}, {"call", {{[24] "string", """, "moonscript.transform.statement"}}}}}, {{"key_literal", "Value"}, {[66] "chain", {[66] "ref", "require"}, {"call", {{[74] "string", """, "moonscript.transform.value"}}}}}}}

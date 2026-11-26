@@ -1,0 +1,45 @@
+classes	.	-l classes.moon
+classes.compact	.	-l --lint-format compact classes.moon
+clean	.	-l clean.moon
+clean.compact	.	-l --lint-format compact clean.moon
+compile_error	.	-l compile_error.moon
+compile_error.compact	.	-l --lint-format compact compile_error.moon
+control	.	-l control.moon
+control.compact	.	-l --lint-format compact control.moon
+crlf	.	-l crlf.moon
+crlf.compact	.	-l --lint-format compact crlf.moon
+empty	.	-l empty.moon
+empty.compact	.	-l --lint-format compact empty.moon
+export_all	.	-l export_all.moon
+export_all.compact	.	-l --lint-format compact export_all.moon
+globals	.	-l globals.moon
+globals.compact	.	-l --lint-format compact globals.moon
+imports	.	-l imports.moon
+imports.compact	.	-l --lint-format compact imports.moon
+many_names	.	-l many_names.moon
+many_names.compact	.	-l --lint-format compact many_names.moon
+parse_error	.	-l parse_error.moon
+parse_error.compact	.	-l --lint-format compact parse_error.moon
+stages	.	-l stages.moon
+stages.compact	.	-l --lint-format compact stages.moon
+unused	.	-l unused.moon
+unused.compact	.	-l --lint-format compact unused.moon
+utf8	.	-l utf8.moon
+utf8.compact	.	-l --lint-format compact utf8.moon
+stages.only-unused	.	-l --lint-stage unused stages.moon
+stages.two	.	-l --lint-stage constant_assign --lint-stage import_overwrite stages.moon
+stages.exclude	.	-l --exclude-lint-stage global_access --exclude-lint-stage unused stages.moon
+stages.exclude-compact	.	-l --lint-format=compact --exclude-lint-stage constant_assign stages.moon
+multi	.	-l globals.moon parse_error.moon clean.moon missing.moon unused.moon globals.moon
+multi.compact	.	-l --lint-format compact stages.moon clean.moon crlf.moon
+multi.crash	.	-l stages.moon compile_error.moon unused.moon
+dir	.	-l dir
+dir.slash	.	-l --lint-format compact dir/
+stdin	.	-l - <stages.moon
+stdin.compact	.	-l --lint-format compact - <stages.moon
+stdin.clean	.	-l - <clean.moon
+stdin.parse-error	.	-l - <parse_error.moon
+stdin.crash	.	-l - <compile_error.moon
+config.app	config	-l app/main.moon thing_spec.moon
+config.compact	config	-l --lint-format compact thing_spec.moon app/main.moon ./app/main.moon
+config.stdin	config	-l - <thing_spec.moon

@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "items"}}, {{[8] "table", {{{[10] "number", "1"}}, {{[13] "number", "2"}}, {{[16] "number", "3"}}, {{[19] "number", "4"}}}}}}
+{[24] "assign", {{[24] "ref", "doubled"}}, {{[33] "comprehension", {"exp", {[35] "ref", "item"}, "*", {[41] "number", "2"}}, {{"foreach", {"i", "item"}, {[58] "chain", {[58] "ref", "ipairs"}, {"call", {{[65] "ref", "items"}}}}}}}}}

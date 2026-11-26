@@ -1,0 +1,6 @@
+{[2] "assign", {{[2] "ref", "hello"}}, {{[9] "string", """, "hello"}}}
+{[18] "assign", {{[18] "ref", "world"}}, {{[25] "string", """, "world"}}}
+{[35] "fndef", {}, {"nil"}, "slim", {{[52] "assign", {{[52] "ref", "hello"}}, {{[59] "number", "3223"}}}}}
+{[66] "fndef", {{"a"}}, {"nil"}, "slim", {{[85] "assign", {{[85] "ref", "hello"}}, {{[92] "number", "3223"}}}, {[100] "assign", {{[100] "ref", "a"}}, {{[103] "number", "323"}}}}}
+{[109] "fndef", {{"a"}, {"b"}, {"c"}}, {"a", "b", "c"}, "slim", {{[134] "assign", {{[134] "ref", "a"}, {[136] "ref", "b"}, {[138] "ref", "c"}}, {{[141] "number", "1"}, {[144] "number", "2"}, {[146] "number", "3"}}}, {[150] "assign", {{[150] "ref", "world"}}, {{[157] "number", "12321"}}}}}
+{[165] "fndef", {{"a"}, {"e"}, {"f"}}, {"a", "b", "c", "hello"}, "slim", {{[197] "assign", {{[197] "ref", "a"}, {[199] "ref", "b"}, {[201] "ref", "c"}}, {{[204] "number", "1"}, {[207] "number", "2"}, {[209] "number", "3"}}}, {[213] "assign", {{[213] "ref", "hello"}}, {{[220] "number", "12321"}}}, {[229] "assign", {{[229] "ref", "world"}}, {{[236] "string", """, "yeah"}}}}}

@@ -1,0 +1,149 @@
+vm_error_names.lua:12: attempt to perform arithmetic on upvalue 'x' (a nil value)
+vm_error_names.lua:13: attempt to perform arithmetic on local 'a' (a nil value)
+vm_error_names.lua:14: attempt to index field 'b' (a nil value)
+vm_error_names.lua:15: attempt to concatenate global 'y' (a nil value)
+vm_error_names.lua:16: attempt to concatenate global 'y' (a table value)
+vm_error_names.lua:17: attempt to index field 'z' (a nil value)
+vm_error_names.lua:18: attempt to call method 'm' (a nil value)
+vm_error_names.lua:19: attempt to call field 'f' (a nil value)
+vm_error_names.lua:20: attempt to call global 'glob' (a nil value)
+vm_error_names.lua:21: attempt to call upvalue 'x' (a nil value)
+vm_error_names.lua:22: attempt to compare two table values
+vm_error_names.lua:23: attempt to compare number with nil
+vm_error_names.lua:24: attempt to compare table with number
+vm_error_names.lua:25: attempt to get length of a nil value
+vm_error_names.lua:26: attempt to get length of upvalue 'x' (a nil value)
+vm_error_names.lua:27: attempt to perform arithmetic on a table value
+vm_error_names.lua:28: attempt to perform arithmetic on local 's' (a table value)
+vm_error_names.lua:29: 'for' initial value must be a number
+vm_error_names.lua:30: 'for' limit must be a number
+vm_error_names.lua:31: 'for' step must be a number
+1
+2
+nil
+vm_error_names.lua:33: attempt to call a nil value
+vm_error_names.lua:34: attempt to concatenate field 'a' (a nil value)
+vm_error_names.lua:35: attempt to concatenate field 'a' (a table value)
+vm_error_names.lua:36: attempt to concatenate field 'a' (a table value)
+vm_error_names.lua:37: attempt to perform arithmetic on a string value
+vm_error_names.lua:38: attempt to perform arithmetic on a nil value
+vm_error_names.lua:39: attempt to perform arithmetic on a string value
+vm_error_names.lua:40: attempt to concatenate a table value
+vm_error_names.lua:41: attempt to concatenate local 'a' (a table value)
+vm_error_names.lua:42: attempt to index field 'x' (a nil value)
+vm_error_names.lua:43: attempt to index local 't' (a nil value)
+vm_error_names.lua:44: attempt to index local 't' (a nil value)
+vm_error_names.lua:45: attempt to index upvalue 'x' (a nil value)
+vm_error_names.lua:46: attempt to index field 'x' (a nil value)
+vm_error_names.lua:47: attempt to index upvalue 'u' (a nil value)
+vm_error_names.lua:48: attempt to perform arithmetic on upvalue 'u' (a nil value)
+vm_error_names.lua:49: attempt to call upvalue 'u' (a nil value)
+vm_error_names.lua:50: attempt to call field 'foo' (a nil value)
+vm_error_names.lua:51: attempt to call method 'nope' (a nil value)
+vm_error_names.lua:52: attempt to compare two boolean values
+vm_error_names.lua:53: attempt to compare string with number
+vm_error_names.lua:54: attempt to perform arithmetic on local 'b' (a nil value)
+vm_error_names.lua:55: attempt to index local 'a' (a nil value)
+vm_error_names.lua:56: attempt to index local 'a' (a nil value)
+vm_error_names.lua:57: attempt to index a nil value
+vm_error_names.lua:58: attempt to index a nil value
+vm_error_names.lua:59: attempt to index local 'x' (a nil value)
+vm_error_names.lua:60: attempt to index a nil value
+vm_error_names.lua:61: attempt to index a nil value
+vm_error_names.lua:62: attempt to index field 'a' (a nil value)
+vm_error_names.lua:63: attempt to index field '?' (a nil value)
+vm_error_names.lua:64: attempt to index field '?' (a nil value)
+vm_error_names.lua:65: attempt to index field 'x' (a nil value)
+vm_error_names.lua:66: attempt to call method 'y' (a nil value)
+vm_error_names.lua:67: attempt to index upvalue 'up' (a nil value)
+vm_error_names.lua:68: attempt to index upvalue 'up' (a nil value)
+vm_error_names.lua:69: attempt to index field 'nope' (a nil value)
+vm_error_names.lua:70: attempt to get length of field 'a' (a nil value)
+vm_error_names.lua:71: attempt to perform arithmetic on field 'a' (a nil value)
+vm_error_names.lua:72: attempt to concatenate field 'a' (a nil value)
+vm_error_names.lua:73: attempt to concatenate field 'b' (a nil value)
+vm_error_names.lua:74: attempt to concatenate a table value
+vm_error_names.lua:75: attempt to perform arithmetic on field 'q' (a nil value)
+vm_error_names.lua:76: attempt to perform arithmetic on field 'q' (a nil value)
+vm_error_names.lua:77: attempt to perform arithmetic on field 'q' (a nil value)
+vm_error_names.lua:78: attempt to perform arithmetic on upvalue 'up' (a nil value)
+vm_error_names.lua:79: attempt to perform arithmetic on local 'x' (a nil value)
+vm_error_names.lua:80: attempt to call field 'f' (a number value)
+vm_error_names.lua:81: attempt to call field 'f' (a nil value)
+vm_error_names.lua:82: attempt to index field 'g' (a nil value)
+vm_error_names.lua:83: attempt to call local 'f' (a nil value)
+vm_error_names.lua:84: attempt to call local 'f' (a nil value)
+vm_error_names.lua:85: attempt to index field 'b' (a nil value)
+vm_error_names.lua:86: attempt to index upvalue 'up' (a nil value)
+vm_error_names.lua:87: attempt to index upvalue 'up' (a nil value)
+vm_error_names.lua:88: attempt to index global 'undefinedglobal' (a nil value)
+vm_error_names.lua:89: attempt to index a number value
+vm_error_names.lua:90: attempt to index a number value
+vm_error_names.lua:91: attempt to index local 'x' (a nil value)
+vm_error_names.lua:92: attempt to index local 'v' (a number value)
+vm_error_names.lua:93: attempt to call local 'k' (a number value)
+vm_error_names.lua:94: attempt to call local 'q' (a nil value)
+vm_error_names.lua:95: attempt to index local 'q' (a nil value)
+vm_error_names.lua:96: attempt to index field 'y' (a nil value)
+vm_error_names.lua:97: attempt to index local 'a' (a nil value)
+vm_error_names.lua:98: attempt to index local 'a' (a boolean value)
+vm_error_names.lua:99: attempt to index local 'a' (a boolean value)
+vm_error_names.lua:100: attempt to index local 'a' (a nil value)
+nil
+vm_error_names.lua:102: attempt to index local 'a' (a nil value)
+vm_error_names.lua:103: attempt to index field 'y' (a nil value)
+vm_error_names.lua:104: attempt to call method 'nope' (a nil value)
+vm_error_names.lua:105: attempt to index field 'huge' (a number value)
+vm_error_names.lua:106: attempt to index field 'y' (a nil value)
+vm_error_names.lua:107: attempt to index local 'n' (a number value)
+vm_error_names.lua:108: attempt to perform arithmetic on a table value
+vm_error_names.lua:109: attempt to perform arithmetic on a table value
+vm_error_names.lua:110: attempt to perform arithmetic on field 'a' (a nil value)
+vm_error_names.lua:111: attempt to perform arithmetic on field 'b' (a nil value)
+vm_error_names.lua:112: attempt to compare table with number
+vm_error_names.lua:113: attempt to compare two function values
+vm_error_names.lua:114: attempt to compare number with string
+vm_error_names.lua:115: attempt to compare two table values
+vm_error_names.lua:116: attempt to index field 'x' (a nil value)
+vm_error_names.lua:117: attempt to index local 'f' (a function value)
+vm_error_names.lua:118: attempt to call local 'b' (a boolean value)
+vm_error_names.lua:119: attempt to index local 'b' (a boolean value)
+vm_error_names.lua:120: attempt to call a nil value
+vm_error_names.lua:121: attempt to call a number value
+vm_error_names.lua:122: attempt to call a table value
+vm_error_names.lua:123: attempt to call field 'missing' (a nil value)
+vm_error_names.lua:124: attempt to index field 'a' (a nil value)
+vm_error_names.lua:125: attempt to index upvalue 'x' (a number value)
+vm_error_names.lua:126: attempt to index upvalue 'x' (a nil value)
+vm_error_names.lua:127: attempt to index field 'x' (a nil value)
+vm_error_names.lua:128: attempt to index upvalue 'u' (a nil value)
+vm_error_names.lua:130: attempt to compare two string values
+vm_error_names.lua:131: attempt to compare two thread values
+vm_error_names.lua:132: attempt to index upvalue 'co' (a thread value)
+vm_error_names.lua:133: attempt to get length of upvalue 'co' (a thread value)
+vm_error_names.lua:134: attempt to compare two thread values
+vm_error_names.lua:136: attempt to index a number value
+vm_error_names.lua:137: attempt to index field 'y' (a nil value)
+vm_error_names.lua:141: loop in gettable
+vm_error_names.lua:142: loop in settable
+vm_error_names.lua:145: attempt to concatenate upvalue 'cc' (a table value)
+vm_error_names.lua:146: attempt to concatenate local 's' (a table value)
+vm_error_names.lua:147: attempt to concatenate field 'q' (a nil value)
+vm_error_names.lua:148: attempt to concatenate a boolean value
+vm_error_names.lua:150: attempt to index field 'f' (a nil value)
+vm_error_names.lua:151: attempt to call method 'nope' (a nil value)
+vm_error_names.lua:152: attempt to index field 'x' (a nil value)
+vm_error_names.lua:153: attempt to call method 'y' (a nil value)
+vm_error_names.lua:154: attempt to call field '?' (a nil value)
+vm_error_names.lua:155: attempt to call field '?' (a nil value)
+vm_error_names.lua:156: attempt to call field '?' (a nil value)
+vm_error_names.lua:158: attempt to index local 'c' (a nil value)
+vm_error_names.lua:159: attempt to index local 'b' (a nil value)
+vm_error_names.lua:160: attempt to index upvalue 'up' (a nil value)
+vm_error_names.lua:161: attempt to index local 't' (a nil value)
+vm_error_names.lua:162: attempt to index field 'next' (a nil value)
+vm_error_names.lua:163: attempt to index local 'v' (a number value)
+vm_error_names.lua:164: attempt to index local 'b' (a nil value)
+vm_error_names.lua:165: attempt to index local 'v' (a nil value)
+vm_error_names.lua:166: attempt to index field 'a' (a nil value)
+vm_error_names.lua:167: attempt to index field 'c' (a nil value)

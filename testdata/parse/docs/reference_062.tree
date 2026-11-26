@@ -1,0 +1,1 @@
+{"decorated", {[1] "chain", {[1] "ref", "print"}, {"call", {{[6] "string", """, "You're lucky!"}}}}, {"unless", {"exp", {[29] "chain", {[29] "ref", "math"}, {"dot", "random"}, {"call", {}}}, ">", {[44] "number", "0.1"}}}}

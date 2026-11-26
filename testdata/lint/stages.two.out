@@ -1,0 +1,11 @@
+exit 1
+stages.moon
+
+line 2: assigning to constant `insert`
+======================================
+> insert = 5
+
+line 7: assigning to constant `insert`
+======================================
+>   import insert from table
+

@@ -1,0 +1,1 @@
+{[1] "with", {[5] "chain", {[5] "ref", "require"}, {"call", {{[13] "string", """, "moonscript.base"}}}}, {{[34] "chain", {"dot", "insert_loader"}, {"call", {}}}}}

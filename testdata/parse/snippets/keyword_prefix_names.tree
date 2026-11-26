@@ -1,0 +1,5 @@
+{[1] "assign", {{[1] "ref", "iffy"}}, {{[7] "number", "1"}}}
+{[10] "assign", {{[10] "ref", "classy"}}, {{[18] "number", "2"}}}
+{[21] "assign", {{[21] "ref", "done"}}, {{[27] "number", "3"}}}
+{[30] "assign", {{[30] "ref", "notx"}}, {{[36] "number", "4"}}}
+{[39] "assign", {{[39] "ref", "or_else"}}, {{[48] "number", "5"}}}

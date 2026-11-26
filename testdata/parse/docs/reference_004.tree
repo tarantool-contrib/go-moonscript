@@ -1,0 +1,2 @@
+{[1] "assign", {{[1] "ref", "some_string"}}, {{[14] "string", """, "Here is a string
+  that has a line break in it."}}}

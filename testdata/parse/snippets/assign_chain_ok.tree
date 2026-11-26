@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "chain", {[1] "ref", "a"}, {"dot", "b"}, {"dot", "c"}}}, {{[8] "number", "1"}}}
+{[11] "assign", {{[11] "chain", {[11] "ref", "a"}, {"index", {[13] "number", "1"}}}}, {{[17] "number", "2"}}}
+{[20] "assign", {{[20] "chain", {[20] "ref", "a"}, {"call", {}}, {"dot", "b"}}}, {{[26] "number", "3"}}}
+{[29] "assign", {{[29] "chain", {[29] "ref", "a"}, {"colon", "b"}, {"call", {}}, {"dot", "c"}}}, {{[37] "number", "4"}}}

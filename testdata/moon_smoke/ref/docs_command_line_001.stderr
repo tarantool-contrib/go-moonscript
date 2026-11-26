@@ -1,0 +1,4 @@
+moon: docs/command_line_001.moon:1: (3) attempt to perform arithmetic on global 'z' (a nil value)
+stack traceback:
+	docs/command_line_001.moon:1: (3) in function 'add_numbers'
+	docs/command_line_001.moon:2: (5) in main chunk

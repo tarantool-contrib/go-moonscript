@@ -1,0 +1,14 @@
+ab34.5-6z	a, b, 3, 4.5, -6, , z	b34.5
+3-4.5--6--z	z	[]
+[]	[]	1
+xy	true
+false	false
+100000	123456789012	67890
+31	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0
+198893
+10203	11.52
+false	invalid value (nil) at index 4 in table for 'concat'
+false	invalid value (nil) at index 0 in table for 'concat'
+true	a,b
+false	invalid value (table) at index 2 in table for 'concat'
+1.5 9.007199254741e+15 1e+100 -0.25

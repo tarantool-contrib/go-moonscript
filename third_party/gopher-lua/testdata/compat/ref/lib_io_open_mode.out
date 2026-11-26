@@ -1,0 +1,24 @@
+w	file	true	nil	abc
+r	file	true	abc	abc
+rb	file	true	abc	abc
+r+	file	true	Xbc	Xbc
+r+b	file	true	Ybc	Ybc
+rb+	file	true	Zbc	Zbc
+a	file	true	nil	Zbcd
+ab	file	true	nil	Zbcde
+a+	file	true	Zbcdef	Zbcdef
+a+b	file	true	Zbcdefg	Zbcdefg
+w+	file	true	hij	hij
+w+b	file	true	klm	klm
+wb+	file	true	nop	nop
+rw	file	true	nop	nop
+rt	file	true	nop	nop
+wbbbbb	file	true	nil	q
+r,ccs=UTF-8	file	true	q	q
+z	nil
+	nil
++r	nil
+R	nil
+true	true	true
+true
+true	true

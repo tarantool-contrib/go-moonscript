@@ -1,0 +1,4 @@
+true	1
+false	err_coroutine.moon:3: inside coroutine
+dead
+10	20	30

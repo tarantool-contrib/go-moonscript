@@ -1,0 +1,11 @@
+local x = 0
+x = x + 10
+local s = "hello "
+s = s .. "world"
+local b = false
+b = b and (true or false)
+local p = 50
+p = p & 5
+p = p | 3
+p = p >> 3
+p = p << 3

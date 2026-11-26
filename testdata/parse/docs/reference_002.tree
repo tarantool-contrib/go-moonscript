@@ -1,0 +1,11 @@
+{[1] "assign", {{[1] "ref", "x"}}, {{[4] "number", "0"}}}
+{[7] "update", {[7] "ref", "x"}, "+=", {[11] "number", "10"}}
+{[16] "assign", {{[16] "ref", "s"}}, {{[19] "string", """, "hello "}}}
+{[29] "update", {[29] "ref", "s"}, "..=", {[34] "string", """, "world"}}
+{[44] "assign", {{[44] "ref", "b"}}, {{[47] "ref", "false"}}}
+{[54] "update", {[54] "ref", "b"}, "and=", {"exp", {[60] "ref", "true"}, "or", {[68] "ref", "false"}}}
+{[76] "assign", {{[76] "ref", "p"}}, {{[79] "number", "50"}}}
+{[83] "update", {[83] "ref", "p"}, "&=", {[87] "number", "5"}}
+{[90] "update", {[90] "ref", "p"}, "|=", {[94] "number", "3"}}
+{[97] "update", {[97] "ref", "p"}, ">>=", {[102] "number", "3"}}
+{[105] "update", {[105] "ref", "p"}, "<<=", {[110] "number", "3"}}

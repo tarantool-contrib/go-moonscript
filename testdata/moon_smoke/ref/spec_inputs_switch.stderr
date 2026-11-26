@@ -1,0 +1,4 @@
+moon: spec/inputs/switch.moon:31: (34) this failed big time
+stack traceback:
+	[C]: in function 'error'
+	spec/inputs/switch.moon:31: (34) in main chunk

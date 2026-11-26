@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "slice"}}, {{[8] "comprehension", {[10] "ref", "item"}, {{"foreach", {"item"}, {"unpack", {[28] "chain", {[28] "ref", "items"}, {"slice", {[34] "number", "1"}, {[36] "number", "5"}}}}}}}}}

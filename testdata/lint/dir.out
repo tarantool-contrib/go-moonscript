@@ -1,0 +1,7 @@
+exit 1
+dir/only.moon
+
+line 1: accessing global `in_dir_global`
+========================================
+> print in_dir_global
+

@@ -1,0 +1,10 @@
+a = 0x1F
+b = 1e10
+c = 1e-5
+d = .5
+e = 5.
+f = 1LL
+g = 0x10ULL
+h = 1.5e3
+i = 0xffLL
+j = 10uLL

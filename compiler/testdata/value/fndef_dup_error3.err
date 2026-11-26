@@ -1,0 +1,3 @@
+fndef_dup_error3.moon	failed to compile: Can't destructure into 'self': name is bound by another parameter at line 1, column 12:
+  f = ({:self}) => self
+             ^

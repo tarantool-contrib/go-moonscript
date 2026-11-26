@@ -1,0 +1,10 @@
+true
+false	cannot resume dead coroutine
+true	false	cannot resume running coroutine
+false	vm_coroutine_messages.lua:14: vm_coroutine_messages.lua:12: boom
+false	vm_coroutine_messages.lua:17: cannot resume dead coroutine
+false	cannot resume dead coroutine
+false	vm_coroutine_messages.lua:21: lvl0
+true
+false	vm_coroutine_messages.lua:26: cannot resume running coroutine
+true	false	vm_coroutine_messages.lua:28: cannot resume running coroutine

@@ -1,0 +1,151 @@
+
+import concat from table
+
+unpack = unpack or table.unpack
+type = type
+
+moon = {
+  is_class: (value) ->
+    if type(value) == "table" and rawget(value, "__base") != nil
+      mt = getmetatable value
+      return mt and rawget(mt, "__call") != nil
+    false
+
+  is_instance: (value) ->
+    if type(value) == "table"
+      mt = getmetatable value
+      return mt and rawget(mt, "__index") == mt and rawget(value, "__index") != value
+    false
+
+}
+
+mtype = (value) -> -- the moonscript object class
+  base_type = type value
+  if base_type == "table"
+    cls = value.__class
+    if cls and rawget(value, "__class") == nil
+      return cls
+  base_type
+
+-- convert position in text to line and column numbers
+pos_to_line_col = (str, pos) ->
+  line = 1
+  line_start = 1
+  while true
+    nl = str\find "\n", line_start, true
+    break unless nl and nl < pos
+    line += 1
+    line_start = nl + 1
+
+  line, pos - line_start + 1
+
+-- convert position in text to line number
+pos_to_line = (str, pos) ->
+  line = pos_to_line_col str, pos
+  line
+
+trim = (str) ->
+  str\match "^%s*(.-)%s*$"
+
+get_line = (str, line_num) ->
+  -- todo: this returns an extra blank line at the end
+  for line in str\gmatch "([^\n]*)\n?"
+    return line if line_num == 1
+    line_num -= 1
+
+get_closest_line = (str, line_num) ->
+  line = get_line str, line_num
+  if (not line or trim(line) == "") and line_num > 1
+    get_closest_line(str, line_num - 1)
+  else
+    line, line_num
+
+split = (str, delim) ->
+  return {} if str == ""
+  str ..= delim
+  [m for m in str\gmatch("(.-)"..delim)]
+
+dump = (what) ->
+  seen = {}
+  _dump = (what, depth=0) ->
+    t = type what
+    if t == "string"
+			'"'..what..'"\n'
+    elseif t == "table"
+      if seen[what]
+        return "recursion("..tostring(what) ..")...\n"
+      seen[what] = true
+
+      depth += 1
+      lines = for k,v in pairs what
+        (" ")\rep(depth*4).."["..tostring(k).."] = ".._dump(v, depth)
+
+      seen[what] = false
+
+      class_name = if type(what.__class) == "table" and type(what.__class.__name) == "string"
+        "<#{what.__class.__name}>"
+
+      "#{class_name or ""}{\n" .. concat(lines) .. (" ")\rep((depth - 1)*4) .. "}\n"
+    else
+      tostring(what).."\n"
+
+  _dump what
+
+
+debug_posmap = (posmap, moon_code, lua_code) ->
+  tuples = [{k, v} for k, v in pairs posmap]
+  table.sort tuples, (a, b) -> a[1] < b[1]
+
+  lines = for pair in *tuples
+    lua_line, pos = unpack pair
+    moon_line = pos_to_line moon_code, pos
+
+    lua_text = get_line lua_code, lua_line
+    moon_text = get_closest_line moon_code, moon_line
+
+    "#{pos}\t #{lua_line}:[ #{trim lua_text} ] >> #{moon_line}:[ #{trim moon_text} ]"
+
+  concat(lines, "\n")
+
+setfenv = setfenv or (fn, env) ->
+  local name
+  i = 1
+  while true
+    name = debug.getupvalue fn, i
+    break if not name or name == "_ENV"
+    i += 1
+
+  if name
+    debug.upvaluejoin fn, i, (-> env), 1
+
+  fn
+
+getfenv = getfenv or (fn) ->
+  i = 1
+  while true
+    name, val = debug.getupvalue fn, i
+    break unless name
+    return val if name == "_ENV"
+    i += 1
+  nil
+
+-- moves the last argument to the front if it's a table, or returns empty table
+-- inserted to the front of args
+get_options = (...) ->
+  count = select "#", ...
+  opts = select count, ...
+  if type(opts) == "table"
+    opts, unpack {...}, nil, count - 1
+  else
+    {}, ...
+
+safe_module = (name, tbl) ->
+  setmetatable tbl, {
+    __index: (key) =>
+      error "Attempted to import non-existent `#{key}` from #{name}"
+  }
+
+{
+  :moon, :mtype, :pos_to_line_col, :pos_to_line, :get_closest_line, :get_line, :trim, :split, :dump,
+  :debug_posmap, :getfenv, :setfenv, :get_options, :unpack, :safe_module
+}

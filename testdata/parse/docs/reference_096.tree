@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "counter"}}, {{[10] "do", {{[16] "assign", {{[16] "ref", "i"}}, {{[19] "number", "0"}}}, {[24] "fndef", {}, {}, "slim", {{[31] "update", {[31] "ref", "i"}, "+=", {[35] "number", "1"}}, {[42] "ref", "i"}}}}}}}
+{[45] "chain", {[45] "ref", "print"}, {"call", {{[50] "chain", {[50] "ref", "counter"}, {"call", {}}}}}}
+{[60] "chain", {[60] "ref", "print"}, {"call", {{[65] "chain", {[65] "ref", "counter"}, {"call", {}}}}}}

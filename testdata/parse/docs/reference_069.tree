@@ -1,0 +1,1 @@
+{[1] "assign", {{[1] "ref", "msg"}}, {{"switch", {[13] "chain", {[13] "ref", "math"}, {"dot", "random"}, {"call", {{[26] "number", "1"}, {[29] "number", "5"}}}}, {{"case", {{[38] "number", "1"}}, {{[45] "string", """, "you are lucky"}}}, {"case", {{[68] "number", "2"}}, {{[75] "string", """, "you are almost lucky"}}}, {"else", {{[105] "string", """, "not so lucky"}}}}}}}

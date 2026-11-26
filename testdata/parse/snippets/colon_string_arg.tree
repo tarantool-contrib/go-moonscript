@@ -1,0 +1,2 @@
+{[1] "chain", {[1] "ref", "a"}, {"colon", "b"}, {"call", {{"string", """, "x"}}}}
+{[8] "chain", {[8] "ref", "a"}, {"colon", "b"}, {"call", {{"string", "[[", "y"}}}}

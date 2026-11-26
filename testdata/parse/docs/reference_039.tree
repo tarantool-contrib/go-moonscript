@@ -1,0 +1,3 @@
+{[1] "assign", {{[1] "ref", "x_coords"}}, {{[11] "table", {{{[13] "number", "4"}}, {{[15] "number", "5"}}, {{[18] "number", "6"}}, {{[21] "number", "7"}}}}}}
+{[25] "assign", {{[25] "ref", "y_coords"}}, {{[35] "table", {{{[37] "number", "9"}}, {{[39] "number", "2"}}, {{[42] "number", "3"}}}}}}
+{[47] "assign", {{[47] "ref", "points"}}, {{[55] "comprehension", {[57] "table", {{{[58] "ref", "x"}}, {{[60] "ref", "y"}}}}, {{"foreach", {"x"}, {"unpack", {[73] "ref", "x_coords"}}}, {"foreach", {"y"}, {"unpack", {[92] "ref", "y_coords"}}}}}}}

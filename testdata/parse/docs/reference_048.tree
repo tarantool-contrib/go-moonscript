@@ -1,0 +1,1 @@
+{[1] "chain", {[1] "ref", "print"}, {"call", {{[6] "string", """, "I am ", {"interpolate", {"exp", {[15] "chain", {[15] "ref", "math"}, {"dot", "random"}, {"call", {}}}, "*", {[29] "number", "100"}}}, "% sure."}}}}

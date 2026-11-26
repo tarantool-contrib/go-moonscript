@@ -1,0 +1,4 @@
+{[1] "assign", {{[1] "ref", "a"}}, {{[4] "table", {{{"key_literal", "hello"}, {[13] "string", """, "world"}}}}}}
+{[24] "assign", {{[24] "ref", "b"}}, {{[27] "table", {{{"key_literal", "okay"}, {[35] "string", """, "sure"}}}}}}
+{[46] "chain", {[46] "ref", "extend"}, {"call", {{[52] "ref", "a"}, {[55] "ref", "b"}}}}
+{[59] "chain", {[59] "ref", "print"}, {"call", {{[64] "chain", {[64] "ref", "a"}, {"dot", "okay"}}}}}

@@ -1,0 +1,8 @@
+/usr/bin/lua5.1: (command line):1: 1.5
+stack traceback:
+	[C]: in function 'error'
+	(command line):1: in function 'moonscript_chunk'
+	...cal/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:106: in function <...cal/lib/luarocks/rocks-5.1/moonscript/dev-1/bin/moon:104>
+	(tail call): ?
+	(tail call): ?
+	[C]: ?

@@ -1,0 +1,1 @@
+{[1] "chain", {[1] "ref", "print"}, {"call", {{[6] "string", """, "x:"}, {[12] "chain", {[12] "ref", "sum"}, {"call", {{[17] "number", "10"}, {[21] "number", "20"}}}}, {[25] "string", """, "y:"}, {[31] "chain", {[31] "ref", "sum"}, {"call", {{[36] "number", "30"}, {[40] "number", "40"}}}}}}}
