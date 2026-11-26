@@ -307,6 +307,12 @@ func callGFunction(L *LState, tailcall bool) bool {
 			}
 		}
 	}
+	if s, ok := L.stack.(*autoGrowingCallFrameStack); ok {
+		if _, top := s.popFast(); top != nil { // go-moonscript patch
+			L.currentFrame = top
+			return false
+		}
+	}
 	L.stack.Pop()
 	L.currentFrame = L.stack.Last()
 	return false
@@ -1349,11 +1355,17 @@ func init() {
 				if cf.Fn == nil {
 					ls.callError(fn, cf.Base) // go-moonscript patch: Lua 5.1's message
 				}
-				if ls.stack.IsFull() {
-					ls.RaiseError("stack overflow")
+				var newcf *callFrame
+				if s, ok := ls.stack.(*autoGrowingCallFrameStack); ok {
+					newcf = s.pushFast(&cf) // go-moonscript patch
 				}
-				ls.stack.Push(cf)
-				newcf := ls.stack.Last()
+				if newcf == nil {
+					if ls.stack.IsFull() {
+						ls.RaiseError("stack overflow")
+					}
+					ls.stack.Push(cf)
+					newcf = ls.stack.Last()
+				}
 				// this section is inlined by go-inline
 				// source function is 'func (ls *LState) initCallFrame(cf *callFrame) ' in '_state.go'
 				{
@@ -1834,7 +1846,16 @@ func init() {
 				switchToParentThread(L, n, false, true)
 				return 1
 			}
-			islast := baseframe == L.stack.Pop() || L.stack.IsEmpty()
+			var popped, top *callFrame
+			if s, ok := L.stack.(*autoGrowingCallFrameStack); ok {
+				popped, top = s.popFast() // go-moonscript patch
+			}
+			var islast bool
+			if top != nil {
+				islast = baseframe == popped
+			} else {
+				islast = baseframe == L.stack.Pop() || L.stack.IsEmpty()
+			}
 			// this section is inlined by go-inline
 			// source function is 'func copyReturnValues(L *LState, regv, start, n, b int) ' in '_vm.go'
 			{
@@ -1941,7 +1962,11 @@ func init() {
 					}
 				}
 			}
-			L.currentFrame = L.stack.Last()
+			if top != nil {
+				L.currentFrame = top
+			} else {
+				L.currentFrame = L.stack.Last()
+			}
 			if islast || L.currentFrame == nil || L.currentFrame.Fn.IsG {
 				return 1
 			}

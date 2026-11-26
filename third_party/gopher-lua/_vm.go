@@ -173,6 +173,12 @@ func callGFunction(L *LState, tailcall bool) bool {
 	}
 
 	// +inline-call L.reg.CopyRange frame.ReturnBase L.reg.Top()-gfnret -1 wantret
+	if s, ok := L.stack.(*autoGrowingCallFrameStack); ok {
+		if _, top := s.popFast(); top != nil { // go-moonscript patch
+			L.currentFrame = top
+			return false
+		}
+	}
 	L.stack.Pop()
 	L.currentFrame = L.stack.Last()
 	return false
@@ -807,9 +813,22 @@ func init() {
 				switchToParentThread(L, n, false, true)
 				return 1
 			}
-			islast := baseframe == L.stack.Pop() || L.stack.IsEmpty()
+			var popped, top *callFrame
+			if s, ok := L.stack.(*autoGrowingCallFrameStack); ok {
+				popped, top = s.popFast() // go-moonscript patch
+			}
+			var islast bool
+			if top != nil {
+				islast = baseframe == popped
+			} else {
+				islast = baseframe == L.stack.Pop() || L.stack.IsEmpty()
+			}
 			// +inline-call copyReturnValues L cf.ReturnBase RA n B
-			L.currentFrame = L.stack.Last()
+			if top != nil {
+				L.currentFrame = top
+			} else {
+				L.currentFrame = L.stack.Last()
+			}
 			if islast || L.currentFrame == nil || L.currentFrame.Fn.IsG {
 				return 1
 			}

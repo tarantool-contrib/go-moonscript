@@ -321,6 +321,7 @@ func (cs *autoGrowingCallFrameStack) IsFull() bool {
 }
 
 func (cs *autoGrowingCallFrameStack) Clear() {
+	cs.freeSpare(cs.segIdx + 1) // go-moonscript patch
 	for i := segIdx(1); i <= cs.segIdx; i++ {
 		freeCallFrameStackSegment(cs.segments[i])
 		cs.segments[i] = nil
@@ -330,6 +331,7 @@ func (cs *autoGrowingCallFrameStack) Clear() {
 }
 
 func (cs *autoGrowingCallFrameStack) FreeAll() {
+	cs.freeSpare(cs.segIdx + 1) // go-moonscript patch
 	for i := segIdx(0); i <= cs.segIdx; i++ {
 		freeCallFrameStackSegment(cs.segments[i])
 		cs.segments[i] = nil
@@ -343,9 +345,12 @@ func (cs *autoGrowingCallFrameStack) Push(v callFrame) {
 	if cs.segSp >= FramesPerSegment {
 		// segment full, push new segment if allowed
 		if cs.segIdx < segIdx(len(cs.segments)-1) {
-			curSeg = newCallFrameStackSegment()
 			cs.segIdx++
-			cs.segments[cs.segIdx] = curSeg
+			curSeg = cs.segments[cs.segIdx] // go-moonscript patch: the spare one
+			if curSeg == nil {
+				curSeg = newCallFrameStackSegment()
+				cs.segments[cs.segIdx] = curSeg
+			}
 			cs.segSp = 0
 		} else {
 			panic("lua callstack overflow")
@@ -366,6 +371,7 @@ func (cs *autoGrowingCallFrameStack) Sp() int {
 func (cs *autoGrowingCallFrameStack) SetSp(sp int) {
 	desiredSegIdx := segIdx(sp / FramesPerSegment)
 	desiredFramesInLastSeg := uint8(sp % FramesPerSegment)
+	cs.freeSpare(cs.segIdx + 1) // go-moonscript patch
 	for {
 		if cs.segIdx <= desiredSegIdx {
 			break
@@ -401,6 +407,7 @@ func (cs *autoGrowingCallFrameStack) ClearUnused() {
 	if int(cs.segIdx) < len(cs.segments) && cs.segments[cs.segIdx] != nil {
 		clear(cs.segments[cs.segIdx].array[cs.segSp:])
 	}
+	cs.freeSpare(cs.segIdx + 1) // go-moonscript patch
 }
 
 func (cs *autoGrowingCallFrameStack) Pop() *callFrame {
@@ -410,14 +417,50 @@ func (cs *autoGrowingCallFrameStack) Pop() *callFrame {
 			// stack empty
 			return nil
 		}
-		freeCallFrameStackSegment(curSeg)
-		cs.segments[cs.segIdx] = nil
+		// go-moonscript patch: the segment left stays as a spare, so that
+		// calls going back and forth over a segment boundary don't free and
+		// allocate it each time; the one above it goes
+		cs.freeSpare(cs.segIdx + 1)
 		cs.segIdx--
 		cs.segSp = FramesPerSegment
 		curSeg = cs.segments[cs.segIdx]
 	}
 	cs.segSp--
 	return &curSeg.array[cs.segSp]
+}
+
+// freeSpare frees the spare segment i, if any (go-moonscript patch).
+func (cs *autoGrowingCallFrameStack) freeSpare(i segIdx) {
+	if int(i) < len(cs.segments) && cs.segments[i] != nil {
+		freeCallFrameStackSegment(cs.segments[i])
+		cs.segments[i] = nil
+	}
+}
+
+// pushFast pushes *cf if the current segment has room for it, returning
+// the new top frame, otherwise nil (go-moonscript patch: the call path
+// without the interface calls of Push and Last).
+func (cs *autoGrowingCallFrameStack) pushFast(cf *callFrame) *callFrame {
+	if cs.segSp >= FramesPerSegment {
+		return nil
+	}
+	f := &cs.segments[cs.segIdx].array[cs.segSp]
+	*f = *cf
+	f.Idx = int(cs.segSp) + FramesPerSegment*int(cs.segIdx)
+	cs.segSp++
+	return f
+}
+
+// popFast pops the top frame if the frame below it is in the same segment,
+// returning both, otherwise nil, nil (go-moonscript patch: the return path
+// without the interface calls of Pop and Last).
+func (cs *autoGrowingCallFrameStack) popFast() (popped, top *callFrame) {
+	if cs.segSp < 2 {
+		return nil, nil
+	}
+	seg := cs.segments[cs.segIdx]
+	cs.segSp--
+	return &seg.array[cs.segSp], &seg.array[cs.segSp-1]
 }
 
 /* }}} */
@@ -1267,11 +1310,17 @@ func (ls *LState) pushCallFrame(cf callFrame, fn LValue, meta bool) { // +inline
 	if cf.Fn == nil {
 		ls.callError(fn, cf.Base) // go-moonscript patch: Lua 5.1's message
 	}
-	if ls.stack.IsFull() {
-		ls.RaiseError("stack overflow")
+	var newcf *callFrame
+	if s, ok := ls.stack.(*autoGrowingCallFrameStack); ok {
+		newcf = s.pushFast(&cf) // go-moonscript patch
 	}
-	ls.stack.Push(cf)
-	newcf := ls.stack.Last()
+	if newcf == nil {
+		if ls.stack.IsFull() {
+			ls.RaiseError("stack overflow")
+		}
+		ls.stack.Push(cf)
+		newcf = ls.stack.Last()
+	}
 	// this section is inlined by go-inline
 	// source function is 'func (ls *LState) initCallFrame(cf *callFrame) ' in '_state.go'
 	{
