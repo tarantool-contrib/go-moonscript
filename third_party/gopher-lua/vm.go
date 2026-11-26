@@ -845,12 +845,12 @@ func init() {
 			}
 			return 0
 		},
-		opArith, // OP_ADD
-		opArith, // OP_SUB
-		opArith, // OP_MUL
-		opArith, // OP_DIV
-		opArith, // OP_MOD
-		opArith, // OP_POW
+		opAdd, // OP_ADD
+		opSub, // OP_SUB
+		opMul, // OP_MUL
+		opDiv, // OP_DIV
+		opMod, // OP_MOD
+		opPow, // OP_POW
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
 			reg := L.reg
 			cf := L.currentFrame
@@ -2311,6 +2311,213 @@ func init() {
 			return 0
 		},
 	}
+}
+
+// go-moonscript patch: one function per arithmetic opcode, with the case of
+// two numbers inline; opArith does the rest.
+
+func opAdd(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD
+	reg := L.reg
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+		if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			RA := L.currentFrame.LocalBase + int(inst>>18)&0xff //GETA
+			v := v1 + v2
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	return opArith(L, inst, baseframe)
+}
+
+func opSub(L *LState, inst uint32, baseframe *callFrame) int { //OP_SUB
+	reg := L.reg
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+		if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			RA := L.currentFrame.LocalBase + int(inst>>18)&0xff //GETA
+			v := v1 - v2
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	return opArith(L, inst, baseframe)
+}
+
+func opMul(L *LState, inst uint32, baseframe *callFrame) int { //OP_MUL
+	reg := L.reg
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+		if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			RA := L.currentFrame.LocalBase + int(inst>>18)&0xff //GETA
+			v := v1 * v2
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	return opArith(L, inst, baseframe)
+}
+
+func opDiv(L *LState, inst uint32, baseframe *callFrame) int { //OP_DIV
+	reg := L.reg
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+		if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			RA := L.currentFrame.LocalBase + int(inst>>18)&0xff //GETA
+			v := v1 / v2
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	return opArith(L, inst, baseframe)
+}
+
+func opMod(L *LState, inst uint32, baseframe *callFrame) int { //OP_MOD
+	reg := L.reg
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+		if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			RA := L.currentFrame.LocalBase + int(inst>>18)&0xff //GETA
+			v := luaModulo(v1, v2)
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	return opArith(L, inst, baseframe)
+}
+
+func opPow(L *LState, inst uint32, baseframe *callFrame) int { //OP_POW
+	reg := L.reg
+	B := int(inst & 0x1ff)    //GETB
+	C := int(inst>>9) & 0x1ff //GETC
+	if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+		if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			RA := L.currentFrame.LocalBase + int(inst>>18)&0xff //GETA
+			v := LNumber(math.Pow(float64(v1), float64(v2)))
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+			{
+				rg := reg
+				regi := RA
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = rg.alloc.LNumber2I(vali)
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			return 0
+		}
+	}
+	return opArith(L, inst, baseframe)
 }
 
 func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_POW
