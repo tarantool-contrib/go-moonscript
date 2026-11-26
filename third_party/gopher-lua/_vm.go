@@ -789,12 +789,13 @@ func init() {
 				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
 					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
 						init += step
-						v := LNumber(init)
-						// +inline-call reg.SetNumber RA v
+						// go-moonscript patch: one box for both registers
+						v := reg.alloc.LNumber2I(init)
+						// +inline-call reg.Set RA v
 						if (step > 0 && init <= limit) || (step <= 0 && init >= limit) {
 							Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
 							cf.Pc += Sbx
-							// +inline-call reg.SetNumber RA+3 v
+							// +inline-call reg.Set RA+3 v
 						} else {
 							// +inline-call reg.SetTop RA+1
 						}

@@ -1902,9 +1902,10 @@ func init() {
 				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
 					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
 						init += step
-						v := LNumber(init)
+						// go-moonscript patch: one box for both registers
+						v := reg.alloc.LNumber2I(init)
 						// this section is inlined by go-inline
-						// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+						// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
 						{
 							rg := reg
 							regi := RA
@@ -1918,7 +1919,7 @@ func init() {
 									rg.resize(requiredSize)
 								}
 							}
-							rg.array[regi] = rg.alloc.LNumber2I(vali)
+							rg.array[regi] = vali
 							if regi >= rg.top {
 								rg.top = regi + 1
 							}
@@ -1927,7 +1928,7 @@ func init() {
 							Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
 							cf.Pc += Sbx
 							// this section is inlined by go-inline
-							// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+							// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
 							{
 								rg := reg
 								regi := RA + 3
@@ -1941,7 +1942,7 @@ func init() {
 										rg.resize(requiredSize)
 									}
 								}
-								rg.array[regi] = rg.alloc.LNumber2I(vali)
+								rg.array[regi] = vali
 								if regi >= rg.top {
 									rg.top = regi + 1
 								}
