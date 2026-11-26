@@ -1436,6 +1436,10 @@ func (ls *LState) callR(nargs, nret, rbase int) {
 		ls.G.MainThread = ls
 		ls.G.CurrentThread = ls
 		ls.mainLoop(ls, nil)
+	} else if ls.currentFrame.Fn.IsG {
+		// go-moonscript patch: what mainLoop does for a Go function, without
+		// entering it (iterators of generic for loops, metamethods)
+		callGFunction(ls, false)
 	} else {
 		ls.mainLoop(ls, ls.currentFrame)
 	}
