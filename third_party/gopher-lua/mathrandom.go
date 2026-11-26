@@ -140,27 +140,27 @@ func mathRandom(L *LState) int {
 				d = math.Floor(d*(r2-r1+1.0)) + r1
 			}
 		}
-		L.Push(LNumber(d))
+		pushNumber(L, LNumber(d))
 		return 1
 	}
 	// lmathlib.c math_random: the % avoids 1.0 when rand() == RAND_MAX
 	r := float64(st.glibc.next()%math.MaxInt32) / float64(math.MaxInt32)
 	switch L.GetTop() {
 	case 0:
-		L.Push(LNumber(r))
+		pushNumber(L, LNumber(r))
 	case 1:
 		u := cInt(float64(L.CheckNumber(1)))
 		if u < 1 {
 			L.ArgError(1, "interval is empty")
 		}
-		L.Push(LNumber(math.Floor(r*float64(u)) + 1))
+		pushNumber(L, LNumber(math.Floor(r*float64(u))+1))
 	case 2:
 		l := cInt(float64(L.CheckNumber(1)))
 		u := cInt(float64(L.CheckNumber(2)))
 		if l > u {
 			L.ArgError(2, "interval is empty")
 		}
-		L.Push(LNumber(math.Floor(r*float64(u-l+1)) + float64(l))) // int arithmetic, as in C
+		pushNumber(L, LNumber(math.Floor(r*float64(u-l+1))+float64(l))) // int arithmetic, as in C
 	default:
 		L.RaiseError("wrong number of arguments")
 	}

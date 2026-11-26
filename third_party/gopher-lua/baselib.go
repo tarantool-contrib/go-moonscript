@@ -447,7 +447,7 @@ func baseToNumber(L *LState) int {
 	if base == 10 {
 		switch lv := L.CheckAny(1).(type) {
 		case LNumber:
-			L.Push(lv)
+			L.Push(L.Get(1)) // go-moonscript patch: without boxing it again
 		case LString:
 			if L.Dialect() == DialectLuaJIT && strings.IndexByte(string(lv), 0) >= 0 {
 				L.Push(LNil) // go-moonscript patch: LuaJIT scans the whole string
@@ -459,7 +459,7 @@ func baseToNumber(L *LState) int {
 			if v, err := parseNumber(string(lv)); err != nil {
 				L.Push(LNil)
 			} else {
-				L.Push(v)
+				pushNumber(L, v)
 			}
 		default:
 			L.Push(LNil)

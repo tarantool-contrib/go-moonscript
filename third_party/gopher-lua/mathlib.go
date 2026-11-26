@@ -53,84 +53,84 @@ var mathFuncs = map[string]LGFunction{
 }
 
 func mathAbs(L *LState) int {
-	L.Push(LNumber(math.Abs(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Abs(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathAcos(L *LState) int {
-	L.Push(LNumber(math.Acos(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Acos(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathAsin(L *LState) int {
-	L.Push(LNumber(math.Asin(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Asin(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathAtan(L *LState) int {
-	L.Push(LNumber(math.Atan(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Atan(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathAtan2(L *LState) int {
-	L.Push(LNumber(math.Atan2(float64(L.CheckNumber(1)), float64(L.CheckNumber(2)))))
+	pushNumber(L, LNumber(math.Atan2(float64(L.CheckNumber(1)), float64(L.CheckNumber(2)))))
 	return 1
 }
 
 func mathCeil(L *LState) int {
-	L.Push(LNumber(math.Ceil(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Ceil(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathCos(L *LState) int {
-	L.Push(LNumber(math.Cos(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Cos(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathCosh(L *LState) int {
-	L.Push(LNumber(math.Cosh(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Cosh(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathDeg(L *LState) int {
-	L.Push(LNumber(float64(L.CheckNumber(1)) * 180 / math.Pi))
+	pushNumber(L, LNumber(float64(L.CheckNumber(1))*180/math.Pi))
 	return 1
 }
 
 func mathExp(L *LState) int {
-	L.Push(LNumber(math.Exp(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Exp(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathFloor(L *LState) int {
-	L.Push(LNumber(math.Floor(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Floor(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathFmod(L *LState) int {
-	L.Push(LNumber(math.Mod(float64(L.CheckNumber(1)), float64(L.CheckNumber(2)))))
+	pushNumber(L, LNumber(math.Mod(float64(L.CheckNumber(1)), float64(L.CheckNumber(2)))))
 	return 1
 }
 
 func mathFrexp(L *LState) int {
 	v1, v2 := math.Frexp(float64(L.CheckNumber(1)))
-	L.Push(LNumber(v1))
-	L.Push(LNumber(v2))
+	pushNumber(L, LNumber(v1))
+	pushNumber(L, LNumber(v2))
 	return 2
 }
 
 func mathLdexp(L *LState) int {
-	L.Push(LNumber(math.Ldexp(float64(L.CheckNumber(1)), L.CheckInt(2))))
+	pushNumber(L, LNumber(math.Ldexp(float64(L.CheckNumber(1)), L.CheckInt(2))))
 	return 1
 }
 
 func mathLog(L *LState) int {
-	L.Push(LNumber(math.Log(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Log(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathLog10(L *LState) int {
-	L.Push(LNumber(math.Log10(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Log10(float64(L.CheckNumber(1)))))
 	return 1
 }
 
@@ -146,7 +146,7 @@ func mathMax(L *LState) int {
 			max = v
 		}
 	}
-	L.Push(max)
+	pushNumber(L, max)
 	return 1
 }
 
@@ -162,50 +162,56 @@ func mathMin(L *LState) int {
 			min = v
 		}
 	}
-	L.Push(min)
+	pushNumber(L, min)
 	return 1
 }
 
 func mathModf(L *LState) int {
 	v1, v2 := math.Modf(float64(L.CheckNumber(1)))
-	L.Push(LNumber(v1))
-	L.Push(LNumber(v2))
+	pushNumber(L, LNumber(v1))
+	pushNumber(L, LNumber(v2))
 	return 2
 }
 
 func mathPow(L *LState) int {
-	L.Push(LNumber(math.Pow(float64(L.CheckNumber(1)), float64(L.CheckNumber(2)))))
+	pushNumber(L, LNumber(math.Pow(float64(L.CheckNumber(1)), float64(L.CheckNumber(2)))))
 	return 1
 }
 
 func mathRad(L *LState) int {
-	L.Push(LNumber(float64(L.CheckNumber(1)) * math.Pi / 180))
+	pushNumber(L, LNumber(float64(L.CheckNumber(1))*math.Pi/180))
 	return 1
 }
 
 func mathSin(L *LState) int {
-	L.Push(LNumber(math.Sin(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Sin(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathSinh(L *LState) int {
-	L.Push(LNumber(math.Sinh(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Sinh(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathSqrt(L *LState) int {
-	L.Push(LNumber(math.Sqrt(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Sqrt(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathTan(L *LState) int {
-	L.Push(LNumber(math.Tan(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Tan(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 func mathTanh(L *LState) int {
-	L.Push(LNumber(math.Tanh(float64(L.CheckNumber(1)))))
+	pushNumber(L, LNumber(math.Tanh(float64(L.CheckNumber(1)))))
 	return 1
 }
 
 //
+
+// pushNumber pushes n, boxed by the allocator rather than by the Go runtime
+// (go-moonscript patch).
+func pushNumber(L *LState, n LNumber) {
+	L.reg.Push(L.reg.alloc.LNumber2I(n))
+}
