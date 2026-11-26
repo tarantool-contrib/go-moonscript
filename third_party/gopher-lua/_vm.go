@@ -954,9 +954,8 @@ func init() {
 				nelem = reg.Top() - RA - 1
 			}
 			table.resizeArray(offset + nelem) // go-moonscript patch: as Lua 5.1
-			for i := 1; i <= nelem; i++ {
-				table.RawSetInt(offset+i, reg.Get(RA+i))
-			}
+			// go-moonscript patch: they all go in the array part
+			copy(table.array[offset:offset+nelem], reg.array[RA+1:RA+1+nelem])
 			return 0
 		},
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_CLOSE
