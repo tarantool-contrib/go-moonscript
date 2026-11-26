@@ -633,7 +633,12 @@ func init() {
 			Bx := int(inst & 0x3ffff) //GETBX
 			//reg.Set(RA, L.getField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx]))
 			proto := cf.Fn.Proto // go-moonscript patch: with the key's hash
-			v := L.getFieldStringK(cf.Fn.Env, proto.Constants[Bx], proto.stringConstants[Bx], proto.strConstHash(Bx))
+			env := cf.Fn.Env
+			key, h := proto.stringConstants[Bx], proto.strConstHash(Bx)
+			v := env.hash.getStringH(key, h)
+			if v == LNil && env.Metatable != LNil { // go-moonscript patch: getFieldStringK only for __index
+				v = L.getFieldStringKMiss(env, proto.Constants[Bx], key, h, true)
+			}
 			// this section is inlined by go-inline
 			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
 			{
@@ -735,7 +740,36 @@ func init() {
 			B := int(inst & 0x1ff)         //GETB
 			C := int(inst>>9) & 0x1ff      //GETC
 			lkey, key, h := L.rkStringK(C) // go-moonscript patch: with the key's hash
-			v := L.getFieldStringK(reg.Get(lbase+B), lkey, key, h)
+			obj := reg.Get(lbase + B)
+			if tb, ok := obj.(*LTable); ok {
+				// go-moonscript patch: getFieldStringK only for __index
+				v := tb.hash.getStringH(key, h)
+				if v == LNil && tb.Metatable != LNil {
+					v = L.getFieldStringKMiss(obj, lkey, key, h, true)
+				}
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+				{
+					rg := reg
+					regi := RA
+					vali := v
+					newSize := regi + 1
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+					{
+						requiredSize := newSize
+						if requiredSize > cap(rg.array) {
+							rg.resize(requiredSize)
+						}
+					}
+					rg.array[regi] = vali
+					if regi >= rg.top {
+						rg.top = regi + 1
+					}
+				}
+				return 0
+			}
+			v := L.getFieldStringK(obj, lkey, key, h)
 			// this section is inlined by go-inline
 			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
 			{
@@ -816,7 +850,15 @@ func init() {
 			B := int(inst & 0x1ff)         //GETB
 			C := int(inst>>9) & 0x1ff      //GETC
 			lkey, key, h := L.rkStringK(B) // go-moonscript patch: with the key's hash
-			L.setFieldStringK(reg.Get(RA), lkey, key, h, L.rkValue(C))
+			obj := reg.Get(RA)
+			if tb, ok := obj.(*LTable); ok {
+				// go-moonscript patch: setFieldStringK only for __newindex
+				if j := tb.hash.findString(key, h); j >= 0 && tb.hash.nodes[j].val != LNil || tb.Metatable == LNil {
+					tb.setStringAt(j, lkey, key, h, L.rkValue(C))
+					return 0
+				}
+			}
+			L.setFieldStringK(obj, lkey, key, h, L.rkValue(C))
 			return 0
 		},
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_NEWTABLE
@@ -863,7 +905,15 @@ func init() {
 			C := int(inst>>9) & 0x1ff //GETC
 			selfobj := reg.Get(lbase + B)
 			lkey, key, h := L.rkStringK(C) // go-moonscript patch: with the key's hash
-			v := L.getFieldStringK(selfobj, lkey, key, h)
+			var v LValue
+			if tb, ok := selfobj.(*LTable); ok {
+				// go-moonscript patch: getFieldStringK only for __index
+				if v = tb.hash.getStringH(key, h); v == LNil && tb.Metatable != LNil {
+					v = L.getFieldStringKMiss(selfobj, lkey, key, h, true)
+				}
+			} else {
+				v = L.getFieldStringK(selfobj, lkey, key, h)
+			}
 			// this section is inlined by go-inline
 			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
 			{

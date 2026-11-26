@@ -1310,10 +1310,18 @@ func (ls *LState) getFieldString(obj LValue, key string) LValue {
 // whose hashString is h (go-moonscript patch: for the VM, which knows the
 // hash of constant keys, and doesn't need to box the key again).
 func (ls *LState) getFieldStringK(obj LValue, lkey LValue, skey string, h uint32) LValue {
+	return ls.getFieldStringKMiss(obj, lkey, skey, h, false)
+}
+
+// getFieldStringKMiss is getFieldStringK; missed: obj is a table that has
+// been looked up and lacks the key (go-moonscript patch).
+func (ls *LState) getFieldStringKMiss(obj LValue, lkey LValue, skey string, h uint32, missed bool) LValue {
 	curobj := obj
 	for i := 0; i < MaxTableGetLoop; i++ {
 		tb, istable := curobj.(*LTable)
-		if istable {
+		if istable && missed {
+			missed = false
+		} else if istable {
 			ret := tb.hash.getStringH(skey, h)
 			if ret != LNil || tb.Metatable == LNil { // go-moonscript patch
 				return ret
@@ -1346,14 +1354,12 @@ func (ls *LState) setFieldStringK(obj LValue, lkey LValue, skey string, h uint32
 	curobj := obj
 	for i := 0; i < MaxTableGetLoop; i++ {
 		tb, istable := curobj.(*LTable)
+		j := int32(-1)
 		if istable {
-			// go-moonscript patch: one lookup for an existing key
-			if j := tb.hash.findString(skey, h); j >= 0 && tb.hash.nodes[j].val != LNil {
-				tb.hash.nodes[j].val = value
-				return
-			}
-			if tb.Metatable == LNil {
-				tb.setString(lkey, skey, h, value)
+			// go-moonscript patch: one lookup for the key
+			j = tb.hash.findString(skey, h)
+			if j >= 0 && tb.hash.nodes[j].val != LNil || tb.Metatable == LNil {
+				tb.setStringAt(j, lkey, skey, h, value)
 				return
 			}
 		}
@@ -1362,7 +1368,7 @@ func (ls *LState) setFieldStringK(obj LValue, lkey LValue, skey string, h uint32
 			if !istable {
 				ls.indexError(curobj, i == 0) // go-moonscript patch: Lua 5.1's message
 			}
-			tb.setString(lkey, skey, h, value)
+			tb.setStringAt(j, lkey, skey, h, value)
 			return
 		}
 		if metaindex.Type() == LTFunction {

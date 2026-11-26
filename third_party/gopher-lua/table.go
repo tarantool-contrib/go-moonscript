@@ -243,6 +243,19 @@ func (tb *LTable) setString(lkey LValue, key string, h uint32, value LValue) {
 	tb.newKey(lkey, h, false, value)
 }
 
+// setStringAt is setString for a key whose node (live or dead) is j, or
+// that is not in the table if j < 0 (hash.findString's result).
+func (tb *LTable) setStringAt(j int32, lkey LValue, key string, h uint32, value LValue) {
+	if j >= 0 {
+		tb.hash.nodes[j].val = value
+		return
+	}
+	if lkey == nil {
+		lkey = LString(key)
+	}
+	tb.newKey(lkey, h, false, value)
+}
+
 // newKey adds a key that is not in the table (Lua's newkey), whose hash
 // is h; isptr: the hash is an address. As in Lua, a nil value adds a dead
 // key.
