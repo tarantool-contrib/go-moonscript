@@ -40,6 +40,9 @@ grep -rl "$ourpath" "$work" --include='*.go' --include='*.y' | xargs sed -i "s#$
 cp "$pristine"/*_test.go "$pristine/go.mod" "$pristine/go.sum" "$work/"
 cp -r "$pristine/_glua-tests" "$pristine/_lua5.1-tests" "$work/"
 chmod -R u+w "$work"
+# our copy uses newer standard library APIs (weak, ...) than pristine's
+# go directive allows; Go 1.27 rejects them, so take the module's version
+(cd "$work" && go mod edit -go="$(sed -n 's/^go //p' "$root/go.mod")")
 
 # the table engine has no `dict` field: read the hash part through the API
 sed -i -e 's/_, found := tbl.dict\[LString("key")\]/found := tbl.RawGetH(LString("key")) != LNil/' \
@@ -88,4 +91,5 @@ sed -i -e "47s/== -36)/== 2^64 - 36)/" -e "48s/== -(10+(16\*(15+(16\*(15+(16\*15
 
 skip=$(IFS='|'; echo "^(${skip_tests[*]})\$")
 cd "$work"
-GOFLAGS=-mod=mod go test -count=1 -skip "$skip" ./...
+# -vet=off: pristine's tests fail vet's printf check under a newer go directive
+GOFLAGS=-mod=mod go test -vet=off -count=1 -skip "$skip" ./...

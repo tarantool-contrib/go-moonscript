@@ -263,9 +263,9 @@ MoonScript v0.8.0 on PUC Lua 5.1, built by [`scripts/moonref`](scripts/moonref):
 Known differences:
 
 - **`moon`** runs on gopher-lua, not PUC Lua: tracebacks are cut to fewer
-  frames, there are no C modules (no `lpeg`), and `math.random` and `pairs`
-  order differ. The VM's runtime error messages are Lua 5.1's, and the
-  file and line in a rewritten error are the same.
+  frames and there are no C modules (no `lpeg`). The VM's runtime error
+  messages, `math.random` sequence and `pairs` order are Lua 5.1's, and
+  the file and line in a rewritten error are the same.
 - **`moon -c`** prints a coverage report; upstream 0.8.0 prints an empty
   one on Lua 5.1 (its line hook is a tail call). This is fixed on purpose.
 - **`moonc --watch` and `--transform`** are accepted but not supported.
@@ -281,8 +281,8 @@ change, with its source, is in
 [`moonscript.patch`](third_party/gopher-lua/moonscript.patch); the official
 Lua 5.1 and LuaJIT test suites run against it in
 [`internal/luasuites`](internal/luasuites). On LuaJIT's benchmark suite it
-is about 3.8 times slower than PUC Lua 5.1 (geometric mean; MoonScript
-workloads about 2.8 times).
+is about 3.3 times slower than PUC Lua 5.1 (geometric mean; MoonScript
+workloads about 2.6 times).
 
 ## Development
 
