@@ -1112,6 +1112,31 @@ func (ls *LState) metaOp1(lvalue LValue, event string) LValue {
 	return LNil
 }
 
+// hashIndex and hashNewIndex are the hashString of "__index" and
+// "__newindex" (go-moonscript patch).
+var (
+	hashIndex    = hashString("__index")
+	hashNewIndex = hashString("__newindex")
+)
+
+// metaOp1H is metaOp1 for an event whose hashString is h (go-moonscript
+// patch).
+func (ls *LState) metaOp1H(lvalue LValue, event string, h uint32) LValue {
+	var mt LValue
+	switch obj := lvalue.(type) {
+	case *LTable:
+		mt = obj.Metatable
+	case *LUserData:
+		mt = obj.Metatable
+	default:
+		mt = ls.metatable(lvalue, true)
+	}
+	if tb, ok := mt.(*LTable); ok {
+		return tb.hash.getStringH(event, h)
+	}
+	return LNil
+}
+
 func (ls *LState) metaOp2(value1, value2 LValue, event string) LValue {
 	if mt := ls.metatable(value1, true); mt != LNil {
 		if tb, ok := mt.(*LTable); ok {
@@ -1389,11 +1414,11 @@ func (ls *LState) getField(obj LValue, key LValue) LValue {
 		tb, istable := curobj.(*LTable)
 		if istable {
 			ret := tb.RawGet(key)
-			if ret != LNil {
+			if ret != LNil || tb.Metatable == LNil { // go-moonscript patch
 				return ret
 			}
 		}
-		metaindex := ls.metaOp1(curobj, "__index")
+		metaindex := ls.metaOp1H(curobj, "__index", hashIndex) // go-moonscript patch: hashed once
 		if metaindex == LNil {
 			if !istable {
 				ls.indexError(curobj, i == 0) // go-moonscript patch: Lua 5.1's message
@@ -1420,11 +1445,11 @@ func (ls *LState) getFieldString(obj LValue, key string) LValue {
 		tb, istable := curobj.(*LTable)
 		if istable {
 			ret := tb.RawGetString(key)
-			if ret != LNil {
+			if ret != LNil || tb.Metatable == LNil { // go-moonscript patch
 				return ret
 			}
 		}
-		metaindex := ls.metaOp1(curobj, "__index")
+		metaindex := ls.metaOp1H(curobj, "__index", hashIndex) // go-moonscript patch: hashed once
 		if metaindex == LNil {
 			if !istable {
 				ls.indexError(curobj, i == 0) // go-moonscript patch: Lua 5.1's message
@@ -1454,11 +1479,11 @@ func (ls *LState) getFieldStringK(obj LValue, lkey LValue, skey string, h uint32
 		tb, istable := curobj.(*LTable)
 		if istable {
 			ret := tb.hash.getStringH(skey, h)
-			if ret != LNil {
+			if ret != LNil || tb.Metatable == LNil { // go-moonscript patch
 				return ret
 			}
 		}
-		metaindex := ls.metaOp1(curobj, "__index")
+		metaindex := ls.metaOp1H(curobj, "__index", hashIndex) // go-moonscript patch: hashed once
 		if metaindex == LNil {
 			if !istable {
 				ls.indexError(curobj, i == 0) // go-moonscript patch: Lua 5.1's message
@@ -1486,12 +1511,17 @@ func (ls *LState) setFieldStringK(obj LValue, lkey LValue, skey string, h uint32
 	for i := 0; i < MaxTableGetLoop; i++ {
 		tb, istable := curobj.(*LTable)
 		if istable {
-			if tb.hash.getStringH(skey, h) != LNil {
+			// go-moonscript patch: one lookup for an existing key
+			if j := tb.hash.findString(skey, h); j >= 0 && tb.hash.nodes[j].val != LNil {
+				tb.hash.nodes[j].val = value
+				return
+			}
+			if tb.Metatable == LNil {
 				tb.setString(lkey, skey, h, value)
 				return
 			}
 		}
-		metaindex := ls.metaOp1(curobj, "__newindex")
+		metaindex := ls.metaOp1H(curobj, "__newindex", hashNewIndex) // go-moonscript patch: hashed once
 		if metaindex == LNil {
 			if !istable {
 				ls.indexError(curobj, i == 0) // go-moonscript patch: Lua 5.1's message
@@ -1518,12 +1548,12 @@ func (ls *LState) setField(obj LValue, key LValue, value LValue) {
 	for i := 0; i < MaxTableGetLoop; i++ {
 		tb, istable := curobj.(*LTable)
 		if istable {
-			if tb.RawGet(key) != LNil {
+			if tb.Metatable == LNil || tb.RawGet(key) != LNil { // go-moonscript patch
 				ls.RawSet(tb, key, value)
 				return
 			}
 		}
-		metaindex := ls.metaOp1(curobj, "__newindex")
+		metaindex := ls.metaOp1H(curobj, "__newindex", hashNewIndex) // go-moonscript patch: hashed once
 		if metaindex == LNil {
 			if !istable {
 				ls.indexError(curobj, i == 0) // go-moonscript patch: Lua 5.1's message
@@ -1550,12 +1580,12 @@ func (ls *LState) setFieldString(obj LValue, key string, value LValue) {
 	for i := 0; i < MaxTableGetLoop; i++ {
 		tb, istable := curobj.(*LTable)
 		if istable {
-			if tb.RawGetString(key) != LNil {
+			if tb.Metatable == LNil || tb.RawGetString(key) != LNil { // go-moonscript patch
 				tb.RawSetString(key, value)
 				return
 			}
 		}
-		metaindex := ls.metaOp1(curobj, "__newindex")
+		metaindex := ls.metaOp1H(curobj, "__newindex", hashNewIndex) // go-moonscript patch: hashed once
 		if metaindex == LNil {
 			if !istable {
 				ls.indexError(curobj, i == 0) // go-moonscript patch: Lua 5.1's message

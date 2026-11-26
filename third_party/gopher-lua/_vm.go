@@ -353,7 +353,27 @@ func init() {
 			RA := lbase + A
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			v := L.getField(reg.Get(lbase+B), L.rkValue(C))
+			obj := reg.Get(lbase + B)
+			key := L.rkValue(C)
+			if tb, ok := obj.(*LTable); ok {
+				// go-moonscript patch: a table's own keys, and its missing keys
+				// if it has no metatable, without getField
+				var v LValue
+				if k, isnum := key.(LNumber); isnum {
+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) {
+						v = tb.array[i-1]
+					} else {
+						v = tb.hash.getNumber(k)
+					}
+				} else {
+					v = tb.RawGet(key)
+				}
+				if v != LNil || tb.Metatable == LNil {
+					// +inline-call reg.Set RA v
+					return 0
+				}
+			}
+			v := L.getField(obj, key)
 			// +inline-call reg.Set RA v
 			return 0
 		},
@@ -400,7 +420,23 @@ func init() {
 			RA := lbase + A
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			L.setField(reg.Get(RA), L.rkValue(B), L.rkValue(C))
+			obj := reg.Get(RA)
+			key := L.rkValue(B)
+			if tb, ok := obj.(*LTable); ok {
+				// go-moonscript patch: an existing key of the array part, or
+				// any key of a table without a metatable, without setField
+				if k, isnum := key.(LNumber); isnum {
+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
+						tb.array[i-1] = L.rkValue(C)
+						return 0
+					}
+				}
+				if tb.Metatable == LNil {
+					L.RawSet(tb, key, L.rkValue(C))
+					return 0
+				}
+			}
+			L.setField(obj, key, L.rkValue(C))
 			return 0
 		},
 		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETTABLEKS
