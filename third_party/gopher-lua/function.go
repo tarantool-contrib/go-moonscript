@@ -165,14 +165,46 @@ func (fp *FunctionProto) str(level int, count int) string {
 /* LFunction {{{ */
 
 func newLFunctionL(proto *FunctionProto, env *LTable, nupvalue int) *LFunction {
-	return &LFunction{
-		IsG: false,
-		Env: env,
-
-		Proto:     proto,
-		GFunction: nil,
-		Upvalues:  make([]*Upvalue, nupvalue),
+	// go-moonscript patch: a closure with few upvalues is one allocation,
+	// the function and its upvalue slots together
+	var fn *LFunction
+	switch nupvalue {
+	case 0:
+		fn = &LFunction{Upvalues: []*Upvalue{}}
+	case 1:
+		c := &struct {
+			fn LFunction
+			uv [1]*Upvalue
+		}{}
+		fn = &c.fn
+		fn.Upvalues = c.uv[:]
+	case 2:
+		c := &struct {
+			fn LFunction
+			uv [2]*Upvalue
+		}{}
+		fn = &c.fn
+		fn.Upvalues = c.uv[:]
+	case 3:
+		c := &struct {
+			fn LFunction
+			uv [3]*Upvalue
+		}{}
+		fn = &c.fn
+		fn.Upvalues = c.uv[:]
+	case 4:
+		c := &struct {
+			fn LFunction
+			uv [4]*Upvalue
+		}{}
+		fn = &c.fn
+		fn.Upvalues = c.uv[:]
+	default:
+		fn = &LFunction{Upvalues: make([]*Upvalue, nupvalue)}
 	}
+	fn.Env = env
+	fn.Proto = proto
+	return fn
 }
 
 func newLFunctionG(gfunc LGFunction, env *LTable, nupvalue int) *LFunction {
