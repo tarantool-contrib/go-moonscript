@@ -369,6 +369,7 @@ func (tb *LTable) resize(nasize, nhsize int) {
 	oldhash := tb.hash
 	if nasize != len(oldarray) {
 		tb.array = resizedArray(oldarray, nasize)
+		defer releaseArray(oldarray) // when resize no longer reads it
 	}
 	tb.hash.init(nhsize)
 	for i := nasize; i < len(oldarray); i++ {
@@ -427,6 +428,17 @@ func resizedArray(a []LValue, n int) []LValue {
 	return array
 }
 
+// releaseArray clears an array part the table no longer uses if it may be
+// the one allocated with the table (newLTable): that one lives as long as
+// the table, and the values left in it would keep the objects they refer
+// to from Go's collector (a weak table's entry would not be cleared).
+// (go-moonscript patch)
+func releaseArray(old []LValue) {
+	if cap(old) <= 4 {
+		clear(old)
+	}
+}
+
 // fillNil sets the elements of s, which are nil (zeroed memory), to LNil.
 // The two words of LNil are pointers out of the Go heap (an itab and
 // runtime.zerobase), and so are those of nil: the collector has nothing
@@ -456,7 +468,9 @@ func (tb *LTable) resizeArray(n int) {
 		if n >= tableBigSlots {
 			tableReserve(n, 0) // go-moonscript patch
 		}
-		tb.array = resizedArray(tb.array, n)
+		old := tb.array
+		tb.array = resizedArray(old, n)
+		releaseArray(old)
 		return
 	}
 	tb.resize(n, len(tb.hash.nodes))

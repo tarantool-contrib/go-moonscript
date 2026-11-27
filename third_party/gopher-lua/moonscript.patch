@@ -454,6 +454,12 @@ that change.
     - SETLIST copies the values into the array part it has sized.
     - callR calls a Go function (iterators, metamethods) without entering
       mainLoop.
+    - A table with an array part of 1-4 slots is one allocation with it;
+      when the array part is replaced, that one is cleared, or the values
+      left in it would keep weak table entries (compat
+      gc_weak_array_growth.lua).
+    - The grown array part is copied with makeslicecopy (barrier on the
+      source only) and filled with LNil by word copies (fillNil).
 
   Performance, dispatch (go-moonscript):
     - mainLoop handles the frequent opcodes in a switch (MOVE, LOADK,
