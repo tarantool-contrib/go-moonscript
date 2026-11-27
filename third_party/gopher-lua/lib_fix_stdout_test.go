@@ -11,6 +11,7 @@ package lua
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -25,11 +26,15 @@ func TestStdoutChild(t *testing.T) {
 		msg, _, _ := strings.Cut(err.Error(), "\n")
 		_, _ = os.Stderr.WriteString("error: " + msg + "\n")
 	}
-	L.Close() // flushes the standard output
-	// exit before the testing package writes "PASS" (and, with -cover, the
-	// coverage line) to the output under test
-	os.Exit(0)
+	L.Close()  // flushes the standard output
+	os.Exit(0) // before the testing package writes "PASS" and the like
 }
+
+// testTrailer matches what the child's testing package and coverage
+// runtime may still write after the output under test: "PASS", with -cover
+// "coverage: ..." or, built with a -coverpkg that leaves this package out,
+// "program not built with -cover".
+var testTrailer = regexp.MustCompile(`(PASS\n)?(coverage: [^\n]*\n)?(program not built with -cover\n)?$`)
 
 func TestStdoutBuffer(t *testing.T) {
 	for _, c := range []struct{ code, input, output string }{
@@ -64,7 +69,7 @@ func TestStdoutBuffer(t *testing.T) {
 			t.Errorf("%s: %v\n%s", c.code, err, output)
 			continue
 		}
-		if got := string(output); got != c.output {
+		if got := testTrailer.ReplaceAllString(string(output), ""); got != c.output {
 			t.Errorf("%s: output %q, want %q", c.code, got, c.output)
 		}
 	}
