@@ -41,9 +41,17 @@ type Error struct {
 	Token   string
 }
 
+// NoLine is the line of an error without a position (Error gives the
+// message alone): Lua 5.1's luaG_runerror in the parser, which adds none
+// as the loader is a C function.
+const NoLine = 0
+
 // Error formats the error as Lua does, with the chunk name verbatim:
 // "<chunk>:<line>: <message> near '<token>'".
 func (e *Error) Error() string {
+	if e.Pos.Line == NoLine {
+		return e.Message
+	}
 	if e.Token == "" {
 		return fmt.Sprintf("%s:%d: %s", e.Pos.Source, e.Pos.Line, e.Message)
 	}
@@ -235,6 +243,11 @@ func (ls *lexer) errorAt(line int, msg string, tok int) {
 		near = ls.txtToken(tok)
 	}
 	panic(&Error{Pos: ast.Position{Source: ls.source, Line: line}, Message: msg, Token: near})
+}
+
+// runError is an error without a position (NoLine).
+func (ls *lexer) runError(msg string) {
+	panic(&Error{Pos: ast.Position{Source: ls.source, Line: NoLine}, Message: msg})
 }
 
 // lexError is luaX_lexerror / lj_lex_error.

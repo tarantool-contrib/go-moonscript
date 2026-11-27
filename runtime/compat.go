@@ -146,6 +146,9 @@ func syntaxError(err error, id, code string) string {
 	var pe *luaparse.Error
 	if errors.As(err, &pe) {
 		msg := pe.Message // the parser's own: lparser.c's or lj_parse.c's
+		if pe.Pos.Line == luaparse.NoLine {
+			return msg // an error without a position
+		}
 		if pe.Pos.Line == luaparse.EOF {
 			return fmt.Sprintf("%s:%d: %s near '<eof>'", id, strings.Count(code, "\n")+1, msg)
 		}

@@ -1,0 +1,16 @@
+main 32767	ok
+main 32768	true	too many local variables
+function 32767	ok
+function 32768	true	too many local variables
+vararg 32767	ok
+vararg 32768	true	too many local variables
+method 32768	true	too many local variables
+numeric for	ok
+numeric for over	true	too many local variables
+generic for	ok
+generic for over	true	too many local variables
+local function	true	too many local variables
+nested apart	ok
+before an error	true	too many local variables
+after an error	true	1: unexpected symbol near '='
+runs	run

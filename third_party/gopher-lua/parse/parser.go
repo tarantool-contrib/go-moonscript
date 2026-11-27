@@ -94,6 +94,7 @@ type funcState struct {
 	vararg  bool
 	actvar  []varInfo // the active local variables
 	pending []varInfo // declared, not active yet
+	nlocvar int       // Lua 5.1: the local variable records (f->locvars)
 	upvals  []int     // variable ids
 	bl      *blockScope
 	vstack  []gola // LuaJIT
@@ -301,11 +302,21 @@ func (p *parser) golaFixup(bl *blockScope) {
 	}
 }
 
+// maxLocVars is Lua 5.1's limit of local variable records per function:
+// registerlocalvar grows f->locvars by luaM_growvector up to SHRT_MAX.
+const maxLocVars = 32767
+
 // newLocalVar declares the n-th variable of a declaration.
 func (p *parser) newLocalVar(name string, n int) {
 	fs := p.fs
 	if len(fs.actvar)+n+1 > maxVars {
 		p.errorLimit(fs, maxVars, "local variables")
+	}
+	if !p.jit {
+		if fs.nlocvar >= maxLocVars {
+			p.ls.runError("too many local variables") // luaM_growaux_'s
+		}
+		fs.nlocvar++
 	}
 	p.nextID++
 	fs.pending = append(fs.pending[:n], varInfo{name, p.nextID})

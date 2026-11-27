@@ -132,6 +132,7 @@ func TestCompat(t *testing.T) {
 	for _, c := range []struct{ name, code, want string }{
 		{"loadstring syntax error", `out(loadstring("x = = 1"))`, `nil	[string "x = = 1"]:1: unexpected symbol near '='`},
 		{"loadstring syntax error message", `out(loadstring("(f)", "=input"))`, `nil	input:1: syntax error near '<eof>'`},
+		{"loadstring error without a position", `out(pcall(loadstring, string.rep("do local a end ", 32768), "=input"))`, "true\tnil\ttoo many local variables"},
 		{"loadstring chunk names", `
 local function msg(f) local ok, e = pcall(f); return e end
 out(msg(loadstring("error('e')")))

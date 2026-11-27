@@ -2116,7 +2116,7 @@ func (ls *LState) Load(reader io.Reader, name string) (*LFunction, error) {
 	if err != nil {
 		// go-moonscript patch: an error near no token (a limit) is reported
 		// like the compiler's limit errors, as "<chunk>:<line>: <message>"
-		if pe, ok := err.(*parse.Error); ok && pe.Token == "" {
+		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
 			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: name}
 		}
 		return nil, newApiErrorE(ApiErrorSyntax, err)

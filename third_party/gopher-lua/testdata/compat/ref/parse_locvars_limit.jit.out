@@ -1,0 +1,16 @@
+main 32767	ok
+main 32768	ok
+function 32767	ok
+function 32768	ok
+vararg 32767	ok
+vararg 32768	ok
+method 32768	ok
+numeric for	ok
+numeric for over	ok
+generic for	ok
+generic for over	ok
+local function	ok
+nested apart	ok
+before an error	true	329: unexpected symbol near '='
+after an error	true	1: unexpected symbol near '='
+runs	run
