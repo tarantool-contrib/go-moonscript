@@ -81,5 +81,3 @@ luajit-tests	lib/string/multiple_functions.lua	#1 string_op	fail: lib/string/mul
 luajit-tests	lib/table/pack.lua	-	skip: index tags +compat5.2
 luajit-tests	opt	-	skip: index tags +jit
 luajit-tests	trace	-	skip: index tags +jit
-parse	vshard	test/misc/check_uuid_on_connect.test.lua	error src:20: unexpected symbol near 'test_run' [lua5.1: error src:20: syntax error near 'test_run']
-parse	vshard	test/rebalancer/receiving_bucket.test.lua	error src:72: unexpected symbol near 'status' [lua5.1: error src:72: syntax error near 'status']

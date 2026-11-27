@@ -145,13 +145,7 @@ func syntaxError(err error, id, code string) string {
 	}
 	var pe *luaparse.Error
 	if errors.As(err, &pe) {
-		// gopher-lua's lexer says "Invalid token" for a character Lua's
-		// parser rejects with "unexpected symbol", its parser "syntax error"
-		// for what Lua mostly calls "unexpected symbol" too
-		msg := pe.Message
-		if msg == "Invalid token" || msg == "syntax error" {
-			msg = "unexpected symbol"
-		}
+		msg := pe.Message // the parser's own: lparser.c's or lj_parse.c's
 		if pe.Pos.Line == luaparse.EOF {
 			return fmt.Sprintf("%s:%d: %s near '<eof>'", id, strings.Count(code, "\n")+1, msg)
 		}
