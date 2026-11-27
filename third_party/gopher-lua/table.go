@@ -1,6 +1,7 @@
 package lua
 
 import (
+	"iter"
 	"math/bits"
 	"unsafe"
 )
@@ -545,6 +546,105 @@ func (tb *LTable) ForEach(cb func(LValue, LValue)) {
 		}
 	}
 	tb.hash.forEach(cb)
+}
+
+// All returns an iterator over the key/value pairs of the table, in the
+// order next and pairs give them: for k, v := range tb.All() visits the
+// pairs a loop of Next calls from LNil visits, and a break stops it.
+// (go-moonscript patch)
+//
+// While it runs, the loop body may assign to fields of the table that
+// exist, nil included, as with next: the other pairs are visited once
+// each, in the same order, and a field set to nil before the loop
+// reaches it is not visited. As in Lua, adding a field (assigning to a
+// key that has no value) during the loop is undefined: the loop may skip
+// pairs, visit some twice and may or may not visit the new ones, but it
+// does not panic and it ends; when the table has been resized, it goes
+// on over the keys the table had, with their current values.
+//
+// It reads the table raw (no __index, __pairs or metatable at all).
+func (tb *LTable) All() iter.Seq2[LValue, LValue] {
+	return func(yield func(LValue, LValue) bool) {
+		// the array part as it was: a key past it is either in the hash
+		// part as it was, or new
+		n := len(tb.array)
+		for i := 0; i < n; i++ {
+			var v LValue
+			if a := tb.array; i < len(a) {
+				v = a[i]
+			} else {
+				v = tb.hash.getNumber(LNumber(i + 1))
+			}
+			if v != LNil && !yield(LNumber(i+1), v) {
+				return
+			}
+		}
+		// the hash part: its nodes as they were; when the table has been
+		// resized (live is false), the table no longer writes them, so its
+		// keys and links are those it had then, and the values are read
+		// from the table
+		nodes := tb.hash.nodes
+		if len(nodes) == 0 {
+			return
+		}
+		live := func() bool { return unsafe.SliceData(tb.hash.nodes) == &nodes[0] }
+		if !tb.hash.inOrder() {
+			for i := range nodes {
+				nd := &nodes[i]
+				k, v := nd.key, nd.val
+				if k == nil {
+					continue
+				}
+				if !live() {
+					v = tb.RawGet(k)
+				}
+				if v != LNil && !yield(k, v) {
+					return
+				}
+			}
+			return
+		}
+		// insertion order: at most one step per node, which a traversal
+		// that adds no key never reaches, so that keys added during the
+		// loop (relinked nodes) cannot make it endless
+		for j, steps := tb.hash.first, 0; j > 0 && steps < len(nodes); steps++ {
+			k, v := nodes[j-1].key, nodes[j-1].val
+			if k == nil {
+				return // not a node of the chain: only an undefined traversal gets here
+			}
+			if !live() {
+				v = tb.RawGet(k)
+			}
+			if v != LNil && !yield(k, v) {
+				return
+			}
+			if live() && nodes[j-1].key != k {
+				// a new key moved k to another node (or took its dead
+				// node): go on from where k is, if it still is
+				i := tb.hash.findKey(k)
+				if i < 0 {
+					return
+				}
+				j = i + 1
+			}
+			j = nodes[j-1].ins
+		}
+	}
+}
+
+// Array returns an iterator over the elements 1, 2, ... of the table up to
+// the first nil, as ipairs: for i, v := range tb.Array() visits i, t[i]
+// read raw. Like ipairs, it reads t[i] when it gets there, so that the
+// loop body may change the table. (go-moonscript patch)
+func (tb *LTable) Array() iter.Seq2[int, LValue] {
+	return func(yield func(int, LValue) bool) {
+		for i := 1; ; i++ {
+			v := tb.RawGetInt(i)
+			if v == LNil || !yield(i, v) {
+				return
+			}
+		}
+	}
 }
 
 // This function is equivalent to lua_next ( http://www.lua.org/manual/5.1/manual.html#lua_next ).
