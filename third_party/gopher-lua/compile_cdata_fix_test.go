@@ -71,32 +71,32 @@ print(xpcall(function() return 1LL end, debug.traceback))
 	if err := L.DoString(script); err != nil {
 		t.Fatal(err)
 	}
-	const want = `false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '0x10ULL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1llu' needs the FFI, which is not supported
-false	s:1: complex number literal '12.5i' needs the FFI, which is not supported
-false	s:1: complex number literal '0b101I' needs the FFI, which is not supported
-false	s:3: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+	const want = `false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '0x10ULL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1llu' needs the FFI, which is not supported
+false	[string "s"]:1: complex number literal '12.5i' needs the FFI, which is not supported
+false	[string "s"]:1: complex number literal '0b101I' needs the FFI, which is not supported
+false	[string "s"]:3: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
 true	false	true
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: complex number literal '1i' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
-load	s:1: malformed number near '1.5LL'
-load	s:1: malformed number near '1e2LL'
-load	s:1: malformed number near '1U'
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: complex number literal '1i' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+false	[string "s"]:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
+load	[string "s"]:1: malformed number near '1.5LL'
+load	[string "s"]:1: malformed number near '1e2LL'
+load	[string "s"]:1: malformed number near '1U'
 false	<string>:34: 64-bit integer literal '1LL' needs the FFI, which is not supported
 2
-false	=dumped:2: complex number literal '2i' needs the FFI, which is not supported
-false	=dumped:2: complex number literal '2i' needs the FFI, which is not supported
+false	dumped:2: complex number literal '2i' needs the FFI, which is not supported
+false	dumped:2: complex number literal '2i' needs the FFI, which is not supported
 false	handled: <string>:42: 64-bit integer literal '1LL' needs the FFI, which is not supported
 false	<string>:43: 64-bit integer literal '1LL' needs the FFI, which is not supported
 stack traceback:

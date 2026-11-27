@@ -8,10 +8,8 @@ local function show(t)
   local r = {}
   for _, k in ipairs(keys) do
     local v = t[k]
-    -- (name and namewhat are the errors area's; gopher-lua's chunk names
-    -- are display names: source is "@<name>" on Lua 5.1, short_src the same)
+    -- (name and namewhat are the errors area's)
     if k == "name" or k == "namewhat" then v = nil end
-    if k == "source" and type(v) == "string" then v = v:gsub("^@", "") end
     if type(v) == "table" then
       local l = {} for line in pairs(v) do l[#l+1] = line end table.sort(l) v = "{" .. table.concat(l, ",") .. "}"
     elseif type(v) == "function" then v = (v == print and "print") or "fn" end

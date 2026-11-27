@@ -38,9 +38,10 @@ func TestCompat(t *testing.T) {
 }
 
 // runCompatScript runs a script as `lua5.1 <name>.lua` (or `luajit
-// <name>.jit.lua`, with DialectLuaJIT) would in its directory (chunk name "<name>.lua", which is what Lua 5.1 shows for
-// "@<name>.lua") and returns what it printed. print writes to a buffer,
-// formatting values with the global tostring as Lua 5.1's print does.
+// <name>.jit.lua`, with DialectLuaJIT) would in its directory (chunk name
+// "@<name>.lua", the script's directory the working directory) and returns
+// what it printed. print writes to a buffer, formatting values with the
+// global tostring as Lua 5.1's print does.
 func runCompatScript(t *testing.T, script string) string {
 	t.Helper()
 	dialect := DialectLua51
@@ -51,6 +52,7 @@ func runCompatScript(t *testing.T, script string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Chdir(filepath.Dir(script))
 	L := NewState(Options{Dialect: dialect})
 	defer L.Close()
 	var out strings.Builder
@@ -69,7 +71,7 @@ func runCompatScript(t *testing.T, script string) string {
 		out.WriteByte('\n')
 		return 0
 	}))
-	fn, err := L.Load(strings.NewReader(string(code)), filepath.Base(script))
+	fn, err := L.LoadChunk(strings.NewReader(string(code)), "@"+filepath.Base(script))
 	if err != nil {
 		t.Fatal(err)
 	}

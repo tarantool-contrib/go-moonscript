@@ -108,8 +108,13 @@ func debugGetInfo(L *LState) int {
 	// calls debug hooks make cheaper)
 	tbl := L.CreateTable(0, 8)
 	if strings.ContainsRune(what, 'S') {
-		tbl.RawSetString("source", LString(dbg.Source))
-		tbl.RawSetString("short_src", LString(shortSource(dbg.Source)))
+		// go-moonscript patch: the Lua chunk name and its id (chunkname.go)
+		shortSrc := dbg.Source
+		if dbg.What == "C" {
+			shortSrc = "[C]"
+		}
+		tbl.RawSetString("source", LString(dbg.ChunkName))
+		tbl.RawSetString("short_src", LString(shortSrc))
 		tbl.RawSetString("linedefined", LNumber(dbg.LineDefined))
 		tbl.RawSetString("lastlinedefined", LNumber(dbg.LastLineDefined))
 		tbl.RawSetString("what", LString(dbg.What))
@@ -134,16 +139,6 @@ func debugGetInfo(L *LState) int {
 	}
 	L.Push(tbl)
 	return 1
-}
-
-// shortSource is luaO_chunkid for gopher-lua's chunk names, which are
-// display names already ("foo.lua", `[string "..."]`): only a '=' or '@'
-// in front goes.
-func shortSource(source string) string {
-	if strings.HasPrefix(source, "=") || strings.HasPrefix(source, "@") {
-		return source[1:]
-	}
-	return source
 }
 
 // activeLines is collectvalidlines: the lines of fn's instructions, as
@@ -394,7 +389,7 @@ func debugDebug(L *LState) int {
 		if !ok || line == "cont\n" {
 			return 0
 		}
-		fn, err := L.Load(strings.NewReader(line), "(debug command)") // a display name, "=(debug command)" in Lua 5.1
+		fn, err := L.LoadChunk(strings.NewReader(line), "=(debug command)")
 		if err == nil {
 			L.Push(fn)
 			err = L.PCall(0, 0, nil)

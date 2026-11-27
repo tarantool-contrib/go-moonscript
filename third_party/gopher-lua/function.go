@@ -23,7 +23,13 @@ type DbgCall struct {
 }
 
 type FunctionProto struct {
-	SourceName         string
+	// SourceName is the name of the chunk shown in error messages and
+	// tracebacks (luaO_chunkid's, debug.getinfo's short_src)
+	SourceName string
+	// Source is the Lua chunk name it was loaded as (lua_load's chunkname,
+	// debug.getinfo's source: "@file", "=name", the source text), "" if
+	// unknown: "=" + SourceName (go-moonscript patch, chunkname.go)
+	Source             string
 	LineDefined        int
 	LastLineDefined    int
 	NumUpvalues        uint8
@@ -43,6 +49,8 @@ type FunctionProto struct {
 	// go-moonscript patch: hashString of each of stringConstants (for the
 	// instructions that index a table with a constant string)
 	stringConstHashes []uint32
+	// go-moonscript patch: Source is set, also when "" (chunkname.go)
+	hasSource bool
 }
 
 // strConstHash returns hashString(fp.stringConstants[k]) (go-moonscript

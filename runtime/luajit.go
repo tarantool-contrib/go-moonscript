@@ -1,17 +1,14 @@
 package runtime
 
 // The LuaJIT 2.1 dialect of the compatibility layer (a state created with
-// lua.Options{Dialect: lua.DialectLuaJIT}, see NewState): load,
-// loadstring (which does the same) and loadfile take LuaJIT's arguments,
-// with this package's chunk naming (ChunkID) and syntax errors; numbers
+// lua.Options{Dialect: lua.DialectLuaJIT}, see NewState): loadfile takes
+// LuaJIT's arguments (load and loadstring are gopher-lua's); numbers
 // convert to strings as LuaJIT does (lua.JITNumberString); string.format
 // is gopher-lua's LuaJIT one, %q included.
 
 import (
-	"errors"
 	"io"
 	"os"
-	"strings"
 
 	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
 )
@@ -25,13 +22,9 @@ func numberString(L *lua.LState, f float64) string {
 	return formatNumber(f)
 }
 
-// openLuaJITCompat replaces the load functions of OpenCompat with
-// LuaJIT 2.1's.
+// openLuaJITCompat replaces the loadfile of OpenCompat with LuaJIT 2.1's.
 func openLuaJITCompat(L *lua.LState) {
-	g := L.G.Global
-	g.RawSetString("load", L.NewFunction(jitLoad))
-	g.RawSetString("loadstring", L.NewFunction(jitLoad)) // the same, another function
-	g.RawSetString("loadfile", L.NewFunction(jitLoadFile))
+	L.G.Global.RawSetString("loadfile", L.NewFunction(jitLoadFile))
 }
 
 func optString(L *lua.LState, n int) (string, bool) {
@@ -39,62 +32,6 @@ func optString(L *lua.LState, n int) (string, bool) {
 		return "", false
 	}
 	return L.CheckString(n), true
-}
-
-// jitLoad is load(chunk [, chunkname [, mode [, env]]]): the chunk is a
-// string (or number), named by itself by default, or a reader function
-// ("=(load)"); a mode without 't' rejects source chunks; a table env is
-// the environment of the loaded function.
-func jitLoad(L *lua.LState) int {
-	chunkname, hasName := optString(L, 2)
-	mode, hasMode := optString(L, 3)
-	env, _ := L.Get(4).(*lua.LTable)
-	var code string
-	if lv := L.Get(1); lv.Type() == lua.LTString || lv.Type() == lua.LTNumber {
-		code = L.CheckString(1)
-		if !hasName {
-			chunkname = code
-		}
-	} else {
-		fn := L.CheckFunction(1)
-		if !hasName {
-			chunkname = "=(load)"
-		}
-		top := L.GetTop()
-		var buf strings.Builder
-		for {
-			L.SetTop(top)
-			L.Push(fn)
-			if err := L.PCall(0, 1, nil); err != nil {
-				L.SetTop(top)
-				L.Push(lua.LNil)
-				if ae := (*lua.ApiError)(nil); errors.As(err, &ae) {
-					L.Push(ae.Object)
-				} else {
-					L.Push(lua.LString(err.Error()))
-				}
-				return 2
-			}
-			piece := L.Get(-1)
-			if piece == lua.LNil {
-				break
-			}
-			if piece.Type() != lua.LTString && piece.Type() != lua.LTNumber {
-				L.SetTop(top)
-				L.Push(lua.LNil)
-				L.Push(lua.LString("reader function must return a string"))
-				return 2
-			}
-			s := L.ToString(-1)
-			if s == "" {
-				break
-			}
-			buf.WriteString(s)
-		}
-		L.SetTop(top)
-		code = buf.String()
-	}
-	return loadChecked(L, code, chunkname, mode, hasMode, env)
 }
 
 // loadChecked loads code as load does after reading it: mode and

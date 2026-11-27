@@ -440,7 +440,11 @@ func (ls *LState) LoadFile(path string) (*LFunction, error) {
 		}
 	}
 
-	return ls.Load(reader, path)
+	// go-moonscript patch: Lua chunk names (chunkname.go)
+	if len(path) == 0 {
+		return ls.LoadChunk(reader, "=stdin")
+	}
+	return ls.LoadChunk(reader, "@"+path)
 }
 
 func (ls *LState) LoadString(source string) (*LFunction, error) {

@@ -1,0 +1,82 @@
+main	"@lib_chunkname.lua"	lib_chunkname.lua	main
+local function	"@lib_chunkname.lua"	lib_chunkname.lua	Lua
+print	"=[C]"	[C]	C
+loadstring	"return 1"	[string "return 1"]	main
+loadstring =name	"=named"	named	main
+loadstring @file	"@file.lua"	file.lua	main
+loadstring name	"chunk"	[string "chunk"]	main
+loadstring lines	"x = 1\
+return 2"	[string "x = 1..."]	main
+loadstring cr	"x = 1\rreturn 2"	[string "x = 1..."]	main
+loadstring tab	"x = 1	return 2"	[string "x = 1	return 2"]	main
+loadstring empty name	""	[string ""]	main
+loadstring 40	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"]	main
+loadstring 42	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"]	main
+loadstring 43	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"]	main
+loadstring 44	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..."]	main
+loadstring 45	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..."]	main
+loadstring 46	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..."]	main
+loadstring 47	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..."]	main
+loadstring 48	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..."]	main
+loadstring 49	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..."]	main
+loadstring 60	"return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"	[string "return xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx..."]	main
+@path 50	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 52	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 53	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 55	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 56	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 57	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 59	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 60	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 61	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+@path 80	"@d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua"	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua	main
+=name 58	"=nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"	nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn	main
+=name 59	"=nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"	nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn	main
+=name 60	"=nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"	nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn	main
+=name 70	"=nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"	nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn	main
+load	"=(load)"	(load)	main
+load =ld	"=ld"	ld	main
+load pieces	"pieces"	[string "pieces"]	main
+loadfile	"@files/ret3.lua"	files/ret3.lua	main
+loadfile ./	"@./files/ret3.lua"	./files/ret3.lua	main
+nested	"=outer"	outer	Lua
+dumped	"@dumped.lua"	dumped.lua	main
+dumped nested	"=outer"	outer	Lua
+error	false	[string "error('boom')"]:1: boom
+error =name	false	named:1: boom
+error @file	false	file.lua:1: boom
+error name	false	[string "chunk"]:1: boom
+error lines	false	[string "local x = 1..."]:2: boom
+error long	false	[string "error('boom') -----------------------------..."]:1: boom
+error load	true
+error nested	false	nested:1: deep
+dumped error	false	dumped:2: E
+syntax	nil	[string "x = = 1"]:1: unexpected symbol near '='
+syntax =name	nil	named:1: unexpected symbol near '='
+syntax @file	nil	file.lua:1: unexpected symbol near '='
+syntax name	nil	[string "chunk"]:1: unexpected symbol near '='
+syntax eof	nil	[string "x = ("]:1: unexpected symbol near '<eof>'
+syntax lines	nil	[string "x = 1..."]:2: unexpected symbol near '='
+syntax load	nil	l:1: unexpected symbol near '='
+syntax file	nil	files/syn.lua:2: unexpected symbol near '='
+syntax long 60	nil	[string "x = = 1 ----------------------------------------------------"]:1: unexpected symbol near '='
+syntax long 63	nil	[string "x = = 1 -------------------------------------------------------"]:1: unexpected symbol near '='
+syntax long 64	nil	[string "x = = 1 -------------------------------------------------------..."]:1: unexpected symbol near '='
+syntax long 70	nil	[string "x = = 1 -------------------------------------------------------..."]:1: unexpected symbol near '='
+syntax long 90	nil	[string "x = = 1 -------------------------------------------------------..."]:1: unexpected symbol near '='
+syntax @path 60	nil	d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua:1: unexpected symbol near '='
+syntax @path 72	nil	d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua:1: unexpected symbol near '='
+syntax @path 73	nil	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua:1: unexpected symbol near '='
+syntax @path 90	nil	.../d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/d/f.lua:1: unexpected symbol near '='
+syntax =name 90	nil	nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn:1: unexpected symbol near '='
+limit error long	nil	[string "local a local a local a local a local a local a local a local a..."]:1: main function has more than 200 local variables
+reader error	nil	lib_chunkname.lua:78: rdr
+reader error value	2
+reader value	nil	lib_chunkname.lua:80: reader function must return a string
+reader number	nil	(load):1: unexpected symbol near '12'
+true
+reader at pcall	true	nil	reader function must return a string
+binary	nil	binary string: bad header in precompiled chunk
+binary =name	nil	bin: bad header in precompiled chunk
+binary @file	nil	bin: bad header in precompiled chunk
+binary name	nil	named: bad header in precompiled chunk

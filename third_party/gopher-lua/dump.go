@@ -31,7 +31,7 @@ const (
 	dumpVersion     = 0x5f     // not 0x51, PUC Lua 5.1's, nor LuaJIT's 1 or 2
 	dumpFormat      = 0
 	dumpMagic       = "gopher-lua" // and the version of the format
-	dumpRevision    = 1
+	dumpRevision    = 2            // 2: prototypes have their chunk name (Source)
 )
 
 // dumpHeader is the start of every dump, dumpHeaderLJ of those made under
@@ -66,7 +66,7 @@ func dumpFunction(fn *LFunction, header string, strip bool) ([]byte, error) {
 		return nil, errors.New("unable to dump given function")
 	}
 	d := &dumper{buf: []byte(header), strip: strip}
-	d.proto(fn.Proto)
+	d.proto(fn.Proto, "")
 	return d.buf, nil
 }
 
@@ -91,8 +91,17 @@ const (
 	dumpConstCdataNumeral // cdataNumeralFn (compile.go)
 )
 
-func (d *dumper) proto(fp *FunctionProto) {
+// proto dumps fp, nested in a prototype whose chunk name is parent ("" for
+// the main one): fp's chunk name is "" if it is the same, as ldump.c's
+// DumpFunction leaves out a source that is its parent's (it is the source
+// text of a string chunk).
+func (d *dumper) proto(fp *FunctionProto, parent string) {
 	d.str(fp.SourceName)
+	if source := fp.chunkName(); source != parent {
+		d.str(source)
+	} else {
+		d.str("")
+	}
 	d.int(fp.LineDefined)
 	d.int(fp.LastLineDefined)
 	d.buf = append(d.buf, fp.NumUpvalues, fp.NumParameters, fp.IsVarArg, fp.NumUsedRegisters)
@@ -127,7 +136,7 @@ func (d *dumper) proto(fp *FunctionProto) {
 	}
 	d.uint(uint64(len(fp.FunctionPrototypes)))
 	for _, p := range fp.FunctionPrototypes {
-		d.proto(p)
+		d.proto(p, fp.chunkName())
 	}
 	d.uint(uint64(len(fp.DbgSourcePositions)))
 	for _, line := range fp.DbgSourcePositions {
@@ -219,13 +228,18 @@ func (u *undumper) byte() byte {
 	return 0
 }
 
-func (u *undumper) proto(depth int) *FunctionProto {
+// proto loads a prototype nested in one whose chunk name is parent.
+func (u *undumper) proto(depth int, parent string) *FunctionProto {
 	if depth > 200 { // LUAI_MAXCCALLS
 		u.fail("bad code")
 		return nil
 	}
 	fp := &FunctionProto{}
 	fp.SourceName = u.str()
+	if fp.Source = u.str(); fp.Source == "" && depth > 0 {
+		fp.Source = parent
+	}
+	fp.hasSource = true
 	fp.LineDefined = u.int()
 	fp.LastLineDefined = u.int()
 	fp.NumUpvalues = u.byte()
@@ -261,7 +275,7 @@ func (u *undumper) proto(depth int) *FunctionProto {
 	}
 	fp.FunctionPrototypes = make([]*FunctionProto, u.count(1))
 	for i := range fp.FunctionPrototypes {
-		fp.FunctionPrototypes[i] = u.proto(depth + 1)
+		fp.FunctionPrototypes[i] = u.proto(depth+1, fp.Source)
 	}
 	fp.DbgSourcePositions = make([]int, u.count(1))
 	for i := range fp.DbgSourcePositions {
@@ -417,7 +431,7 @@ func undumpChunk(data []byte) (fp *FunctionProto, why string, header bool) {
 		return nil, "unexpected end", true
 	}
 	u := &undumper{data: data[len(dumpHeader):]}
-	fp = u.proto(0)
+	fp = u.proto(0, "")
 	if u.err == "" && len(u.data) != 0 {
 		u.fail("bad code") // trailing bytes
 	}
@@ -437,11 +451,11 @@ func newUndumpedFunction(fp *FunctionProto, env *LTable) *LFunction {
 	return fn
 }
 
-// undumpError is the error of a binary chunk named name that cannot be
-// loaded: luaU_undump's "<name>: <why> in precompiled chunk", where name
-// is the chunk name without its '@' or '=', "binary string" for a chunk
-// named by its own text (gopher-lua's display names: `[string "..."]` of a
-// text starting with the signature); LuaJIT's "<name>: cannot load
+// undumpError is the error of a binary chunk named name (a Lua chunk name)
+// that cannot be loaded: luaU_undump's "<name>: <why> in precompiled
+// chunk", where name is the chunk name without its '@' or '=', "binary
+// string" for a chunk named by its own text (or by a display name of Load
+// `[string "..."]` of such a text); LuaJIT's "<name>: cannot load
 // incompatible bytecode" (or "malformed" when the header is right), name
 // "(binary)" for a chunk named by its text.
 func undumpError(ls *LState, name, why string, header bool) error {
@@ -456,10 +470,12 @@ func undumpError(ls *LState, name, why string, header bool) error {
 	} else {
 		why += " in precompiled chunk"
 	}
-	switch {
-	case len(name) > 0 && (name[0] == '@' || name[0] == '='):
+	if len(name) > 0 && (name[0] == '@' || name[0] == '=') {
 		name = name[1:]
-	case IsBinaryChunk(name), strings.HasPrefix(name, "[string \"") && IsBinaryChunk(name[9:]):
+		if strings.HasPrefix(name, "[string \"") && IsBinaryChunk(name[9:]) {
+			name = binName // a display name of Load
+		}
+	} else if IsBinaryChunk(name) {
 		name = binName
 	}
 	return newApiErrorS(ApiErrorSyntax, name+": "+why)

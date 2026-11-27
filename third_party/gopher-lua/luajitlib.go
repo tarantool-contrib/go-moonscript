@@ -134,18 +134,18 @@ func jitLoad(L *LState) int {
 	name, hasName := jitOptString(L, 2)
 	mode, hasMode := jitOptString(L, 3)
 	env, _ := L.Get(4).(*LTable)
-	var code, bcname string
+	// go-moonscript patch: Lua chunk names, the string itself or "=(load)"
+	// by default, as in LuaJIT (chunkname.go)
+	var code string
 	if lv := L.Get(1); lv.Type() == LTString || lv.Type() == LTNumber {
 		code = L.CheckString(1)
-		bcname = code
 		if !hasName {
-			name = "<string>"
+			name = code
 		}
 	} else {
 		fn := L.CheckFunction(1)
-		bcname = "=(load)"
 		if !hasName {
-			name = "?"
+			name = "=(load)"
 		}
 		var buf strings.Builder
 		top := L.GetTop()
@@ -169,7 +169,7 @@ func jitLoad(L *LState) int {
 			if !LVCanConvToString(ret) {
 				L.SetTop(top)
 				L.Push(LNil)
-				L.Push(LString("reader function must return a string"))
+				L.Push(LString(L.whereMessage("reader function must return a string")))
 				return 2
 			}
 			s := L.lvAsString(ret)
@@ -181,6 +181,13 @@ func jitLoad(L *LState) int {
 		L.SetTop(top)
 		code = buf.String()
 	}
+	return jitLoadChecked(L, code, name, mode, hasMode, env)
+}
+
+// jitLoadChecked loads code as LuaJIT's load and loadfile do once they
+// have read it: the mode and precompiled chunks checked, the environment
+// set.
+func jitLoadChecked(L *LState, code, chunkname, mode string, hasMode bool, env *LTable) int {
 	if msg := JITLoadModeError(code, mode, hasMode); msg != "" {
 		L.Push(LNil)
 		L.Push(LString(msg))
@@ -188,14 +195,11 @@ func jitLoad(L *LState) int {
 	}
 	if JITIsBinaryChunk(code) && !IsDump(code) {
 		// bytecode of another VM; this VM's own dumps load (dump.go)
-		if hasName {
-			bcname = name
-		}
 		L.Push(LNil)
-		L.Push(LString(JITBytecodeError(bcname)))
+		L.Push(LString(JITBytecodeError(chunkname)))
 		return 2
 	}
-	n := loadaux(L, strings.NewReader(code), name)
+	n := loadaux(L, strings.NewReader(code), chunkname)
 	if fn, ok := L.Get(-1).(*LFunction); ok && n == 1 && env != nil {
 		fn.Env = env
 	}
@@ -266,10 +270,10 @@ func jitLoadFile(L *LState) int {
 	var chunkname string
 	var err error
 	if fname, ok := jitOptString(L, 1); ok {
-		chunkname = fname
+		chunkname = "@" + fname // go-moonscript patch: Lua chunk names
 		code, err = os.ReadFile(fname)
 	} else {
-		chunkname = "<stdin>"
+		chunkname = "=stdin"
 		code, err = readAllStdin()
 	}
 	if err != nil {
@@ -281,22 +285,13 @@ func jitLoadFile(L *LState) int {
 			msg = strings.ToUpper(msg[:1]) + msg[1:]
 		}
 		L.Push(LNil)
-		L.Push(LString("cannot open " + chunkname + ": " + msg))
+		L.Push(LString("cannot open " + chunkname[1:] + ": " + msg))
 		return 2
 	}
 	// go-moonscript patch: the parser skips a first "#" line (lj_lex_setup;
 	// luaL_loadfilex reads the file as it is), and refuses bytecode after it
 	src := string(code)
-	if msg := JITLoadModeError(src, mode, hasMode); msg != "" {
-		L.Push(LNil)
-		L.Push(LString(msg))
-		return 2
-	}
-	n := loadaux(L, strings.NewReader(src), chunkname)
-	if fn, ok := L.Get(-1).(*LFunction); ok && n == 1 && env != nil {
-		fn.Env = env
-	}
-	return n
+	return jitLoadChecked(L, src, chunkname, mode, hasMode, env)
 }
 
 func readAllStdin() ([]byte, error) {

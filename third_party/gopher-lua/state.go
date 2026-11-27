@@ -163,9 +163,15 @@ type Debug struct {
 	// NameWhat is Lua 5.1's namewhat: how the function was named in the
 	// call ("global", "local", "method", "field", "upvalue"), "" if Name
 	// is none (go-moonscript patch)
-	NameWhat        string
-	What            string
-	Source          string
+	NameWhat string
+	What     string
+	// Source is the chunk's name as error messages show it (lua_Debug's
+	// short_src; "=[C]" for a Go function)
+	Source string
+	// ChunkName is the Lua chunk name of the chunk (lua_Debug's source:
+	// "@file", "=name", the source text; "=[C]" for a Go function)
+	// (go-moonscript patch, chunkname.go)
+	ChunkName       string
 	CurrentLine     int
 	NUpvalues       int
 	LineDefined     int
@@ -2064,11 +2070,13 @@ func (ls *LState) GetInfo(what string, dbg *Debug, fn LValue) (LValue, error) {
 			if f.IsG {
 				dbg.What = "C"
 				dbg.Source = "=[C]"
+				dbg.ChunkName = "=[C]"
 				dbg.LineDefined = -1
 				dbg.LastLineDefined = -1
 			} else {
 				dbg.What = "Lua"
 				dbg.Source = f.Proto.SourceName
+				dbg.ChunkName = f.Proto.chunkName()
 				dbg.LineDefined = f.Proto.LineDefined
 				dbg.LastLineDefined = f.Proto.LastLineDefined
 				if f.Proto.LineDefined == 0 {
@@ -2314,9 +2322,21 @@ func (ls *LState) Register(name string, fn LGFunction) {
 
 /* load and function call operations {{{ */
 
+// Load loads a chunk named name, which error messages and tracebacks show
+// as it is ("name:1: ..."). go-moonscript patch: debug.getinfo reports its
+// source as "=" + name and its short_src as name; LoadChunk loads a chunk
+// with a Lua chunk name ("@file", "=name", the source text), as lua_load
+// does (chunkname.go).
 func (ls *LState) Load(reader io.Reader, name string) (*LFunction, error) {
+	return ls.load(reader, name, name, "="+name)
+}
+
+// load loads a chunk whose name in error messages is name (parseName in
+// syntax errors) and whose Lua chunk name is chunkname (go-moonscript
+// patch).
+func (ls *LState) load(reader io.Reader, name, parseName, chunkname string) (*LFunction, error) {
 	// go-moonscript patch: binary chunks, from string.dump (dump.go)
-	reader, fn, err := ls.loadBinary(reader, name)
+	reader, fn, err := ls.loadBinary(reader, chunkname)
 	if fn != nil || err != nil {
 		return fn, err
 	}
@@ -2329,34 +2349,35 @@ func (ls *LState) Load(reader io.Reader, name string) (*LFunction, error) {
 	if err != nil {
 		return nil, newApiErrorE(ApiErrorSyntax, err)
 	}
-	chunk, err := parse.ParseBytes(src, name, dialect)
+	chunk, err := parse.ParseBytes(src, parseName, dialect)
 	if err != nil {
 		// go-moonscript patch: a function that needs too many registers
 		// before the error, which lua5.1 finds while parsing (lua51Overflow)
 		if dialect == parse.Lua51 {
-			if pe := parse.Lua51Overflow(src, name); pe != nil {
+			if pe := parse.Lua51Overflow(src, parseName); pe != nil {
 				err = pe
 			}
 		}
 		// go-moonscript patch: an error near no token (a limit) is reported
 		// like the compiler's limit errors, as "<chunk>:<line>: <message>"
 		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
-			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: name}
+			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: parseName}
 		}
 		return nil, newApiErrorE(ApiErrorSyntax, err)
 	}
-	proto, err := Compile(chunk, name)
+	proto, err := Compile(chunk, parseName)
 	// go-moonscript patch: lua5.1 finds that a function needs too many
 	// registers while parsing, and reports it near the token it is at; the
 	// parser's model of its registers tells, if the compiler needed many
 	if dialect == parse.Lua51 && lua51Overflow(proto, err) {
-		if pe := parse.Lua51Overflow(src, name); pe != nil {
+		if pe := parse.Lua51Overflow(src, parseName); pe != nil {
 			return nil, newApiErrorE(ApiErrorSyntax, pe)
 		}
 	}
 	if err != nil {
 		return nil, newApiErrorE(ApiErrorSyntax, err)
 	}
+	setSource(proto, name, chunkname) // go-moonscript patch (chunkname.go)
 	return newLFunctionL(proto, ls.currentEnv(), 0), nil
 }
 

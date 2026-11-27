@@ -77,7 +77,7 @@ end)`); err != nil {
 				t.Fatalf("panic loading %q: %v", b, r)
 			}
 		}()
-		if _, err := L.Load(bytes.NewReader(b), "=chunk"); err != nil &&
+		if _, err := L.LoadChunk(bytes.NewReader(b), "=chunk"); err != nil &&
 			!(strings.HasPrefix(err.Error(), "chunk: ") && strings.HasSuffix(err.Error(), " in precompiled chunk")) {
 			t.Fatalf("error %q", err)
 		}

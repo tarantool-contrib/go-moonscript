@@ -144,11 +144,11 @@ func limitSource(family string, n int) string {
 	return pre.String() + body + "\n"
 }
 
-// loadResult is "ok" or "error <message>" for loadstring(src, "input").
+// loadResult is "ok" or "error <message>" for loadstring(src, "=input").
 func loadResult(t *testing.T, L *LState, src string) string {
 	t.Helper()
 	L.SetGlobal("src", LString(src))
-	if err := L.DoString(`local f, e = loadstring(src, "input") res = f and "ok" or "error " .. e`); err != nil {
+	if err := L.DoString(`local f, e = loadstring(src, "=input") res = f and "ok" or "error " .. e`); err != nil {
 		t.Fatal(err)
 	}
 	return L.GetGlobal("res").String()

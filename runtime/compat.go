@@ -5,25 +5,24 @@ package runtime
 // libraries that MoonScript tooling depends on behave like the reference
 // interpreter:
 //
-//   - chunk names: gopher-lua prints a chunk name verbatim in error
-//     positions ("@foo.moon:3: boom"); loadstring, load, loadfile, dofile and
-//     the package loaders here convert it like luaO_chunkid ("foo.moon:3:",
-//     "=(command line)" -> "(command line)", strings -> [string "..."]), and
-//     debug.getinfo reports the original name as source (short_src is
-//     the converted one).
-//     This is what moonscript.errors relies on: it looks the file name from
-//     an error position up as line_tables["@" .. name].
-//   - Lua syntax errors from loadstring & co are reported as
-//     "<chunkid>:<line>: <message> near '<token>'".
+//   - chunk names and syntax errors are gopher-lua's own
+//     (third_party/gopher-lua/chunkname.go): Lua chunk names ("@foo.moon",
+//     "=(command line)", source strings) are shown as luaO_chunkid does
+//     ("foo.moon:3:", "(command line)", [string "..."]) and debug.getinfo
+//     reports them as source (short_src is the shown name), which
+//     moonscript.errors relies on: it looks the file name from an error
+//     position up as line_tables["@" .. name]. LoadLua is loadstring's
+//     loading; loadfile, dofile and the package loaders here read files
+//     as luaL_loadfile does.
 //   - require follows ll_require: package.loaders is read from the package
 //     table on every call (so moonscript.insert_loader works), and the
 //     "module 'x' not found:" message lists each loader's reason.
 //   - debug.traceback labels frames like PUC Lua: native (Go) functions
 //     "[C]" instead of "[G]", "(tail call)" instead of "(tailcall)", chunk
 //     functions "main chunk" instead of "function <file:0>".
-//   - The wrappers of tostring, string.format, debug.getinfo and
-//     debug.traceback run the function they wrap in their own frame, so
-//     debug hooks see one call, as in Lua 5.1.
+//   - The wrappers of tostring, string.format and debug.traceback run the
+//     function they wrap in their own frame, so debug hooks see one call,
+//     as in Lua 5.1.
 //   - string.format's %q escapes like Lua 5.1's addquoted (a newline
 //     becomes backslash-newline, "\r" "\\r", NUL "\\000").
 //   - tostring and print format numbers with "%.14g" (LUAI_NUMFFORMAT)
@@ -40,45 +39,13 @@ import (
 	"strings"
 
 	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
-	luaparse "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
 )
 
-const luaIDSize = 60 // LUA_IDSIZE
-
 // ChunkID is luaO_chunkid: the name Lua 5.1 shows in error positions and
-// tracebacks for a chunk named source.
+// tracebacks for a chunk named source (lua.ChunkID in DialectLua51).
 func ChunkID(source string) string {
-	switch {
-	case strings.HasPrefix(source, "="):
-		s := source[1:]
-		if len(s) > luaIDSize-1 {
-			s = s[:luaIDSize-1]
-		}
-		return s
-	case strings.HasPrefix(source, "@"):
-		s := source[1:]
-		max := luaIDSize - len(" '...' ") - 1
-		if len(s) > max {
-			return "..." + s[len(s)-max:]
-		}
-		return s
-	default:
-		max := luaIDSize - len(` [string "..."] `) - 1
-		l := strings.IndexAny(source, "\n\r")
-		if l < 0 {
-			l = len(source)
-		}
-		if l > max {
-			l = max
-		}
-		if l < len(source) {
-			return `[string "` + source[:l] + `..."]`
-		}
-		return `[string "` + source + `"]`
-	}
+	return lua.ChunkID(source, lua.DialectLua51)
 }
-
-const sourcesKey = "go-moonscript.sources"
 
 // load compiles Lua code as chunk chunkname (a Lua chunk name: "@file",
 // "=name" or the source itself) and pushes the function, or pushes nil and
@@ -94,74 +61,11 @@ func load(L *lua.LState, code, chunkname string) int {
 	return 1
 }
 
-// loadLua compiles code, naming the chunk like PUC Lua (see ChunkID).
+// loadLua compiles code as chunk chunkname (a Lua chunk name: "@file",
+// "=name" or the source itself), named like PUC Lua in error messages
+// (lua.LState.LoadChunk).
 func loadLua(L *lua.LState, code, chunkname string) (*lua.LFunction, error) {
-	id := ChunkID(chunkname)
-	fn, err := L.Load(strings.NewReader(code), id)
-	if err != nil {
-		return nil, errors.New(syntaxError(err, id, code))
-	}
-	if !lua.IsBinaryChunk(code) { // a binary chunk keeps its functions' names
-		recordSource(L, id, chunkname)
-	}
-	return fn, nil
-}
-
-// recordSource remembers the chunk name behind a chunk id for debug.getinfo,
-// unless the id gives it back (sourceOf): the table only grows, and
-// loadstring in a loop must not make it grow.
-func recordSource(L *lua.LState, id, chunkname string) {
-	if src, ok := sourceOf(id); ok && src == chunkname {
-		return
-	}
-	reg := L.Get(lua.RegistryIndex).(*lua.LTable)
-	tbl, ok := reg.RawGetString(sourcesKey).(*lua.LTable)
-	if !ok {
-		tbl = L.NewTable()
-		reg.RawSetString(sourcesKey, tbl)
-	}
-	tbl.RawSetString(id, lua.LString(chunkname))
-}
-
-// sourceOf returns the chunk name of a chunk id [string "<source>"] whose
-// source was not shortened; ok is false for other ids.
-func sourceOf(id string) (src string, ok bool) {
-	const prefix, suffix = `[string "`, `"]`
-	if strings.HasPrefix(id, prefix) && strings.HasSuffix(id, suffix) && len(id) >= len(prefix)+len(suffix) {
-		src = id[len(prefix) : len(id)-len(suffix)]
-		if ChunkID(src) == id {
-			return src, true
-		}
-	}
-	return "", false
-}
-
-// syntaxError formats a gopher-lua parse or compile error the way luaX
-// reports errors: "<chunkid>:<line>: <message> near '<token>'".
-func syntaxError(err error, id, code string) string {
-	var ae *lua.ApiError
-	if errors.As(err, &ae) && ae.Cause != nil {
-		err = ae.Cause
-	}
-	var pe *luaparse.Error
-	if errors.As(err, &pe) {
-		msg := pe.Message // the parser's own: lparser.c's or lj_parse.c's
-		if pe.Pos.Line == luaparse.NoLine {
-			return msg // an error without a position
-		}
-		if pe.Pos.Line == luaparse.EOF {
-			return fmt.Sprintf("%s:%d: %s near '<eof>'", id, strings.Count(code, "\n")+1, msg)
-		}
-		return fmt.Sprintf("%s:%d: %s near '%s'", id, pe.Pos.Line, msg, pe.Token)
-	}
-	var ce *lua.CompileError
-	if errors.As(err, &ce) {
-		return fmt.Sprintf("%s:%d: %s", id, ce.Line, ce.Message)
-	}
-	if errors.As(err, &ae) && ae.Object != nil {
-		return ae.Object.String()
-	}
-	return err.Error()
+	return L.LoadChunk(strings.NewReader(code), chunkname)
 }
 
 // strerror is the C library text for an OS error ("No such file or
@@ -223,41 +127,6 @@ func loadFile(L *lua.LState, path string) (*lua.LFunction, error) {
 func OpenCompat(L *lua.LState) {
 	g := L.G.Global
 
-	g.RawSetString("loadstring", L.NewFunction(func(L *lua.LState) int {
-		code := L.CheckString(1)
-		return load(L, code, L.OptString(2, code))
-	}))
-
-	g.RawSetString("load", L.NewFunction(func(L *lua.LState) int {
-		fn := L.CheckFunction(1)
-		chunkname := L.OptString(2, "=(load)")
-		var buf strings.Builder
-		for {
-			L.Push(fn)
-			L.Call(0, 1)
-			piece := L.Get(-1)
-			L.Pop(1)
-			if piece == lua.LNil {
-				break
-			}
-			s, ok := piece.(lua.LString)
-			if !ok {
-				if n, isNum := piece.(lua.LNumber); isNum {
-					s = lua.LString(numberString(L, float64(n)))
-				} else {
-					L.Push(lua.LNil)
-					L.Push(lua.LString("reader function must return a string"))
-					return 2
-				}
-			}
-			if s == "" {
-				break
-			}
-			buf.WriteString(string(s))
-		}
-		return load(L, buf.String(), chunkname)
-	}))
-
 	g.RawSetString("loadfile", L.NewFunction(func(L *lua.LState) int {
 		fn, err := loadFile(L, L.OptString(1, ""))
 		if err != nil {
@@ -280,7 +149,7 @@ func OpenCompat(L *lua.LState) {
 		return L.GetTop() - top
 	}))
 	if L.Dialect() == lua.DialectLuaJIT {
-		openLuaJITCompat(L) // LuaJIT's load, loadstring and loadfile (luajit.go)
+		openLuaJITCompat(L) // LuaJIT's loadfile (luajit.go)
 	}
 
 	tostring := g.RawGetString("tostring").(*lua.LFunction)
@@ -340,36 +209,6 @@ func OpenCompat(L *lua.LState) {
 				traceback.GFunction(L)
 				if s, ok := L.Get(-1).(lua.LString); ok {
 					L.Replace(-1, lua.LString(FormatTraceback(string(s))))
-				}
-				return 1
-			}))
-		}
-		if getinfo, ok := dbg.RawGetString("getinfo").(*lua.LFunction); ok {
-			dbg.RawSetString("getinfo", L.NewFunction(func(L *lua.LState) int {
-				// called in this frame, so that levels count from our caller
-				// and no call is added for debug hooks to see
-				getinfo.GFunction(L)
-				info, ok := L.Get(-1).(*lua.LTable)
-				if !ok {
-					return 1
-				}
-				// the chunk names of Lua functions are ChunkIDs: short_src
-				// is the id, source the chunk name behind it
-				if info.RawGetString("source") == lua.LString("=(tail call)") || info.RawGetString("what") == lua.LString("C") {
-					return 1
-				}
-				if src, ok := info.RawGetString("source").(lua.LString); ok {
-					info.RawSetString("short_src", src)
-					reg := L.Get(lua.RegistryIndex).(*lua.LTable)
-					if tbl, ok := reg.RawGetString(sourcesKey).(*lua.LTable); ok {
-						if orig, ok := tbl.RawGetString(string(src)).(lua.LString); ok {
-							info.RawSetString("source", orig)
-							return 1
-						}
-					}
-					if orig, ok := sourceOf(string(src)); ok {
-						info.RawSetString("source", lua.LString(orig))
-					}
 				}
 				return 1
 			}))

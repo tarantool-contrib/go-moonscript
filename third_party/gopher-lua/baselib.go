@@ -161,15 +161,32 @@ func baseIpairs(L *LState) int {
 	return 3
 }
 
+// loadaux loads a chunk with a Lua chunk name (go-moonscript patch: it was
+// a display name) and pushes the function, or nil and the message.
 func loadaux(L *LState, reader io.Reader, chunkname string) int {
-	if fn, err := L.Load(reader, chunkname); err != nil {
+	fn, err := L.LoadChunk(reader, chunkname)
+	return pushLoadResult(L, fn, err)
+}
+
+// pushLoadResult is load_aux: it pushes fn, or nil and err's message
+// (go-moonscript patch).
+func pushLoadResult(L *LState, fn *LFunction, err error) int {
+	if err != nil {
 		L.Push(LNil)
-		L.Push(LString(err.Error()))
+		L.Push(loadErrorValue(err))
 		return 2
-	} else {
-		L.Push(fn)
-		return 1
 	}
+	L.Push(fn)
+	return 1
+}
+
+// loadErrorValue is the error value of a failed load: the message of an
+// ApiError without its stack trace (go-moonscript patch).
+func loadErrorValue(err error) LValue {
+	if ae, ok := err.(*ApiError); ok {
+		return ae.Object
+	}
+	return LString(err.Error())
 }
 
 // go-moonscript patch: load is Lua 5.1's load(func [, chunkname]): the
@@ -182,7 +199,7 @@ func baseLoad(L *LState) int {
 	if L.Dialect() == DialectLuaJIT {
 		return jitLoad(L)
 	}
-	chunkname := L.OptString(2, "?")
+	chunkname := L.OptString(2, "=(load)") // go-moonscript patch: Lua 5.1's name
 	fn := L.CheckFunction(1)
 	top := L.GetTop()
 	var buf strings.Builder
@@ -211,7 +228,7 @@ func baseLoad(L *LState) int {
 		} else {
 			L.SetTop(top)
 			L.Push(LNil)
-			L.Push(LString("reader function must return a string"))
+			L.Push(LString(L.whereMessage("reader function must return a string")))
 			return 2
 		}
 	}
@@ -227,8 +244,8 @@ func baseLoadFile(L *LState) int {
 	var chunkname string
 	var err error
 	if L.GetTop() < 1 {
-		reader = L.Stdin() // go-moonscript patch: the io library's stdin
-		chunkname = "<stdin>"
+		reader = L.Stdin()   // go-moonscript patch: the io library's stdin
+		chunkname = "=stdin" // go-moonscript patch: Lua chunk names (chunkname.go)
 	} else {
 		chunkname = L.CheckString(1)
 		reader, err = os.Open(chunkname)
@@ -239,19 +256,20 @@ func baseLoadFile(L *LState) int {
 		}
 		defer reader.(*os.File).Close()
 	}
+	if chunkname != "=stdin" {
+		chunkname = "@" + chunkname // go-moonscript patch
+	}
 	return loadaux(L, reader, chunkname)
 }
 
+// go-moonscript patch: loadstring(s [, chunkname]) names the chunk s by
+// default, as Lua 5.1 does: [string "..."] in its errors.
 func baseLoadString(L *LState) int {
 	if L.Dialect() == DialectLuaJIT { // go-moonscript patch: load's alias
 		return jitLoad(L)
 	}
 	chunk := L.CheckString(1)
-	name := "<string>"
-	if IsBinaryChunk(chunk) {
-		name = chunk // go-moonscript patch: as in Lua 5.1, for its errors (dump.go)
-	}
-	return loadaux(L, strings.NewReader(chunk), L.OptString(2, name))
+	return loadaux(L, strings.NewReader(chunk), L.OptString(2, chunk))
 }
 
 func baseNext(L *LState) int {
