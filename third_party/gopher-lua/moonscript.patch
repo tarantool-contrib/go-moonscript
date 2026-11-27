@@ -416,6 +416,11 @@ that change.
       checked with lua5.1) (go-moonscript).
     - Close runs the __gc metamethods on an emptied stack, as lua_close
       does: go-moonscript
+    - DialectLuaJIT scans numbers as lj_strscan (parse/strscan.go, adapted
+      from bigbes/go-luascope parser/number.go, BSD-2-Clause): 0b numerals,
+      LuaJIT's limits and rounding, tonumber's STRSCAN_OPT_TONUM; the FFI
+      literals 1LL/1ULL/1i parse and raise "needs the FFI, which is not
+      supported" when evaluated (ast.CdataNumberExpr) (go-moonscript).
     - gcinfo()/collectgarbage("count") read the heap exactly (ReadMemStats
       flushes the per-P span caches that /memory/classes/heap/objects lags
       behind) and leave out the collector's own scratch, kept in a mark set
@@ -2302,7 +2307,24 @@ regenerates the diff below; this header is edited by hand.
  }
 --- a/ast/expr.go
 +++ b/ast/expr.go
-@@ -72,6 +72,9 @@
+@@ -50,6 +50,16 @@
+ 
+ /* ConstExprs }}} */
+ 
++// CdataNumberExpr is a numeral LuaJIT reads as cdata, accepted in the
++// LuaJIT dialect: a 64-bit integer (1LL, 1ULL, 1LLU) or an imaginary number
++// (1i). Value is its text. The VM has no FFI: evaluating one is an error.
++// go-moonscript patch.
++type CdataNumberExpr struct {
++	ExprBase
++
++	Value string
++}
++
+ type Comma3Expr struct {
+ 	ExprBase
+ 	AdjustRet bool
+@@ -72,6 +82,9 @@
  	ExprBase
  
  	Fields []*Field
@@ -2312,7 +2334,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  type FuncCallExpr struct {
-@@ -82,6 +85,9 @@
+@@ -82,6 +95,9 @@
  	Method    string
  	Args      []Expr
  	AdjustRet bool
@@ -2511,7 +2533,7 @@ regenerates the diff below; this header is edited by hand.
  	}
 --- a/baselib.go
 +++ b/baselib.go
-@@ -3,9 +3,9 @@
+@@ -3,10 +3,12 @@
  import (
  	"fmt"
  	"io"
@@ -2521,9 +2543,12 @@ regenerates the diff below; this header is edited by hand.
 -	"runtime"
 -	"strconv"
  	"strings"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
  )
  
-@@ -19,15 +19,17 @@
+ /* basic functions {{{ */
+@@ -19,15 +21,17 @@
  	basemod := L.RegisterModule("_G", baseFuncs)
  	global.RawSetString("ipairs", L.NewClosure(baseIpairs, L.NewFunction(ipairsaux)))
  	global.RawSetString("pairs", L.NewClosure(basePairs, L.NewFunction(pairsaux)))
@@ -2542,7 +2567,7 @@ regenerates the diff below; this header is edited by hand.
  	"getfenv":        baseGetFEnv,
  	"getmetatable":   baseGetMetatable,
  	"load":           baseLoad,
-@@ -52,22 +54,21 @@
+@@ -52,22 +56,21 @@
  	"module":  loModule,
  	"require": loRequire,
  	// hidden features
@@ -2571,7 +2596,7 @@ regenerates the diff below; this header is edited by hand.
  func baseDoFile(L *LState) int {
  	src := L.ToString(1)
  	top := L.GetTop()
-@@ -82,49 +83,51 @@
+@@ -82,49 +85,51 @@
  }
  
  func baseError(L *LState) int {
@@ -2655,7 +2680,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func baseGetMetatable(L *LState) int {
-@@ -167,40 +170,62 @@
+@@ -167,40 +172,62 @@
  	}
  }
  
@@ -2727,7 +2752,7 @@ regenerates the diff below; this header is edited by hand.
  		chunkname = "<stdin>"
  	} else {
  		chunkname = L.CheckString(1)
-@@ -216,7 +241,15 @@
+@@ -216,7 +243,15 @@
  }
  
  func baseLoadString(L *LState) int {
@@ -2744,7 +2769,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func baseNext(L *LState) int {
-@@ -225,7 +258,10 @@
+@@ -225,7 +260,10 @@
  	if L.GetTop() >= 2 {
  		index = L.Get(2)
  	}
@@ -2756,7 +2781,7 @@ regenerates the diff below; this header is edited by hand.
  	if key == LNil {
  		L.Push(LNil)
  		return 1
-@@ -237,7 +273,10 @@
+@@ -237,7 +275,10 @@
  
  func pairsaux(L *LState) int {
  	tb := L.CheckTable(1)
@@ -2768,7 +2793,7 @@ regenerates the diff below; this header is edited by hand.
  	if key == LNil {
  		return 0
  	} else {
-@@ -280,15 +319,32 @@
+@@ -280,15 +321,32 @@
  	}
  }
  
@@ -2804,7 +2829,7 @@ regenerates the diff below; this header is edited by hand.
  	return 0
  }
  
-@@ -312,84 +368,62 @@
+@@ -312,84 +370,62 @@
  }
  
  func baseRawSet(L *LState) int {
@@ -2929,7 +2954,7 @@ regenerates the diff below; this header is edited by hand.
  	mt := L.Get(2)
  	if m := L.metatable(obj, true); m != LNil {
  		if tb, ok := m.(*LTable); ok && tb.RawGetString("__metatable") != LNil {
-@@ -401,39 +435,138 @@
+@@ -401,39 +437,144 @@
  	return 1
  }
  
@@ -2963,8 +2988,14 @@ regenerates the diff below; this header is edited by hand.
 +		case LNumber:
 +			L.Push(L.Get(1)) // go-moonscript patch: without boxing it again
 +		case LString:
-+			if L.Dialect() == DialectLuaJIT && strings.IndexByte(string(lv), 0) >= 0 {
-+				L.Push(LNil) // go-moonscript patch: LuaJIT scans the whole string
++			if L.Dialect() == DialectLuaJIT {
++				// go-moonscript patch: LuaJIT's lj_strscan ("0b101" is 5,
++				// "nan(1)" and a string with a NUL are no numbers)
++				if v, ok := parse.ScanNumberLuaJIT(string(lv)); ok {
++					pushNumber(L, LNumber(v))
++				} else {
++					L.Push(LNil)
++				}
 +				break
  			}
 -			if v, err := strconv.ParseInt(str, base, LNumberBit); err != nil {
@@ -3087,7 +3118,7 @@ regenerates the diff below; this header is edited by hand.
  	L.Push(L.ToStringMeta(v1))
  	return 1
  }
-@@ -457,24 +590,54 @@
+@@ -457,24 +598,54 @@
  	return ret
  }
  
@@ -3152,7 +3183,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -580,18 +743,6 @@
+@@ -580,18 +751,6 @@
  
  /* hidden features {{{ */
  
@@ -3278,7 +3309,31 @@ regenerates the diff below; this header is edited by hand.
  }
  
  type lblabels struct {
-@@ -165,10 +170,18 @@
+@@ -137,6 +142,23 @@
+ 	return 0, false
+ }
+ 
++// cdataNumeralFn is the function a LuaJIT FFI numeral (1LL, 1ULL, 1i,
++// ast.CdataNumberExpr) compiles to a call of, with the numeral: such a
++// numeral is cdata, which the VM doesn't have, so evaluating it is an error
++// (the function is a constant, which string.dump keeps). go-moonscript
++// patch.
++var cdataNumeralFn = newLFunctionG(cdataNumeral, nil, 0)
++
++func cdataNumeral(L *LState) int {
++	s := L.CheckString(1)
++	kind := "64-bit integer"
++	if s[len(s)-1]|0x20 == 'i' {
++		kind = "complex number"
++	}
++	L.RaiseError("%s literal '%s' needs the FFI, which is not supported", kind, s)
++	return 0
++}
++
+ /* utilities }}} */
+ 
+ type gotoLabelDesc struct { // {{{
+@@ -165,10 +187,18 @@
  	context *funcContext
  	Line    int
  	Message string
@@ -3298,7 +3353,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  type codeStore struct { // {{{
-@@ -221,6 +234,30 @@
+@@ -221,6 +251,30 @@
  	*reg = *reg + inc
  }
  
@@ -3329,7 +3384,7 @@ regenerates the diff below; this header is edited by hand.
  func (cd *codeStore) PropagateMV(top int, save *int, reg *int, inc int) {
  	lastinst := cd.Last()
  	if opGetArgA(lastinst) >= top {
-@@ -245,6 +282,11 @@
+@@ -245,6 +299,11 @@
  	cd.AddABC(OP_LOADNIL, a, b, 0, line)
  }
  
@@ -3341,7 +3396,7 @@ regenerates the diff below; this header is edited by hand.
  func (cd *codeStore) SetOpCode(pc int, v int) {
  	opSetOpCode(&cd.codes[pc], v)
  }
-@@ -306,10 +348,11 @@
+@@ -306,10 +365,11 @@
  type varNamePool struct {
  	names  []string
  	offset int
@@ -3354,7 +3409,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (vp *varNamePool) Names() []string {
-@@ -364,10 +407,11 @@
+@@ -364,10 +424,11 @@
  	LastLine       int
  	labels         map[string]*gotoLabelDesc
  	firstGotoIndex int
@@ -3367,7 +3422,7 @@ regenerates the diff below; this header is edited by hand.
  	if pos != nil {
  		bl.LineStart = pos.Line()
  		bl.LastLine = pos.LastLine()
-@@ -410,6 +454,43 @@
+@@ -410,6 +471,43 @@
  	labelPc         map[int]int
  	gotosCount      int
  	unresolvedGotos map[int]*gotoLabelDesc
@@ -3411,7 +3466,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func newFuncContext(sourcename string, parent *funcContext) *funcContext {
-@@ -424,6 +505,14 @@
+@@ -424,6 +522,14 @@
  		labelPc:         map[int]int{},
  		gotosCount:      0,
  		unresolvedGotos: map[int]*gotoLabelDesc{},
@@ -3426,7 +3481,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	fc.Blocks = []*codeBlock{fc.Block}
  	return fc
-@@ -435,7 +524,8 @@
+@@ -435,7 +541,8 @@
  		if !ok {
  			continue
  		}
@@ -3436,7 +3491,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  }
  
-@@ -446,7 +536,7 @@
+@@ -446,7 +553,7 @@
  
  func (fc *funcContext) AddNamedLabel(label *gotoLabelDesc) {
  	if old := fc.Block.AddLabel(label); old != nil {
@@ -3445,7 +3500,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	fc.SetLabelPc(label.Id, label.Pc)
  }
-@@ -458,7 +548,8 @@
+@@ -458,7 +565,8 @@
  func (fc *funcContext) ResolveGoto(from, to *gotoLabelDesc, index int) {
  	if from.NumActiveLocalVars < to.NumActiveLocalVars {
  		varName := fc.Block.LocalVars.Names()[len(fc.Block.LocalVars.Names())-1]
@@ -3455,7 +3510,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	fc.Code.SetSbx(from.Pc, to.Id)
  	delete(fc.unresolvedGotos, index)
-@@ -513,21 +604,181 @@
+@@ -513,21 +621,181 @@
  
  func (fc *funcContext) SetLabelPc(label int, pc int) {
  	fc.labelPc[label] = pc
@@ -3642,7 +3697,7 @@ regenerates the diff below; this header is edited by hand.
  	if v > opMaxArgBx {
  		raiseCompileError(fc, fc.Proto.LineDefined, "too many constants")
  	}
-@@ -543,6 +794,7 @@
+@@ -543,6 +811,7 @@
  
  func (fc *funcContext) RegisterLocalVar(name string) int {
  	ret := fc.Block.LocalVars.Register(name)
@@ -3650,7 +3705,7 @@ regenerates the diff below; this header is edited by hand.
  	fc.Proto.DbgLocals = append(fc.Proto.DbgLocals, &DbgLocalInfo{Name: name, StartPc: fc.Code.LastPC() + 1})
  	fc.SetRegTop(fc.RegTop() + 1)
  	return ret
-@@ -585,8 +837,8 @@
+@@ -585,8 +854,8 @@
  }
  
  func (fc *funcContext) LeaveBlock() int {
@@ -3660,7 +3715,7 @@ regenerates the diff below; this header is edited by hand.
  
  	if fc.Block.Parent != nil {
  		fc.ResolveCurrentBlockGotosWithParentBlock()
-@@ -596,15 +848,36 @@
+@@ -596,15 +865,36 @@
  	return closed
  }
  
@@ -3700,7 +3755,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	fc.regTop = top
  }
-@@ -652,6 +925,9 @@
+@@ -652,6 +942,9 @@
  } // }}}
  
  func compileStmt(context *funcContext, stmt ast.Stmt, isLastStmt bool) { // {{{
@@ -3710,7 +3765,7 @@ regenerates the diff below; this header is edited by hand.
  	switch st := stmt.(type) {
  	case *ast.AssignStmt:
  		compileAssignStmt(context, st)
-@@ -660,7 +936,7 @@
+@@ -660,7 +953,7 @@
  	case *ast.FuncCallStmt:
  		compileFuncCallExpr(context, context.RegTop(), st.Expr.(*ast.FuncCallExpr), ecnone(-1))
  	case *ast.DoBlockStmt:
@@ -3719,7 +3774,7 @@ regenerates the diff below; this header is edited by hand.
  		compileChunk(context, st.Stmts, false)
  		context.LeaveBlock()
  	case *ast.WhileStmt:
-@@ -689,7 +965,7 @@
+@@ -689,7 +982,7 @@
  func compileAssignStmtLeft(context *funcContext, stmt *ast.AssignStmt) (int, []*assigncontext) { // {{{
  	reg := context.RegTop()
  	acs := make([]*assigncontext, 0, len(stmt.Lhs))
@@ -3728,7 +3783,7 @@ regenerates the diff below; this header is edited by hand.
  		switch st := lhs.(type) {
  		case *ast.IdentExpr:
  			identtype := getIdentRefType(context, context, st)
-@@ -702,12 +978,35 @@
+@@ -702,12 +995,35 @@
  			case ecLocal:
  				ec.reg = context.FindLocalVar(st.Value)
  			}
@@ -3769,7 +3824,7 @@ regenerates the diff below; this header is edited by hand.
  			if _, ok := st.Key.(*ast.StringExpr); ok {
  				ac.keyks = true
  			}
-@@ -720,6 +1019,23 @@
+@@ -720,6 +1036,23 @@
  	return reg, acs
  } // }}}
  
@@ -3793,7 +3848,7 @@ regenerates the diff below; this header is edited by hand.
  func compileAssignStmtRight(context *funcContext, stmt *ast.AssignStmt, reg int, acs []*assigncontext) (int, []*assigncontext) { // {{{
  	lennames := len(stmt.Lhs)
  	lenexprs := len(stmt.Rhs)
-@@ -728,6 +1044,15 @@
+@@ -728,6 +1061,15 @@
  	for namesassigned < lennames {
  		ac := acs[namesassigned]
  		ec := ac.ec
@@ -3809,7 +3864,7 @@ regenerates the diff below; this header is edited by hand.
  		var expr ast.Expr = nil
  		if namesassigned >= lenexprs {
  			expr = &ast.NilExpr{}
-@@ -751,11 +1076,26 @@
+@@ -751,11 +1093,26 @@
  		if expr == nil {
  			expr = stmt.Rhs[namesassigned]
  		}
@@ -3837,7 +3892,7 @@ regenerates the diff below; this header is edited by hand.
  			} else {
  				ac.valuerk = idx
  				reg += reginc
-@@ -781,40 +1121,74 @@
+@@ -781,40 +1138,74 @@
  } // }}}
  
  func compileAssignStmt(context *funcContext, stmt *ast.AssignStmt) { // {{{
@@ -3919,7 +3974,7 @@ regenerates the diff below; this header is edited by hand.
  	lenexprs := len(exprs)
  	namesassigned := 0
  	ec := &expcontext{}
-@@ -838,7 +1212,7 @@
+@@ -838,7 +1229,7 @@
  	// extra left names
  	if lennames > namesassigned {
  		restleft := lennames - namesassigned - 1
@@ -3928,7 +3983,7 @@ regenerates the diff below; this header is edited by hand.
  		reg += restleft
  	}
  
-@@ -855,15 +1229,17 @@
+@@ -855,15 +1246,17 @@
  
  func compileLocalAssignStmt(context *funcContext, stmt *ast.LocalAssignStmt) { // {{{
  	reg := context.RegTop()
@@ -3949,7 +4004,7 @@ regenerates the diff below; this header is edited by hand.
  	for _, name := range stmt.Names {
  		context.RegisterLocalVar(name)
  	}
-@@ -880,7 +1256,7 @@
+@@ -880,7 +1273,7 @@
  		switch ex := stmt.Exprs[0].(type) {
  		case *ast.IdentExpr:
  			if idx := context.FindLocalVar(ex.Value); idx > -1 {
@@ -3958,7 +4013,7 @@ regenerates the diff below; this header is edited by hand.
  				return
  			}
  		case *ast.FuncCallExpr:
-@@ -890,7 +1266,7 @@
+@@ -890,7 +1283,7 @@
  				reg += compileExpr(context, reg, ex, ecnone(-2))
  				code.SetOpCode(code.LastPC(), OP_TAILCALL)
  			}
@@ -3967,7 +4022,7 @@ regenerates the diff below; this header is edited by hand.
  			return
  		}
  	}
-@@ -907,29 +1283,46 @@
+@@ -907,29 +1300,46 @@
  	if lastisvaarg {
  		count = 0
  	}
@@ -4027,7 +4082,7 @@ regenerates the diff below; this header is edited by hand.
  	// TODO folding constants?
  	code := context.Code
  	flip := 0
-@@ -950,6 +1343,16 @@
+@@ -950,6 +1360,16 @@
  			return
  		}
  	case *ast.UnaryNotOpExpr:
@@ -4044,7 +4099,7 @@ regenerates the diff below; this header is edited by hand.
  		compileBranchCondition(context, reg, ex.Expr, elselabel, thenlabel, !hasnextcond)
  		return
  	case *ast.LogicalOpExpr:
-@@ -973,8 +1376,8 @@
+@@ -973,8 +1393,8 @@
  
  	a := reg
  	compileExprWithMVPropagation(context, expr, &reg, &a)
@@ -4055,7 +4110,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileWhileStmt(context *funcContext, stmt *ast.WhileStmt) { // {{{
-@@ -985,10 +1388,12 @@
+@@ -985,10 +1405,12 @@
  	context.SetLabelPc(condlabel, context.Code.LastPC())
  	compileBranchCondition(context, context.RegTop(), stmt.Condition, thenlabel, elselabel, false)
  	context.SetLabelPc(thenlabel, context.Code.LastPC())
@@ -4070,7 +4125,7 @@ regenerates the diff below; this header is edited by hand.
  	context.LeaveBlock()
  	context.SetLabelPc(elselabel, context.Code.LastPC())
  } // }}}
-@@ -1008,11 +1413,12 @@
+@@ -1008,11 +1430,12 @@
  	n := context.LeaveBlock()
  
  	if n > -1 {
@@ -4086,7 +4141,7 @@ regenerates the diff below; this header is edited by hand.
  		context.SetLabelPc(label, context.Code.LastPC())
  	}
  
-@@ -1043,7 +1449,7 @@
+@@ -1043,7 +1466,7 @@
  		astmt := &ast.AssignStmt{Lhs: []ast.Expr{stmt.Name.Func}, Rhs: []ast.Expr{stmt.Func}}
  		astmt.SetLine(sline(stmt.Func))
  		astmt.SetLastLine(eline(stmt.Func))
@@ -4095,7 +4150,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  } // }}}
  
-@@ -1052,27 +1458,36 @@
+@@ -1052,27 +1475,36 @@
  	endlabel := context.NewLabel()
  	ec := &expcontext{}
  
@@ -4143,7 +4198,7 @@ regenerates the diff below; this header is edited by hand.
  
  	context.RegisterLocalVar(stmt.Name)
  
-@@ -1083,6 +1498,7 @@
+@@ -1083,6 +1515,7 @@
  
  	flpc := code.LastPC()
  	code.AddASbx(OP_FORLOOP, rindex, bodypc-(flpc+1), sline(stmt))
@@ -4151,7 +4206,7 @@ regenerates the diff below; this header is edited by hand.
  
  	context.SetLabelPc(endlabel, code.LastPC())
  	code.SetSbx(bodypc, flpc-bodypc)
-@@ -1096,14 +1512,21 @@
+@@ -1096,14 +1529,21 @@
  	fllabel := context.NewLabel()
  	nnames := len(stmt.Names)
  
@@ -4177,7 +4232,7 @@ regenerates the diff below; this header is edited by hand.
  
  	for _, name := range stmt.Names {
  		context.RegisterLocalVar(name)
-@@ -1115,8 +1538,12 @@
+@@ -1115,8 +1555,12 @@
  	context.LeaveBlock()
  
  	context.SetLabelPc(fllabel, code.LastPC())
@@ -4192,7 +4247,7 @@ regenerates the diff below; this header is edited by hand.
  
  	context.SetLabelPc(endlabel, code.LastPC())
  } // }}}
-@@ -1140,6 +1567,8 @@
+@@ -1140,6 +1584,8 @@
  } // }}}
  
  func compileExpr(context *funcContext, reg int, expr ast.Expr, ec *expcontext) int { // {{{
@@ -4201,7 +4256,22 @@ regenerates the diff below; this header is edited by hand.
  	code := context.Code
  	sreg := savereg(ec, reg)
  	sused := 1
-@@ -1162,7 +1591,7 @@
+@@ -1158,11 +1604,22 @@
+ 		}
+ 		code.AddABx(OP_LOADK, sreg, context.ConstIndex(num), sline(ex))
+ 		return sused
++	case *ast.CdataNumberExpr:
++		// go-moonscript patch: a LuaJIT FFI numeral calls cdataNumeral,
++		// which raises the error, in free registers (a call may write
++		// above its function's register)
++		code.AddABx(OP_LOADK, reg, context.ConstIndex(cdataNumeralFn), sline(ex))
++		code.AddABx(OP_LOADK, reg+1, context.ConstIndex(LString(ex.Value)), sline(ex))
++		code.AddABC(OP_CALL, reg, 2, 2, sline(ex))
++		if sreg != reg {
++			code.AddABC(OP_MOVE, sreg, reg, 0, sline(ex))
++		}
++		return sused
+ 	case *constLValueExpr:
  		code.AddABx(OP_LOADK, sreg, context.ConstIndex(ex.Value), sline(ex))
  		return sused
  	case *ast.NilExpr:
@@ -4210,7 +4280,7 @@ regenerates the diff below; this header is edited by hand.
  		return sused
  	case *ast.FalseExpr:
  		code.AddABC(OP_LOADBOOL, sreg, 0, 0, sline(ex))
-@@ -1228,18 +1657,21 @@
+@@ -1228,18 +1685,21 @@
  		compileFunctionExpr(childcontext, ex, ec)
  		protono := len(context.Proto.FunctionPrototypes)
  		context.Proto.FunctionPrototypes = append(context.Proto.FunctionPrototypes, childcontext.Proto)
@@ -4235,7 +4305,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  		}
  		return sused
-@@ -1259,7 +1691,28 @@
+@@ -1259,7 +1719,28 @@
  	}
  } // }}}
  
@@ -4264,7 +4334,7 @@ regenerates the diff below; this header is edited by hand.
  	compileExprWithPropagation(context, expr, reg, save, context.Code.PropagateKMV)
  } // }}}
  
-@@ -1267,11 +1720,36 @@
+@@ -1267,11 +1748,36 @@
  	compileExprWithPropagation(context, expr, reg, save, context.Code.PropagateMV)
  } // }}}
  
@@ -4304,7 +4374,7 @@ regenerates the diff below; this header is edited by hand.
  		if lisconst && risconst {
  			switch expr.Operator {
  			case "+":
-@@ -1293,7 +1771,7 @@
+@@ -1293,7 +1799,7 @@
  			return expr
  		}
  	case *ast.UnaryMinusOpExpr:
@@ -4313,7 +4383,7 @@ regenerates the diff below; this header is edited by hand.
  		if value, ok := lnumberValue(expr.Expr); ok {
  			return &constLValueExpr{Value: LNumber(-value)}
  		}
-@@ -1307,6 +1785,7 @@
+@@ -1307,6 +1813,7 @@
  func compileFunctionExpr(context *funcContext, funcexpr *ast.FunctionExpr, ec *expcontext) { // {{{
  	context.Proto.LineDefined = sline(funcexpr)
  	context.Proto.LastLineDefined = eline(funcexpr)
@@ -4321,7 +4391,7 @@ regenerates the diff below; this header is edited by hand.
  	if len(funcexpr.ParList.Names) > maxRegisters {
  		raiseCompileError(context, context.Proto.LineDefined, "register overflow")
  	}
-@@ -1323,19 +1802,36 @@
+@@ -1323,19 +1830,36 @@
  			context.Proto.IsVarArg = VarArgHasArg | VarArgNeedsArg
  			if context.Parent != nil {
  				context.RegisterLocalVar("arg")
@@ -4360,7 +4430,7 @@ regenerates the diff below; this header is edited by hand.
  	context.Proto.NumUpvalues = uint8(len(context.Proto.DbgUpvalues))
  	for _, clv := range context.Proto.Constants {
  		sv := ""
-@@ -1343,6 +1839,7 @@
+@@ -1343,6 +1867,7 @@
  			sv = string(slv)
  		}
  		context.Proto.stringConstants = append(context.Proto.stringConstants, sv)
@@ -4368,7 +4438,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	patchCode(context)
  } // }}}
-@@ -1357,12 +1854,19 @@
+@@ -1357,12 +1882,19 @@
  	*/
  	tablereg := reg
  	reg++
@@ -4389,7 +4459,7 @@ regenerates the diff below; this header is edited by hand.
  	for i, field := range ex.Fields {
  		islast := i == len(ex.Fields)-1
  		if field.Key == nil {
-@@ -1370,10 +1874,15 @@
+@@ -1370,10 +1902,15 @@
  				reg += compileExpr(context, reg, field.Value, ecnone(-2))
  				lastvararg = true
  			} else {
@@ -4406,7 +4476,7 @@ regenerates the diff below; this header is edited by hand.
  			regorg := reg
  			b := reg
  			compileExprWithKMVPropagation(context, field.Key, &reg, &b)
-@@ -1383,43 +1892,61 @@
+@@ -1383,43 +1920,61 @@
  			if _, ok := field.Key.(*ast.StringExpr); ok {
  				opcode = OP_SETTABLEKS
  			}
@@ -4486,7 +4556,7 @@ regenerates the diff below; this header is edited by hand.
  	if ex, ok := exp.(*constLValueExpr); ok {
  		exp.SetLine(sline(expr))
  		compileExpr(context, reg, ex, ec)
-@@ -1477,7 +2004,7 @@
+@@ -1477,7 +2032,7 @@
  	var operandexpr ast.Expr
  	switch ex := expr.(type) {
  	case *ast.UnaryMinusOpExpr:
@@ -4495,7 +4565,7 @@ regenerates the diff below; this header is edited by hand.
  		if lvexpr, ok := exp.(*constLValueExpr); ok {
  			exp.SetLine(sline(expr))
  			compileExpr(context, reg, lvexpr, ec)
-@@ -1510,6 +2037,8 @@
+@@ -1510,6 +2065,8 @@
  } // }}}
  
  func compileRelationalOpExprAux(context *funcContext, reg int, expr *ast.RelationalOpExpr, flip int, label int) { // {{{
@@ -4504,7 +4574,7 @@ regenerates the diff below; this header is edited by hand.
  	code := context.Code
  	b := reg
  	compileExprWithKMVPropagation(context, expr.Lhs, &reg, &b)
-@@ -1517,19 +2046,19 @@
+@@ -1517,19 +2074,19 @@
  	compileExprWithKMVPropagation(context, expr.Rhs, &reg, &c)
  	switch expr.Operator {
  	case "<":
@@ -4531,7 +4601,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileRelationalOpExpr(context *funcContext, reg int, expr *ast.RelationalOpExpr, ec *expcontext) { // {{{
-@@ -1537,9 +2066,9 @@
+@@ -1537,9 +2094,9 @@
  	code := context.Code
  	jumplabel := context.NewLabel()
  	compileRelationalOpExprAux(context, reg, expr, 1, jumplabel)
@@ -4543,7 +4613,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileLogicalOpExpr(context *funcContext, reg int, expr *ast.LogicalOpExpr, ec *expcontext) { // {{{
-@@ -1574,6 +2103,8 @@
+@@ -1574,6 +2131,8 @@
  } // }}}
  
  func compileLogicalOpExprAux(context *funcContext, reg int, expr ast.Expr, ec *expcontext, thenlabel, elselabel int, hasnextcond bool, lb *lblabels) { // {{{
@@ -4552,7 +4622,7 @@ regenerates the diff below; this header is edited by hand.
  	// TODO folding constants?
  	code := context.Code
  	flip := 0
-@@ -1657,24 +2188,27 @@
+@@ -1657,24 +2216,27 @@
  		if sreg == b {
  			op = OP_TEST
  		}
@@ -4586,7 +4656,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileFuncCallExpr(context *funcContext, reg int, expr *ast.FuncCallExpr, ec *expcontext) int { // {{{
-@@ -1705,10 +2239,16 @@
+@@ -1705,10 +2267,16 @@
  		name = string(expr.Method)
  	}
  
@@ -4603,7 +4673,7 @@ regenerates the diff below; this header is edited by hand.
  		} else {
  			reg += compileExpr(context, reg, ar, ecnone(0))
  		}
-@@ -1717,11 +2257,17 @@
+@@ -1717,11 +2285,17 @@
  	if islastvararg {
  		b = 0
  	}
@@ -4623,7 +4693,7 @@ regenerates the diff below; this header is edited by hand.
  		return 1
  	}
  	if context.RegTop() > (funcreg+2+ec.varargopt) || ec.varargopt < -1 {
-@@ -1775,17 +2321,26 @@
+@@ -1775,17 +2349,26 @@
  	}
  	moven := 0
  	code := context.Code.List()
@@ -4651,7 +4721,7 @@ regenerates the diff below; this header is edited by hand.
  			/* nothing to do */
  		case OP_CALL:
  			if reg := opGetArgA(inst) + opGetArgC(inst) - 2; reg > maxreg {
-@@ -1816,6 +2371,11 @@
+@@ -1816,6 +2399,11 @@
  				}
  				distance = d
  				count++
@@ -4663,7 +4733,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			if distance == 0 {
  				context.Code.SetOpCode(pc, OP_NOP)
-@@ -1827,6 +2387,9 @@
+@@ -1827,6 +2415,9 @@
  				maxreg = reg
  			}
  		}
@@ -4673,7 +4743,7 @@ regenerates the diff below; this header is edited by hand.
  
  		// bulk move optimization(reducing op dipatch costs)
  		if curop == OP_MOVE {
-@@ -1838,10 +2401,17 @@
+@@ -1838,10 +2429,17 @@
  			}
  			moven = 0
  		}
@@ -4693,6 +4763,121 @@ regenerates the diff below; this header is edited by hand.
  	}
  	context.Proto.NumUsedRegisters = uint8(maxreg)
  } // }}}
+--- a/compile_cdata_fix_test.go
++++ b/compile_cdata_fix_test.go
+@@ -0,0 +1,112 @@
++package lua
++
++// go-moonscript patch: LuaJIT's FFI numerals (1LL, 1ULL, 1i) in
++// DialectLuaJIT. They are cdata, which the VM doesn't have: they parse, as
++// with luajit, and evaluating one is an error (luajit evaluates them to
++// cdata, so this can't be compared with its output).
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestCdataNumerals(t *testing.T) {
++	const script = `
++local function try(s)
++  local f, err = loadstring(s, "s")
++  if not f then return print("load", err) end
++  print(pcall(f))
++end
++try("return 1LL")
++try("return 0x10ULL")
++try("return 1llu")
++try("return 12.5i")
++try("return 0b101I")
++try("local a = 1\n\nreturn -1LL")
++try("return 1LL + 1")
++try("return {1LL}")
++try("return {[1LL] = 1}")
++try("if 1LL then return 1 end")
++try("if not 1LL then return 1 end")
++try("return 1LL and 2")
++try("return false and 1LL, true or 1i")
++try("for i = 1LL, 2 do end")
++try("local x = 1LL")
++try("local x; x = 1LL")
++try("x = 1i")
++try("return print(1LL)")
++try("return 1LL .. ''")
++try("return 1.5LL")
++try("return 1e2LL")
++try("return 1U")
++-- a register above the call isn't clobbered: an upvalue keeps its value
++local get
++print(pcall(function()
++  local a, b = 1, 2
++  get = function() return b end
++  a = 1LL
++end))
++print(get())
++-- string.dump keeps the call
++local f = loadstring("local x = 1\nreturn 2i", "=dumped")
++print(pcall(loadstring(string.dump(f))))
++print(pcall(loadstring(string.dump(f, true))))
++-- the message handler sees the error
++print(xpcall(function() return 1LL end, function(m) return "handled: " .. m end))
++print(xpcall(function() return 1LL end, debug.traceback))
++`
++	L := NewState(Options{Dialect: DialectLuaJIT})
++	defer L.Close()
++	var out strings.Builder
++	L.SetGlobal("print", L.NewFunction(func(L *LState) int {
++		for i := 1; i <= L.GetTop(); i++ {
++			if i > 1 {
++				out.WriteByte('\t')
++			}
++			out.WriteString(L.ToStringMeta(L.Get(i)).String())
++		}
++		out.WriteByte('\n')
++		return 0
++	}))
++	if err := L.DoString(script); err != nil {
++		t.Fatal(err)
++	}
++	const want = `false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '0x10ULL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1llu' needs the FFI, which is not supported
++false	s:1: complex number literal '12.5i' needs the FFI, which is not supported
++false	s:1: complex number literal '0b101I' needs the FFI, which is not supported
++false	s:3: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++true	false	true
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: complex number literal '1i' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	s:1: 64-bit integer literal '1LL' needs the FFI, which is not supported
++load	s:1: malformed number near '1.5LL'
++load	s:1: malformed number near '1e2LL'
++load	s:1: malformed number near '1U'
++false	<string>:34: 64-bit integer literal '1LL' needs the FFI, which is not supported
++2
++false	=dumped:2: complex number literal '2i' needs the FFI, which is not supported
++false	=dumped:2: complex number literal '2i' needs the FFI, which is not supported
++false	handled: <string>:42: 64-bit integer literal '1LL' needs the FFI, which is not supported
++false	<string>:43: 64-bit integer literal '1LL' needs the FFI, which is not supported
++stack traceback:
++	[G]: in function (anonymous)
++	<string>:43: in function <<string>:43>
++	[G]: in function 'xpcall'
++	<string>:43: in main chunk
++	[G]: ?
++`
++	if got := out.String(); got != want {
++		t.Errorf("got:\n%s\nwant:\n%s", got, want)
++	}
++}
 --- a/compile_fix_test.go
 +++ b/compile_fix_test.go
 @@ -0,0 +1,154 @@
@@ -5415,7 +5600,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/dump.go
 +++ b/dump.go
-@@ -0,0 +1,478 @@
+@@ -0,0 +1,487 @@
 +package lua
 +
 +// go-moonscript patch: string.dump and binary chunks. gopher-lua has no
@@ -5506,6 +5691,7 @@ regenerates the diff below; this header is edited by hand.
 +	dumpConstTrue
 +	dumpConstNumber
 +	dumpConstString
++	dumpConstCdataNumeral // cdataNumeralFn (compile.go)
 +)
 +
 +func (d *dumper) proto(fp *FunctionProto) {
@@ -5531,6 +5717,12 @@ regenerates the diff below; this header is edited by hand.
 +				d.buf = append(d.buf, dumpConstTrue)
 +			} else {
 +				d.buf = append(d.buf, dumpConstFalse)
++			}
++		case *LFunction:
++			if v == cdataNumeralFn {
++				d.buf = append(d.buf, dumpConstCdataNumeral)
++			} else {
++				d.buf = append(d.buf, dumpConstNil)
 +			}
 +		default:
 +			d.buf = append(d.buf, dumpConstNil)
@@ -5664,6 +5856,8 @@ regenerates the diff below; this header is edited by hand.
 +			}
 +		case dumpConstString:
 +			fp.Constants[i] = LString(u.str())
++		case dumpConstCdataNumeral:
++			fp.Constants[i] = cdataNumeralFn
 +		default:
 +			u.fail("bad constant")
 +		}
@@ -13040,7 +13234,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/parse/lexer.go
 +++ b/parse/lexer.go
-@@ -1,549 +1,838 @@
+@@ -1,549 +1,742 @@
  package parse
  
 +// go-moonscript patch: the lexer is Lua 5.1's llex.c (Lua51) or LuaJIT
@@ -13055,7 +13249,6 @@ regenerates the diff below; this header is edited by hand.
  	"fmt"
 -	"io"
 -	"reflect"
-+	"math"
  	"strconv"
  	"strings"
  
@@ -13075,8 +13268,10 @@ regenerates the diff below; this header is edited by hand.
 +	Lua51 Dialect = iota
 +	// LuaJIT is LuaJIT 2.1's (without LUAJIT_ENABLE_LUA52COMPAT): goto and
 +	// labels, hexadecimal floats and binary numerals, \x \z \u{} escapes,
-+	// identifiers with non-ASCII bytes. Its FFI numerals (1LL, 1ULL, 1i)
-+	// are not accepted: they are cdata, which the VM doesn't have.
++	// identifiers with non-ASCII bytes, numerals as lj_strscan reads them.
++	// Its FFI numerals (1LL, 1ULL, 1i) are accepted, as LuaJIT with the FFI
++	// does, but are cdata, which the VM doesn't have: they are
++	// ast.CdataNumberExpr, which evaluate to an error.
 +	LuaJIT
 +)
 +
@@ -13164,9 +13359,10 @@ regenerates the diff below; this header is edited by hand.
 +// token is a token, its semantic value (a name, the value of a string, the
 +// text of a number) and the line it starts on.
 +type token struct {
-+	typ  int
-+	sem  string
-+	line int
++	typ   int
++	sem   string
++	line  int
++	cdata bool // a LuaJIT FFI numeral (1LL, 1ULL, 1i), sem its text
 +}
 +
 +type lexer struct {
@@ -13223,9 +13419,6 @@ regenerates the diff below; this header is edited by hand.
 +func isAlnum(c int) bool  { return isAlpha(c) || isDigit(c) }
 +func isSpace(c int) bool  { return c == ' ' || '\t' <= c && c <= '\r' }
 +func isCntrl(c int) bool  { return 0 <= c && c < 32 || c == 127 }
-+
-+// isIdent is lj_char_isident: alphanumeric, '_' and the bytes 128-255.
-+func isIdent(c int) bool { return isAlnum(c) || c == '_' || c >= 128 }
  
 -func NewScanner(reader io.Reader, source string) *Scanner {
 -	return &Scanner{
@@ -13235,6 +13428,9 @@ regenerates the diff below; this header is edited by hand.
 -			Column: 0,
 -		},
 -		reader: bufio.NewReaderSize(reader, 4096),
++// isIdent is lj_char_isident: alphanumeric, '_' and the bytes 128-255.
++func isIdent(c int) bool { return isAlnum(c) || c == '_' || c >= 128 }
++
 +func (ls *lexer) next() {
 +	if ls.pos < len(ls.src) {
 +		ls.current = int(ls.src[ls.pos])
@@ -13376,12 +13572,26 @@ regenerates the diff below; this header is edited by hand.
 -		ch = sc.Next()
  	}
 -	return nil
+-}
+-
+-func (sc *Scanner) scanIdent(ch int, buf *bytes.Buffer) error {
+-	writeChar(buf, ch)
+-	for isIdent(sc.Peek(), 1) {
+-		writeChar(buf, sc.Next())
 +	if ls.checkNext("Ee") {
 +		ls.checkNext("+-")
-+	}
+ 	}
+-	return nil
+-}
+-
+-func (sc *Scanner) scanDecimal(ch int, buf *bytes.Buffer) error {
+-	writeChar(buf, ch)
+-	for isDecimal(sc.Peek()) {
+-		writeChar(buf, sc.Next())
 +	for isAlnum(ls.current) || ls.current == '_' {
 +		ls.saveNext()
-+	}
+ 	}
+-	return nil
 +	s := string(ls.buff)
 +	if !isNumeral(s) {
 +		ls.lexError("malformed number", tkNumber)
@@ -13389,10 +13599,22 @@ regenerates the diff below; this header is edited by hand.
 +	return s
  }
  
--func (sc *Scanner) scanIdent(ch int, buf *bytes.Buffer) error {
--	writeChar(buf, ch)
--	for isIdent(sc.Peek(), 1) {
--		writeChar(buf, sc.Next())
+-func (sc *Scanner) scanNumber(ch int, buf *bytes.Buffer) error {
+-	if ch == '0' { // octal
+-		if sc.Peek() == 'x' || sc.Peek() == 'X' {
+-			writeChar(buf, ch)
+-			writeChar(buf, sc.Next())
+-			hasvalue := false
+-			for isDigit(sc.Peek()) {
+-				writeChar(buf, sc.Next())
+-				hasvalue = true
+-			}
+-			if !hasvalue {
+-				return sc.Error(buf.String(), "illegal hexadecimal number")
+-			}
+-			return nil
+-		} else if sc.Peek() != '.' && isDecimal(sc.Peek()) {
+-			ch = sc.Next()
 +// isNumeral reports whether s, a numeral as read_numeral reads it, is a
 +// number for luaO_str2d (strtod): decimal with an optional exponent, or
 +// "0x" and hexadecimal digits with an optional binary exponent.
@@ -13408,12 +13630,18 @@ regenerates the diff below; this header is edited by hand.
 +	if i < len(s) && s[i] == '.' {
 +		for i++; i < len(s) && digit(int(s[i])); i++ {
 +			ndigits++
-+		}
-+	}
+ 		}
+ 	}
+-	sc.scanDecimal(ch, buf)
+-	if sc.Peek() == '.' {
+-		sc.scanDecimal(sc.Next(), buf)
 +	if ndigits == 0 {
 +		return false
  	}
--	return nil
+-	if ch = sc.Peek(); ch == 'e' || ch == 'E' {
+-		writeChar(buf, sc.Next())
+-		if ch = sc.Peek(); ch == '-' || ch == '+' {
+-			writeChar(buf, sc.Next())
 +	if i < len(s) && s[i]|0x20 == expch {
 +		i++
 +		if i < len(s) && (s[i] == '+' || s[i] == '-') {
@@ -13424,165 +13652,57 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		for i < len(s) && isDigit(int(s[i])) {
 +			i++
-+		}
-+	}
+ 		}
+-		sc.scanDecimal(sc.Next(), buf)
+ 	}
+-
+-	return nil
 +	return i == len(s)
  }
  
--func (sc *Scanner) scanDecimal(ch int, buf *bytes.Buffer) error {
--	writeChar(buf, ch)
--	for isDecimal(sc.Peek()) {
--		writeChar(buf, sc.Next())
-+// lexNumber is LuaJIT's lex_number. The value is the numeral, which strtod
-+// reads as lj_strscan does, but for a binary numeral, given as its value.
-+func (ls *lexer) lexNumber() string {
+-func (sc *Scanner) scanString(quote int, buf *bytes.Buffer) error {
+-	ch := sc.Next()
+-	for ch != quote {
+-		if ch == '\n' || ch == '\r' || ch < 0 {
+-			return sc.Error(buf.String(), "unterminated string")
+-		}
+-		if ch == '\\' {
+-			if err := sc.scanEscape(ch, buf); err != nil {
+-				return err
+-			}
+-		} else {
+-			writeChar(buf, ch)
++// lexNumber is LuaJIT's lex_number: the numeral, as lj_strscan reads it with
++// the FFI (scanNumeral). It returns the token's value, the number formatted
++// to convert back exactly (by parseNumber) or the numeral of a cdata one
++// (1LL, 1ULL, 1i), and whether the numeral is cdata.
++func (ls *lexer) lexNumber() (string, bool) {
 +	xp := 'e'
 +	c := ls.current
 +	if c == '0' {
 +		ls.saveNext()
 +		if ls.current|0x20 == 'x' {
 +			xp = 'p'
-+		}
-+	}
+ 		}
+-		ch = sc.Next()
+ 	}
+-	return nil
 +	for isIdent(ls.current) || ls.current == '.' ||
 +		(ls.current == '-' || ls.current == '+') && rune(c|0x20) == xp {
 +		c = ls.current
 +		ls.saveNext()
 +	}
 +	s := string(ls.buff)
-+	v, ok := strscan(s)
++	v, cdata, ok := scanNumeral(s)
 +	if !ok {
 +		ls.lexError("malformed number", tkNumber)
 +	}
-+	if len(s) > 1 && s[0] == '0' && s[1]|0x20 == 'b' {
-+		return strconv.FormatFloat(v, 'g', -1, 64)
- 	}
--	return nil
-+	return s
++	if cdata {
++		return s, true
++	}
++	return strconv.FormatFloat(v, 'g', -1, 64), false
  }
  
--func (sc *Scanner) scanNumber(ch int, buf *bytes.Buffer) error {
--	if ch == '0' { // octal
--		if sc.Peek() == 'x' || sc.Peek() == 'X' {
--			writeChar(buf, ch)
--			writeChar(buf, sc.Next())
--			hasvalue := false
--			for isDigit(sc.Peek()) {
--				writeChar(buf, sc.Next())
--				hasvalue = true
-+// strscan is lj_strscan_scan's check of a numeral (with STRSCAN_OPT_TONUM,
-+// without the FFI's LL, ULL and i suffixes). It computes the value of a
-+// binary numeral only (NaN for the others).
-+func strscan(s string) (float64, bool) {
-+	at := func(i int) int {
-+		if i < len(s) {
-+			return int(s[i])
-+		}
-+		return 0
-+	}
-+	p, base, digit := 0, 10, isDigit
-+	dp, hasdig, dig := -1, false, 0
-+	if at(p) <= '0' { // the base, leading zeros
-+		if at(p) == '0' {
-+			if at(p+1)|0x20 == 'x' {
-+				base, digit = 16, isXDigit
-+				p += 2
-+			} else if at(p+1)|0x20 == 'b' {
-+				base = 2
-+				p += 2
-+			}
-+		}
-+		for ; ; p++ {
-+			if at(p) == '0' {
-+				hasdig = true
-+			} else if at(p) == '.' {
-+				if dp >= 0 {
-+					return 0, false
-+				}
-+				dp = p
-+			} else {
-+				break
- 			}
--			if !hasvalue {
--				return sc.Error(buf.String(), "illegal hexadecimal number")
-+		}
-+	}
-+	sp := p
-+	for ; ; p++ {
-+		if digit(at(p)) {
-+			dig++
-+		} else if at(p) == '.' {
-+			if dp >= 0 {
-+				return 0, false
- 			}
--			return nil
--		} else if sc.Peek() != '.' && isDecimal(sc.Peek()) {
--			ch = sc.Next()
-+			dp = p
-+		} else {
-+			break
- 		}
- 	}
--	sc.scanDecimal(ch, buf)
--	if sc.Peek() == '.' {
--		sc.scanDecimal(sc.Next(), buf)
-+	if !hasdig && dig == 0 {
-+		return 0, false
- 	}
--	if ch = sc.Peek(); ch == 'e' || ch == 'E' {
--		writeChar(buf, sc.Next())
--		if ch = sc.Peek(); ch == '-' || ch == '+' {
--			writeChar(buf, sc.Next())
-+	if dp >= 0 {
-+		if base == 2 {
-+			return 0, false
-+		}
-+		if dig > 0 {
-+			ex := dp - (p - 1)
-+			for q := p - 1; ex < 0 && at(q) == '0'; q-- {
-+				ex++
-+				dig--
-+			}
-+			if ex <= -(1 << 20) {
-+				return 0, false
-+			}
- 		}
--		sc.scanDecimal(sc.Next(), buf)
- 	}
--
--	return nil
--}
--
--func (sc *Scanner) scanString(quote int, buf *bytes.Buffer) error {
--	ch := sc.Next()
--	for ch != quote {
--		if ch == '\n' || ch == '\r' || ch < 0 {
--			return sc.Error(buf.String(), "unterminated string")
-+	if base == 16 && at(p)|0x20 == 'p' || base == 10 && at(p)|0x20 == 'e' {
-+		p++
-+		if at(p) == '+' || at(p) == '-' {
-+			p++
-+		}
-+		if !isDigit(at(p)) {
-+			return 0, false
- 		}
--		if ch == '\\' {
--			if err := sc.scanEscape(ch, buf); err != nil {
--				return err
-+		xx := at(p) & 15
-+		for p++; isDigit(at(p)); p++ {
-+			xx = xx*10 + at(p)&15
-+			if xx >= 1<<20 {
-+				return 0, false
- 			}
--		} else {
--			writeChar(buf, ch)
- 		}
--		ch = sc.Next()
- 	}
--	return nil
--}
--
 -func (sc *Scanner) scanEscape(ch int, buf *bytes.Buffer) error {
 -	ch = sc.Next()
 -	switch ch {
@@ -13616,48 +13736,8 @@ regenerates the diff below; this header is edited by hand.
 -			bytes := []byte{byte(ch)}
 -			for i := 0; i < 2 && isDecimal(sc.Peek()); i++ {
 -				bytes = append(bytes, byte(sc.Next()))
-+	if p < len(s) { // a suffix: the FFI's, or garbage
-+		return 0, false
-+	}
-+	if base == 2 {
-+		if dig > 64 {
-+			return 0, false
-+		}
-+		var x uint64
-+		for i := sp; i < p; i++ {
-+			if s[i]&^1 != '0' {
-+				return 0, false
- 			}
--			val, _ := strconv.ParseInt(string(bytes), 10, 32)
--			writeChar(buf, int(val))
--		} else {
--			writeChar(buf, ch)
-+			x = x<<1 | uint64(s[i]&1)
- 		}
-+		return float64(x), true
- 	}
--	return nil
-+	return math.NaN(), true
- }
- 
--func (sc *Scanner) countSep(ch int) (int, int) {
 +func (ls *lexer) skipSep() int {
- 	count := 0
--	for ; ch == '='; count = count + 1 {
--		ch = sc.Next()
--	}
--	return count, ch
--}
--
--func (sc *Scanner) scanMultilineString(ch int, buf *bytes.Buffer) error {
--	var count1, count2 int
--	count1, ch = sc.countSep(ch)
--	if ch != '[' {
--		return sc.Error(string(rune(ch)), "invalid multiline string")
--	}
--	ch = sc.Next()
--	if ch == '\n' || ch == '\r' {
--		ch = sc.Next()
++	count := 0
 +	s := ls.current
 +	ls.saveNext()
 +	for ls.current == '=' {
@@ -13675,14 +13755,8 @@ regenerates the diff below; this header is edited by hand.
 +	ls.saveNext() // skip the second '['
 +	if ls.currIsNewline() {
 +		ls.inclinenumber() // a first newline is skipped
- 	}
- 	for {
--		if ch < 0 {
--			return sc.Error(buf.String(), "unterminated multiline string")
--		} else if ch == ']' {
--			count2, ch = sc.countSep(sc.Next())
--			if count1 == count2 && ch == ']' {
--				goto finally
++	}
++	for {
 +		switch ls.current {
 +		case EOF:
 +			if isString {
@@ -13721,35 +13795,19 @@ regenerates the diff below; this header is edited by hand.
 +			} else {
 +				ls.next()
  			}
--			buf.WriteByte(']')
--			buf.WriteString(strings.Repeat("=", count2))
--			continue
+-			val, _ := strconv.ParseInt(string(bytes), 10, 32)
+-			writeChar(buf, int(val))
+-		} else {
+-			writeChar(buf, ch)
  		}
--		writeChar(buf, ch)
--		ch = sc.Next()
  	}
--
--finally:
 -	return nil
  }
  
--var reservedWords = map[string]int{
--	"and": TAnd, "break": TBreak, "do": TDo, "else": TElse, "elseif": TElseIf,
--	"end": TEnd, "false": TFalse, "for": TFor, "function": TFunction,
--	"if": TIf, "in": TIn, "local": TLocal, "nil": TNil, "not": TNot, "or": TOr,
--	"return": TReturn, "repeat": TRepeat, "then": TThen, "true": TTrue,
--	"until": TUntil, "while": TWhile, "goto": TGoto}
--
--func (sc *Scanner) Scan(lexer *Lexer) (ast.Token, error) {
--redo:
--	var err error
--	tok := ast.Token{}
--	newline := false
--
--	ch := sc.skipWhiteSpace(whitespace1)
--	if ch == '\n' || ch == '\r' {
--		newline = true
--		ch = sc.skipWhiteSpace(whitespace2)
+-func (sc *Scanner) countSep(ch int) (int, int) {
+-	count := 0
+-	for ; ch == '='; count = count + 1 {
+-		ch = sc.Next()
 +// readString is Lua 5.1's read_string.
 +func (ls *lexer) readString(del int) string {
 +	ls.saveNext()
@@ -13804,14 +13862,28 @@ regenerates the diff below; this header is edited by hand.
 +			ls.saveNext()
 +		}
  	}
+-	return count, ch
 +	ls.saveNext() // skip the delimiter
 +	return string(ls.buff[1 : len(ls.buff)-1])
-+}
+ }
  
--	if ch == '(' && lexer.PrevTokenType == ')' {
--		lexer.PNewLine = newline
--	} else {
--		lexer.PNewLine = false
+-func (sc *Scanner) scanMultilineString(ch int, buf *bytes.Buffer) error {
+-	var count1, count2 int
+-	count1, ch = sc.countSep(ch)
+-	if ch != '[' {
+-		return sc.Error(string(rune(ch)), "invalid multiline string")
+-	}
+-	ch = sc.Next()
+-	if ch == '\n' || ch == '\r' {
+-		ch = sc.Next()
+-	}
+-	for {
+-		if ch < 0 {
+-			return sc.Error(buf.String(), "unterminated multiline string")
+-		} else if ch == ']' {
+-			count2, ch = sc.countSep(sc.Next())
+-			if count1 == count2 && ch == ']' {
+-				goto finally
 +// lexString is LuaJIT's lex_string.
 +func (ls *lexer) lexString() string {
 +	del := ls.current
@@ -13907,32 +13979,63 @@ regenerates the diff below; this header is edited by hand.
 +				}
 +				ls.save(c)
 +				continue
-+			}
+ 			}
+-			buf.WriteByte(']')
+-			buf.WriteString(strings.Repeat("=", count2))
+-			continue
 +			ls.save(c)
 +			ls.next()
 +		default:
 +			ls.saveNext()
-+		}
+ 		}
+-		writeChar(buf, ch)
+-		ch = sc.Next()
  	}
+-
+-finally:
+-	return nil
 +	ls.saveNext() // skip the delimiter
 +	return string(ls.buff[1 : len(ls.buff)-1])
-+}
+ }
  
--	var _buf bytes.Buffer
--	buf := &_buf
--	tok.Pos = sc.Pos
+-var reservedWords = map[string]int{
+-	"and": TAnd, "break": TBreak, "do": TDo, "else": TElse, "elseif": TElseIf,
+-	"end": TEnd, "false": TFalse, "for": TFor, "function": TFunction,
+-	"if": TIf, "in": TIn, "local": TLocal, "nil": TNil, "not": TNot, "or": TOr,
+-	"return": TReturn, "repeat": TRepeat, "then": TThen, "true": TTrue,
+-	"until": TUntil, "while": TWhile, "goto": TGoto}
+-
+-func (sc *Scanner) Scan(lexer *Lexer) (ast.Token, error) {
+-redo:
+-	var err error
+-	tok := ast.Token{}
+-	newline := false
+-
+-	ch := sc.skipWhiteSpace(whitespace1)
+-	if ch == '\n' || ch == '\r' {
+-		newline = true
+-		ch = sc.skipWhiteSpace(whitespace2)
 +// hexDigit is the value of the current character, a hexadecimal digit in
 +// an escape sequence.
 +func (ls *lexer) hexDigit() int {
 +	if !isXDigit(ls.current) {
 +		ls.lexError("invalid escape sequence", tkString)
-+	}
+ 	}
+-
+-	if ch == '(' && lexer.PrevTokenType == ')' {
+-		lexer.PNewLine = newline
+-	} else {
+-		lexer.PNewLine = false
 +	if isDigit(ls.current) {
 +		return ls.current - '0'
-+	}
+ 	}
 +	return ls.current&15 + 9
 +}
  
+-	var _buf bytes.Buffer
+-	buf := &_buf
+-	tok.Pos = sc.Pos
+-
 +// encodeUTF8 encodes c (below 0x110000) as LuaJIT does a \u{} escape.
 +func encodeUTF8(b []byte, c int) int {
  	switch {
@@ -13972,6 +14075,7 @@ regenerates the diff below; this header is edited by hand.
 +// line into tok.
 +func (ls *lexer) llex(tok *token) int {
 +	ls.buff = ls.buff[:0]
++	tok.cdata = false
 +	jit := ls.dialect == LuaJIT
 +	for {
 +		tok.line = ls.linenumber
@@ -14133,7 +14237,7 @@ regenerates the diff below; this header is edited by hand.
 -				tok.Str = "::"
 -				sc.Next()
 +			if jit {
-+				tok.sem = ls.lexNumber()
++				tok.sem, tok.cdata = ls.lexNumber()
  			} else {
 -				tok.Type = ch
 -				tok.Str = string(rune(ch))
@@ -14253,7 +14357,7 @@ regenerates the diff below; this header is edited by hand.
 +			continue
 +		case isDigit(c):
 +			if jit {
-+				tok.sem = ls.lexNumber()
++				tok.sem, tok.cdata = ls.lexNumber()
 +			} else {
 +				tok.sem = ls.readNumeral()
  			}
@@ -14312,7 +14416,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/parse/parser.go
 +++ b/parse/parser.go
-@@ -1,1385 +1,1053 @@
+@@ -1,1385 +1,1057 @@
 -// Code generated by goyacc -o parser.go parser.go.y. DO NOT EDIT.
 -
 -//line parser.go.y:2
@@ -14851,30 +14955,14 @@ regenerates the diff below; this header is edited by hand.
 -	if !yyErrorVerbose {
 -		return "syntax error"
 -	}
--
--	for _, e := range yyErrorMessages {
--		if e.state == state && e.token == lookAhead {
--			return "syntax error: " + e.msg
--		}
--	}
--
--	res := "syntax error: unexpected " + yyTokname(lookAhead)
--
--	// To match Bison, suggest at most four expected tokens.
--	expected := make([]int, 0, 4)
 +func (p *parser) checkNext(c int) {
 +	p.check(c)
 +	p.next()
 +}
  
--	// Look for shiftable tokens.
--	base := int(yyPact[state])
--	for tok := TOKSTART; tok-1 < len(yyToknames); tok++ {
--		if n := base + tok; n >= 0 && n < yyLast && int(yyChk[int(yyAct[n])]) == tok {
--			if len(expected) == cap(expected) {
--				return res
--			}
--			expected = append(expected, tok)
+-	for _, e := range yyErrorMessages {
+-		if e.state == state && e.token == lookAhead {
+-			return "syntax error: " + e.msg
 +func (p *parser) checkMatch(what, who, where int) {
 +	if !p.testNext(what) {
 +		if where == p.ls.linenumber {
@@ -14885,6 +14973,22 @@ regenerates the diff below; this header is edited by hand.
  	}
 +}
  
+-	res := "syntax error: unexpected " + yyTokname(lookAhead)
+-
+-	// To match Bison, suggest at most four expected tokens.
+-	expected := make([]int, 0, 4)
+-
+-	// Look for shiftable tokens.
+-	base := int(yyPact[state])
+-	for tok := TOKSTART; tok-1 < len(yyToknames); tok++ {
+-		if n := base + tok; n >= 0 && n < yyLast && int(yyChk[int(yyAct[n])]) == tok {
+-			if len(expected) == cap(expected) {
+-				return res
+-			}
+-			expected = append(expected, tok)
+-		}
+-	}
+-
 -	if yyDef[state] == -2 {
 -		i := 0
 -		for yyExca[i] != -1 || int(yyExca[i+1]) != state {
@@ -14967,14 +15071,14 @@ regenerates the diff below; this header is edited by hand.
 -out:
 -	if token == 0 {
 -		token = int(yyTok2[1]) /* unknown char */
+-	}
+-	if yyDebug >= 3 {
+-		__yyfmt__.Printf("lex %s(%d)\n", yyTokname(token), uint(char))
 +func (p *parser) enterLevel() {
 +	p.level++
 +	if p.level > maxLevels || p.jit && p.level >= maxLevels {
 +		p.ls.lexError("chunk has too many syntax levels", 0)
  	}
--	if yyDebug >= 3 {
--		__yyfmt__.Printf("lex %s(%d)\n", yyTokname(token), uint(char))
--	}
 -	return char, token
  }
  
@@ -16273,6 +16377,8 @@ regenerates the diff below; this header is edited by hand.
 -		{
 -			if yylex.(*Lexer).PNewLine {
 -				yylex.(*Lexer).TokenError(yyDollar[1].token, "ambiguous syntax (function call x new statement)")
+-			}
+-			yyVAL.exprlist = []ast.Expr{}
 +		kind = kindParen
 +	case p.isName():
 +		name, line := p.strCheckName()
@@ -16314,7 +16420,13 @@ regenerates the diff below; this header is edited by hand.
 +			e, kind = c, kindCall
 +		default:
 +			return e, kind
-+		}
+ 		}
+-	case 78:
+-		yyDollar = yyS[yypt-3 : yypt+1]
+-//line parser.go.y:437
+-		{
+-			if yylex.(*Lexer).PNewLine {
+-				yylex.(*Lexer).TokenError(yyDollar[1].token, "ambiguous syntax (function call x new statement)")
 +	}
 +}
 +
@@ -16323,7 +16435,11 @@ regenerates the diff below; this header is edited by hand.
 +	var e ast.Expr
 +	switch ls.t.typ {
 +	case tkNumber:
-+		e = &ast.NumberExpr{Value: ls.t.sem}
++		if ls.t.cdata { // go-moonscript patch: LuaJIT's FFI numerals
++			e = &ast.CdataNumberExpr{Value: ls.t.sem}
++		} else {
++			e = &ast.NumberExpr{Value: ls.t.sem}
++		}
 +	case tkString:
 +		e = &ast.StringExpr{Value: ls.t.sem}
 +	case tkNil:
@@ -16371,15 +16487,7 @@ regenerates the diff below; this header is edited by hand.
 +				v, _ := p.expr()
 +				fields = append(fields, &ast.Field{Value: v})
 +				break
- 			}
--			yyVAL.exprlist = []ast.Expr{}
--		}
--	case 78:
--		yyDollar = yyS[yypt-3 : yypt+1]
--//line parser.go.y:437
--		{
--			if yylex.(*Lexer).PNewLine {
--				yylex.(*Lexer).TokenError(yyDollar[1].token, "ambiguous syntax (function call x new statement)")
++			}
 +			name, nameLine := p.strCheckName()
 +			key := &ast.StringExpr{Value: name}
 +			key.SetLine(nameLine)
@@ -16677,6 +16785,441 @@ regenerates the diff below; this header is edited by hand.
 +}
 +
 +// }}
+--- a/parse/strscan.go
++++ b/parse/strscan.go
+@@ -0,0 +1,335 @@
++package parse
++
++// go-moonscript patch: LuaJIT 2.1's number scanner, lj_strscan.c's
++// lj_strscan_scan, for the numerals of DialectLuaJIT and for its tonumber.
++//
++// Adapted from go-luascope's parser/number.go
++// (https://github.com/bigbes/go-luascope, BSD-2-Clause,
++// Copyright (c) 2026, Eugene Blikh; see NOTICE), a port of lj_strscan.c
++// (LuaJIT, Copyright (C) 2005-2017 Mike Pall, MIT): it gained the string
++// conversion's white space, sign, "inf" and "nan", and passes every digit
++// to strconv. Checked against Debian's luajit 2.1.0-beta3.
++
++import (
++	"math"
++	"strconv"
++	"strings"
++)
++
++// numFormat is lj_strscan.c's StrScanFmt, in the same order.
++type numFormat int
++
++const (
++	fmtError numFormat = iota
++	fmtNum             // a double
++	fmtImag            // cdata: an imaginary number (1i)
++	fmtInt             // an integer without a suffix
++	fmtU32             // 1U: C syntax only, an error here
++	fmtI64             // cdata: 1LL
++	fmtU64             // cdata: 1ULL, 1LLU
++)
++
++// scanOpt is lj_strscan.c's STRSCAN_OPT_* (STRSCAN_OPT_TONUM always: the VM
++// has no integer numbers; never STRSCAN_OPT_C).
++type scanOpt int
++
++const (
++	optLL   scanOpt = 1 << iota // the LL, ULL and LLU suffixes
++	optImag                     // the i suffix
++)
++
++// maxExp is STRSCAN_MAXEXP: an exponent, or the count of fractional digits,
++// from it on is an error.
++const maxExp = 1 << 20
++
++// ljNaN is the NaN LuaJIT's scanner gives (setnanV).
++var ljNaN = math.Float64frombits(0xfff8000000000000)
++
++// ScanNumberLuaJIT converts a string to a number as LuaJIT 2.1 does
++// (lj_strscan_num, which its tonumber uses): white space around, a sign,
++// "inf", "infinity" and "nan" in any case, or a decimal, "0x" hexadecimal
++// or "0b" binary number with an optional fraction and exponent ("e", or "p"
++// for hexadecimal), correctly rounded. A NUL byte anywhere makes it no
++// number.
++func ScanNumberLuaJIT(s string) (float64, bool) {
++	v, f := strscan(s, 0)
++	return v, f == fmtNum
++}
++
++// scanNumeral checks a numeral as lex_number does with the FFI's options: it
++// returns the value of a number, or reports that the numeral is cdata (a
++// 64-bit integer or an imaginary number), or that it is malformed.
++func scanNumeral(s string) (v float64, cdata, ok bool) {
++	v, f := strscan(s, optLL|optImag)
++	switch f {
++	case fmtNum:
++		return v, false, true
++	case fmtImag, fmtI64, fmtU64:
++		return 0, true, true
++	}
++	return 0, false, false
++}
++
++// strscan is lj_strscan_scan with STRSCAN_OPT_TONUM and the options opt. It
++// returns the format and, for fmtNum and fmtImag, the value (the imaginary
++// part).
++func strscan(s string, opt scanOpt) (float64, numFormat) {
++	// at is the byte at i, 0 past the end, as in LuaJIT's NUL-terminated
++	// strings
++	at := func(i int) int {
++		if i < len(s) {
++			return int(s[i])
++		}
++		return 0
++	}
++	lower := func(i int) int { return at(i) | 0x20 }
++	p, neg := 0, false
++
++	// white space, the sign, "inf", "infinity", "nan"
++	if !isDigit(at(p)) {
++		for isSpace(at(p)) {
++			p++
++		}
++		if c := at(p); c == '+' || c == '-' {
++			neg = c == '-'
++			p++
++		}
++		if at(p) >= 'A' {
++			v := ljNaN
++			if lower(p) == 'i' && lower(p+1) == 'n' && lower(p+2) == 'f' {
++				v = math.Inf(1)
++				if neg {
++					v = math.Inf(-1)
++				}
++				p += 3
++				if lower(p) == 'i' && lower(p+1) == 'n' && lower(p+2) == 'i' &&
++					lower(p+3) == 't' && lower(p+4) == 'y' {
++					p += 5
++				}
++			} else if lower(p) == 'n' && lower(p+1) == 'a' && lower(p+2) == 'n' {
++				p += 3
++			}
++			for isSpace(at(p)) {
++				p++
++			}
++			if p < len(s) {
++				return 0, fmtError
++			}
++			return v, fmtNum
++		}
++	}
++
++	// the base and leading zeros
++	f, base, digit := fmtInt, 10, isDigit
++	dp, hasdig := -1, false
++	if at(p) <= '0' {
++		if at(p) == '0' {
++			switch lower(p + 1) {
++			case 'x':
++				base, digit = 16, isXDigit
++				p += 2
++			case 'b':
++				base = 2 // the digits are decimal ones, checked below
++				p += 2
++			}
++		}
++		for ; ; p++ {
++			if at(p) == '0' {
++				hasdig = true
++			} else if at(p) == '.' {
++				if dp >= 0 {
++					return 0, fmtError
++				}
++				dp = p
++			} else {
++				break
++			}
++		}
++	}
++
++	// the significant digits and the decimal point
++	sp, dig := p, 0
++	for ; ; p++ {
++		if digit(at(p)) {
++			dig++
++		} else if at(p) == '.' {
++			if dp >= 0 {
++				return 0, fmtError
++			}
++			dp = p
++		} else {
++			break
++		}
++	}
++	if !hasdig && dig == 0 {
++		return 0, fmtError
++	}
++	ex := 0 // the exponent of the significant digits as an integer
++	if dp >= 0 {
++		if base == 2 {
++			return 0, fmtError
++		}
++		f = fmtNum
++		if dig > 0 {
++			ex = dp - (p - 1)
++			for q := p - 1; ex < 0 && s[q] == '0'; q-- { // trailing zeros
++				ex++
++				dig--
++			}
++			if ex <= -maxExp {
++				return 0, fmtError
++			}
++			if base == 16 {
++				ex *= 4
++			}
++		}
++	}
++
++	// the exponent
++	if base >= 10 && (base == 16 && lower(p) == 'p' || base == 10 && lower(p) == 'e') {
++		f = fmtNum
++		p++
++		negx := false
++		if c := at(p); c == '+' || c == '-' {
++			negx = c == '-'
++			p++
++		}
++		if !isDigit(at(p)) {
++			return 0, fmtError
++		}
++		xx := at(p) & 15
++		for p++; isDigit(at(p)); p++ {
++			xx = xx*10 + at(p)&15
++			if xx >= maxExp {
++				return 0, fmtError
++			}
++		}
++		if negx {
++			xx = -xx
++		}
++		ex += xx
++	}
++
++	// the suffix: I (imaginary), LL (int64), ULL or LLU (uint64); U (uint32)
++	// and L (long) are C syntax only. Then white space.
++	if at(p) != 0 {
++		if lower(p) == 'i' {
++			if opt&optImag == 0 {
++				return 0, fmtError
++			}
++			p++
++			f = fmtImag
++		} else if f == fmtInt {
++			if lower(p) == 'u' {
++				p++
++				f = fmtU32
++			}
++			if lower(p) == 'l' {
++				p++
++				if lower(p) != 'l' {
++					return 0, fmtError
++				}
++				p++
++				f += fmtI64 - fmtInt
++			}
++			if lower(p) == 'u' && (f == fmtInt || f == fmtI64) {
++				p++
++				f += fmtU32 - fmtInt
++			}
++			if f == fmtU32 || f >= fmtI64 && opt&optLL == 0 {
++				return 0, fmtError
++			}
++		}
++		for isSpace(at(p)) {
++			p++
++		}
++		if at(p) != 0 {
++			return 0, fmtError
++		}
++	}
++	if p < len(s) { // a NUL byte
++		return 0, fmtError
++	}
++
++	// the base-specific conversion (strscan_hex, strscan_bin, strscan_dec)
++	if f == fmtInt {
++		f = fmtNum
++	}
++	digits := func() string { // the significant digits, without the point
++		d := strings.Replace(s[sp:], ".", "", 1)
++		return d[:dig]
++	}
++	switch base {
++	case 2:
++		if dig > 64 {
++			return 0, fmtError
++		}
++		var x uint64
++		for _, c := range []byte(s[sp : sp+dig]) {
++			if c&^1 != '0' {
++				return 0, fmtError
++			}
++			x = x<<1 | uint64(c&1)
++		}
++		if f == fmtI64 || f == fmtU64 {
++			return 0, f
++		}
++		return signed(float64(x), neg), f
++	case 16:
++		if f == fmtI64 || f == fmtU64 {
++			if dig > 16 {
++				return 0, fmtError
++			}
++			return 0, f
++		}
++		if dig == 0 {
++			return signed(0, neg), f
++		}
++		// "0x.<digits>p<exponent>": the exponent stays small for a value in
++		// range (strconv stops reading exponents at 10000)
++		return signed(parseFloat("0x."+digits()+"p"+strconv.Itoa(ex+4*dig)), neg), f
++	default:
++		if f == fmtI64 || f == fmtU64 {
++			if !fitsUint64(digits()) {
++				return 0, fmtError
++			}
++			return 0, f
++		}
++		if dig == 0 {
++			return signed(0, neg), f
++		}
++		return signed(parseFloat("0."+digits()+"e"+strconv.Itoa(ex+dig)), neg), f
++	}
++}
++
++// parseFloat is strconv.ParseFloat of a number strscan made, ±Inf or 0 out
++// of range. It rounds correctly as LuaJIT does: LuaJIT takes the first 800
++// significant decimal digits and whether any other is not 0, enough to.
++func parseFloat(s string) float64 {
++	v, err := strconv.ParseFloat(s, 64)
++	if ne, ok := err.(*strconv.NumError); ok && ne.Err != strconv.ErrRange {
++		panic("parse: number " + strconv.Quote(s) + ": " + err.Error())
++	}
++	return v
++}
++
++func signed(v float64, neg bool) float64 {
++	if neg {
++		return -v
++	}
++	return v
++}
++
++// fitsUint64 reports whether the decimal integer d is below 2^64, as
++// strscan_dec requires of an LL, ULL or LLU numeral (at most 20 digits,
++// without overflow).
++func fitsUint64(d string) bool {
++	if d == "" { // only zeros
++		return true
++	}
++	if len(d) > 20 {
++		return false
++	}
++	_, err := strconv.ParseUint(d, 10, 64)
++	return err == nil
++}
+--- a/parse/strscan_test.go
++++ b/parse/strscan_test.go
+@@ -0,0 +1,94 @@
++package parse
++
++// go-moonscript patch: tests of strscan.go. Its behaviour is checked
++// against luajit by testdata/compat/parse_numeral_on_luajit.jit.lua and
++// lib_tonumber_strscan_on_luajit.jit.lua; these test the corners directly.
++
++import (
++	"math"
++	"strings"
++	"testing"
++)
++
++func TestScanNumberLuaJIT(t *testing.T) {
++	for _, c := range []struct {
++		s  string
++		v  float64
++		ok bool
++	}{
++		{"1", 1, true},
++		{" \t1\n ", 1, true},
++		{"-0", math.Copysign(0, -1), true},
++		{"-0x10", -16, true},
++		{"0b101", 5, true},
++		{"-0b101", -5, true},
++		{"0x.8", 0.5, true},
++		{"0x1p-1074", math.SmallestNonzeroFloat64, true},
++		{"0x1.8p-1075", math.SmallestNonzeroFloat64, true},
++		{"1e1048575", math.Inf(1), true},
++		{"-INFINITY", math.Inf(-1), true},
++		{"0." + strings.Repeat("0", 1048574) + "1", 0, true},
++		{"0." + strings.Repeat("0", 1048575) + "1", 0, false},
++		{strings.Repeat("1", 1<<20+1) + "e-1048570", 1111111.1111111111111111, true},
++		{"0x1" + strings.Repeat("0", 1000) + "p-3990", 1024, true},
++		{"0x1p1048576", 0, false},
++		{"1e1048576", 0, false},
++		{"nan(1)", 0, false},
++		{"1\x00", 0, false},
++		{"1LL", 0, false},
++		{"1i", 0, false},
++		{"0b2", 0, false},
++		{"0b" + strings.Repeat("1", 65), 0, false},
++		{"", 0, false},
++	} {
++		v, ok := ScanNumberLuaJIT(c.s)
++		name := c.s
++		if len(name) > 40 {
++			name = name[:40] + "..."
++		}
++		if ok != c.ok || ok && math.Float64bits(v) != math.Float64bits(c.v) {
++			t.Errorf("ScanNumberLuaJIT(%q) = %v, %v; want %v, %v", name, v, ok, c.v, c.ok)
++		}
++	}
++	if v, ok := ScanNumberLuaJIT("-nan"); !ok || math.Float64bits(v) != 0xfff8000000000000 {
++		t.Errorf(`ScanNumberLuaJIT("-nan") = %x, %v; want LuaJIT's NaN`, math.Float64bits(v), ok)
++	}
++}
++
++func TestScanNumeral(t *testing.T) {
++	for _, c := range []struct {
++		s         string
++		cdata, ok bool
++	}{
++		{"1", false, true},
++		{"1LL", true, true},
++		{"1ULL", true, true},
++		{"1LLU", true, true},
++		{"0LL", true, true},
++		{"1.5i", true, true},
++		{"0x1p4i", true, true},
++		{"0xffffffffffffffffULL", true, true},
++		{"0x10000000000000000ULL", false, false},
++		{"18446744073709551615ULL", true, true},
++		{"18446744073709551616ULL", false, false},
++		{"1.5LL", false, false},
++		{"1U", false, false},
++		{"1L", false, false},
++		{"1 ", false, true}, // not in a numeral, but as lj_strscan
++	} {
++		_, cdata, ok := scanNumeral(c.s)
++		if cdata != c.cdata || ok != c.ok {
++			t.Errorf("scanNumeral(%q) = cdata %v, ok %v; want %v, %v", c.s, cdata, ok, c.cdata, c.ok)
++		}
++	}
++}
++
++func FuzzScanNumberLuaJIT(f *testing.F) {
++	for _, s := range []string{"1", "0x1.8p3", "0b11", " -inf ", "1e5LL", "0x.p", "12.5i", ".5e-3"} {
++		f.Add(s)
++	}
++	f.Fuzz(func(t *testing.T, s string) {
++		ScanNumberLuaJIT(s)
++		scanNumeral(s)
++	})
++}
 --- a/pm/perf_cache_test.go
 +++ b/pm/perf_cache_test.go
 @@ -0,0 +1,96 @@
@@ -21604,13 +22147,14 @@ regenerates the diff below; this header is edited by hand.
 +print(math.floor("3.7"), math.max("0x10", "1e1"))
 --- a/testdata/compat/compile_tonumber_on_luajit.jit.lua
 +++ b/testdata/compat/compile_tonumber_on_luajit.jit.lua
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,29 @@
 +-- The cases of compile_tonumber.lua under DialectLuaJIT, compared with luajit's output.
 +-- yuin/gopher-lua#478, halogencapital/gopher-lua d3de08565a: strings convert
 +-- to numbers as with strtod (tonumber and arithmetic). Left out: the
 +-- cases where LuaJIT's lj_strscan differs from strtod ("0b101" is 5,
-+-- "nan(123)" and strings with a NUL are not numbers), which the VM does
-+-- not follow in its LuaJIT dialect yet.
++-- "nan(123)" and strings with a NUL are not numbers): tonumber follows
++-- lj_strscan (lib_tonumber_strscan_on_luajit.jit.lua), the arithmetic and
++-- library argument coercions don't yet.
 +local function fmt(v)
 +  if type(v) ~= "number" then return tostring(v) end
 +  if v ~= v then return "nan" end
@@ -26501,6 +27045,60 @@ regenerates the diff below; this header is edited by hand.
 +  (pcall(tonumber, "10", -16)), (pcall(tonumber, "10", 36)), (pcall(tonumber, "10", 2)))
 +print((pcall(tonumber, nil, 16)), (pcall(tonumber, {}, 16)), (pcall(tonumber, true, 2)))
 +print(tonumber(nil), tonumber(true), tonumber({}), tonumber("0x10"), tonumber("10", nil))
+--- a/testdata/compat/lib_tonumber_strscan_on_luajit.jit.lua
++++ b/testdata/compat/lib_tonumber_strscan_on_luajit.jit.lua
+@@ -0,0 +1,51 @@
++-- tonumber(s) and tonumber(s, 10) of LuaJIT 2.1: lj_strscan.c with
++-- STRSCAN_OPT_TONUM (white space, a sign, inf and nan, no FFI suffixes),
++-- compared with luajit's output: the value as a hexadecimal float, or nil.
++local function hex(v)
++  if v == nil then return "nil" end
++  if v ~= v then return "nan" end
++  return string.format("%a", v)
++end
++local function esc(s)
++  if #s > 60 then s = s:sub(1, 30) .. "...(" .. #s .. ")..." .. s:sub(-20) end
++  return (string.gsub(s, "[^%w%p ]", function(c) return "\\" .. string.byte(c) end))
++end
++local cases = {
++  -- white space and signs
++  "1", " 1", "1 ", " 1 ", "\t\n\v\f\r1\r\n\f\v\t", "1 2", "- 1", "-1", "+1", "--1", "+-1", "-+1",
++  "-0", "+0", "-0.0", "-0x10", "+0x10", "-0b11", "+0b11", "+.5", "-.5e1", "-", "+", "-.", ".",
++  " -inf ", "\t+inf\n",
++  -- inf and nan
++  "inf", "INF", "Inf", "iNf", "-inf", "+inf", "infinity", "INFINITY", "-Infinity", "infinit",
++  "infinityy", "infx", "inf x", "inf inity", "nan", "NaN", "NAN", "-nan", "+nan", "nan(1)",
++  "nan()", "nan ", " nan", "nanx", "nana", "in", "i", "n", "na", "infnan", "nan inf", "-nan(1)",
++  "x", "_1", "[1", "~1", "@1", "\2261", "\1951",
++  -- empty strings and NUL bytes
++  "", " ", "\0", "1\0", "\0" .. "1", "1 \0", "inf\0", "nan\0", "0x10\0", " \0", "1\0 ",
++  -- decimal
++  "10", "010", "00011", "1.", ".5", "5.", "-1.", "1e2", "1E+2", "1e-06", "+.5e1", "1e", "1e+",
++  "e1", "1.5e3x", "1e400", "-1e400", "1e-400", "-1e-400", "1e1.5", "3.4.5", "1_000", "0o17",
++  "123456789012345678901234567890", "9007199254740993", "4.9406564584124654e-324",
++  "2.4703282292062328e-324", "2.4703282292062327e-324", "1e1048575", "1e1048576", "1e-1048575",
++  "1e00000000000000000005", "1e5 ", " 1e5", "1 e5", "1e 5", "1e- 5",
++  -- hexadecimal and binary
++  "0x", "0x10", "0X1f", " 0x10 ", "0x-1", "0x1p4", "0x1.8", "0x.8", "0xA.8p1", "0x1p", "0x.",
++  "0x1e+1", "0x1P-1074", "0x1p-1075", "0x1.8p-1075", "0xffffffffffffffffff", "0x1p1048576",
++  "0x7fffffffffffffff", "0b", "0b101", "0B11", "0b2", "0b1.0", "0b" .. string.rep("1", 64),
++  "0b" .. string.rep("1", 65), "0b" .. string.rep("1", 54), "0xg", "0x 1", "0 x1",
++  -- the FFI's suffixes are not accepted
++  "1LL", "1ULL", "1i", "1U", "1L", "0x10LL", "1.5i", "1 LL", "1LL ", "1 i",
++}
++for _, s in ipairs(cases) do
++  print(esc(s), hex(tonumber(s)), hex(tonumber(s, 10)))
++end
++-- long strings
++local h = "9007199254740993"
++for _, z in ipairs({780, 791, 800, 801, 900}) do
++  print(z, hex(tonumber(h .. string.rep("0", z) .. "e-" .. z)), hex(tonumber(" " .. h .. string.rep("0", z) .. "e-" .. (z + 1) .. " ")),
++    hex(tonumber(h .. string.rep("0", z) .. "1e-" .. (z + 1))), hex(tonumber("-" .. h .. "." .. string.rep("0", z))))
++end
++print(hex(tonumber("0." .. string.rep("0", 1048574) .. "1")), hex(tonumber("0." .. string.rep("0", 1048575) .. "1")))
++print(hex(tonumber(string.rep(" ", 100000) .. "1" .. string.rep(" ", 100000))))
++-- numbers and other values
++print(tonumber(10), tonumber(-0.5), tonumber(1/0), tonumber(nil), tonumber(true), tonumber({}))
 --- a/testdata/compat/lib_xpcall.lua
 +++ b/testdata/compat/lib_xpcall.lua
 @@ -0,0 +1,23 @@
@@ -26837,6 +27435,88 @@ regenerates the diff below; this header is edited by hand.
 +levels("index", function(n) return "return " .. r("a[", n) .. "1" .. r("]", n) end)
 +levels("assign", function(n) return r("a, ", n) .. "a = 1" end)
 +levels("nested assign", function(n) return "do do " .. r("a, ", n) .. "a = 1 end end" end)
+--- a/testdata/compat/parse_numeral_on_luajit.jit.lua
++++ b/testdata/compat/parse_numeral_on_luajit.jit.lua
+@@ -0,0 +1,79 @@
++-- LuaJIT 2.1's numerals (lj_lex.c's lex_number, lj_strscan.c with the FFI's
++-- suffixes), compared with luajit's output: the value of each numeral as a
++-- hexadecimal float, or its error. The FFI's 64-bit integers (1LL, 1ULL)
++-- and imaginary numbers (1i) are cdata: luajit evaluates them, the VM
++-- accepts them and raises an error when they are evaluated; both print
++-- "cdata".
++local function hex(v)
++  if v ~= v then return "nan" end
++  return string.format("%a", v)
++end
++local function cut(s)
++  if #s > 120 then s = s:sub(1, 60) .. "...(" .. #s .. ")..." .. s:sub(-40) end
++  return s
++end
++local function show(s)
++  local f, err = loadstring("return " .. s, "=n")
++  if not f then return cut((string.gsub(err, "^.-:(%d+): ", "%1: "))) end
++  local ok, v = pcall(f)
++  if ok and type(v) == "cdata" or not ok and string.find(v, "needs the FFI", 1, true) then
++    return "cdata"
++  end
++  if not ok then return "error " .. v end
++  return hex(v)
++end
++local function esc(s)
++  s = cut(s)
++  return (string.gsub(s, "[^%w%p ]", function(c) return "\\" .. string.byte(c) end))
++end
++local cases = {
++  -- decimal
++  "0", "00", "1", "007", "1.", ".5", "1.5", "0.1", "1e5", "1E+5", "1e-5", "1.e5", "1.5e-3",
++  "123456789012345678901234567890", "9007199254740993", "9007199254740995",
++  "1e308", "1.7976931348623157e308", "1.7976931348623158e308", "1.7976931348623159e308",
++  "1e309", "1e400", "4.9406564584124654e-324", "2.4703282292062328e-324",
++  "2.4703282292062327e-324", "1e-400", "2.2250738585072011e-308", "2.2250738585072012e-308",
++  "1e", "1e+", "1e-", "1.5e", "1..5", "3.4.5", "1e1.5", "1e5.", "1x", "1a", "1f", "1_000",
++  "1end", "1e+5+3", "1-1", "1e-1-1", "1E-2",
++  -- exponent limits
++  "1e1048575", "1e1048576", "1e-1048575", "0e1048575", "0e1048576", "1e00000000000000000005",
++  -- hexadecimal
++  "0x", "0X", "0x.", "0x.8", "0x1.", "0x1p", "0x1p+", "0x1p-", "0x1p4", "0X1P-4", "0xA.8p1",
++  "0x1e+1", "0xe+1", "0xep1", "0xg", "0x1g", "0x1.8", "0x.p1", "0x1p1023", "0x1p1024",
++  "0x1.fffffffffffffp1023", "0x1.fffffffffffff8p1023", "0x1p-1022", "0x1p-1074", "0x1p-1075",
++  "0x1.0000000000001p-1075", "0x1.8p-1074", "0x1.8p-1075", "0x3p-1076", "0x1.00000000000008p0",
++  "0x1.000000000000080000000001p0", "0x1.00000000000018p0", "0x1.000000000000180p0",
++  "0xffffffffffffffff", "0xffffffffffffffffff", "0x123456789abcdef0123", "0x00000000000000000001",
++  "0x1P", "0x1p1048575", "0x1p1048576", "0x10e", "0x1.p1", "0x1..2",
++  -- binary
++  "0b", "0B", "0b0", "0b1", "0b101", "0B11", "0b2", "0b12", "0b1.0", "0b.1", "0b1.", "0b11e1",
++  "0b1p1", "0b" .. string.rep("1", 53), "0b" .. string.rep("1", 54), "0b" .. string.rep("1", 64),
++  "0b" .. string.rep("1", 65), "0b" .. string.rep("0", 70) .. "1", "0b1" .. string.rep("0", 63),
++  -- the FFI's suffixes
++  "1LL", "1ll", "1lL", "1uLL", "1ULL", "1ull", "1LLU", "1llu", "1LLu", "1U", "1u", "1L", "1l",
++  "1UL", "1LU", "1LLL", "1ULLU", "1LLUU", "1UU", "1i", "1I", "1.5i", ".5i", "1e3i", "1e-3I",
++  "0x10i", "0x1p4i", "0b11i", "1ii", "1iLL", "1LLi", "1.5LL", "1e2LL", "1.LL", "0x1p4LL",
++  "0x10LL", "0x10ULL", "0xffffffffffffffffULL", "0xffffffffffffffffLL",
++  "0x10000000000000000LL", "0x00000000000000000001LL", "18446744073709551615ULL",
++  "18446744073709551616ULL", "18446744073709551615LL", "9223372036854775808LL",
++  "99999999999999999999LL", "100000000000000000000LL", "00000000000000000000000001LL", "0LL",
++  "0ll", "0ULL", "00LL", "0b1LL", "0b" .. string.rep("1", 64) .. "ULL",
++  "0b" .. string.rep("1", 65) .. "ULL", "0b2LL", "0xLL", "0bLL", "1LLx", "1i5", "1e5LL",
++}
++for _, s in ipairs(cases) do
++  print(esc(s), show(s))
++end
++-- long numerals: digits after the 800th, fractional digits up to 2^20
++local h = "9007199254740993"
++for _, z in ipairs({780, 791, 800, 801, 900}) do
++  print(z, show(h .. string.rep("0", z) .. "e-" .. z), show(h .. string.rep("0", z) .. "e-" .. (z + 1)),
++    show(h .. string.rep("0", z) .. "1e-" .. (z + 1)), show(h .. "." .. string.rep("0", z)))
++end
++print(show("1" .. string.rep("0", 400)), show("0." .. string.rep("0", 330) .. "1"))
++print(show("0." .. string.rep("0", 1048574) .. "1"), show("0." .. string.rep("0", 1048575) .. "1"))
++print(show("1." .. string.rep("0", 1048580)), show(".1" .. string.rep("0", 1048580)))
++print(show(string.rep("1", 1048580) .. ".5e-1048400"), show("0x1." .. string.rep("0", 1048574) .. "1p4"),
++  show("0x1." .. string.rep("0", 1048574) .. "1p1048575"))
++print(show("1" .. string.rep("0", 1048576) .. "LL"), show("0x" .. string.rep("0", 1048576) .. "1LL"))
++-- operators after a numeral
++print(1e+5+3, 0x1p-1-1, 0xe+1, 1-1, 2^-1, 0x10 .. "", 1 .. 2)
 --- a/testdata/compat/perf_patterns.lua
 +++ b/testdata/compat/perf_patterns.lua
 @@ -0,0 +1,38 @@
@@ -31700,6 +32380,170 @@ regenerates the diff below; this header is edited by hand.
 +false	false	false	false	true	true
 +false	false	false
 +nil	nil	nil	16	10
+--- a/testdata/compat/ref/lib_tonumber_strscan_on_luajit.jit.out
++++ b/testdata/compat/ref/lib_tonumber_strscan_on_luajit.jit.out
+@@ -0,0 +1,161 @@
++1	0x1p+0	0x1p+0
++ 1	0x1p+0	0x1p+0
++1 	0x1p+0	0x1p+0
++ 1 	0x1p+0	0x1p+0
++\9\10\11\12\131\13\10\12\11\9	0x1p+0	0x1p+0
++1 2	nil	nil
++- 1	nil	nil
++-1	-0x1p+0	-0x1p+0
+++1	0x1p+0	0x1p+0
++--1	nil	nil
+++-1	nil	nil
++-+1	nil	nil
++-0	-0x0p+0	-0x0p+0
+++0	0x0p+0	0x0p+0
++-0.0	-0x0p+0	-0x0p+0
++-0x10	-0x1p+4	-0x1p+4
+++0x10	0x1p+4	0x1p+4
++-0b11	-0x1.8p+1	-0x1.8p+1
+++0b11	0x1.8p+1	0x1.8p+1
+++.5	0x1p-1	0x1p-1
++-.5e1	-0x1.4p+2	-0x1.4p+2
++-	nil	nil
+++	nil	nil
++-.	nil	nil
++.	nil	nil
++ -inf 	-inf	-inf
++\9+inf\10	inf	inf
++inf	inf	inf
++INF	inf	inf
++Inf	inf	inf
++iNf	inf	inf
++-inf	-inf	-inf
+++inf	inf	inf
++infinity	inf	inf
++INFINITY	inf	inf
++-Infinity	-inf	-inf
++infinit	nil	nil
++infinityy	nil	nil
++infx	nil	nil
++inf x	nil	nil
++inf inity	nil	nil
++nan	nan	nan
++NaN	nan	nan
++NAN	nan	nan
++-nan	nan	nan
+++nan	nan	nan
++nan(1)	nil	nil
++nan()	nil	nil
++nan 	nan	nan
++ nan	nan	nan
++nanx	nil	nil
++nana	nil	nil
++in	nil	nil
++i	nil	nil
++n	nil	nil
++na	nil	nil
++infnan	nil	nil
++nan inf	nil	nil
++-nan(1)	nil	nil
++x	nil	nil
++_1	nil	nil
++[1	nil	nil
++~1	nil	nil
++@1	nil	nil
++\2261	nil	nil
++\1951	nil	nil
++	nil	nil
++ 	nil	nil
++\0	nil	nil
++1\0	nil	nil
++\01	nil	nil
++1 \0	nil	nil
++inf\0	nil	nil
++nan\0	nil	nil
++0x10\0	nil	nil
++ \0	nil	nil
++1\0 	nil	nil
++10	0x1.4p+3	0x1.4p+3
++010	0x1.4p+3	0x1.4p+3
++00011	0x1.6p+3	0x1.6p+3
++1.	0x1p+0	0x1p+0
++.5	0x1p-1	0x1p-1
++5.	0x1.4p+2	0x1.4p+2
++-1.	-0x1p+0	-0x1p+0
++1e2	0x1.9p+6	0x1.9p+6
++1E+2	0x1.9p+6	0x1.9p+6
++1e-06	0x1.0c6f7a0b5ed8dp-20	0x1.0c6f7a0b5ed8dp-20
+++.5e1	0x1.4p+2	0x1.4p+2
++1e	nil	nil
++1e+	nil	nil
++e1	nil	nil
++1.5e3x	nil	nil
++1e400	inf	inf
++-1e400	-inf	-inf
++1e-400	0x0p+0	0x0p+0
++-1e-400	-0x0p+0	-0x0p+0
++1e1.5	nil	nil
++3.4.5	nil	nil
++1_000	nil	nil
++0o17	nil	nil
++123456789012345678901234567890	0x1.8ee90ff6c373ep+96	0x1.8ee90ff6c373ep+96
++9007199254740993	0x1p+53	0x1p+53
++4.9406564584124654e-324	0x1p-1074	0x1p-1074
++2.4703282292062328e-324	0x1p-1074	0x1p-1074
++2.4703282292062327e-324	0x0p+0	0x0p+0
++1e1048575	inf	inf
++1e1048576	nil	nil
++1e-1048575	0x0p+0	0x0p+0
++1e00000000000000000005	0x1.86ap+16	0x1.86ap+16
++1e5 	0x1.86ap+16	0x1.86ap+16
++ 1e5	0x1.86ap+16	0x1.86ap+16
++1 e5	nil	nil
++1e 5	nil	nil
++1e- 5	nil	nil
++0x	nil	nil
++0x10	0x1p+4	0x1p+4
++0X1f	0x1.fp+4	0x1.fp+4
++ 0x10 	0x1p+4	0x1p+4
++0x-1	nil	nil
++0x1p4	0x1p+4	0x1p+4
++0x1.8	0x1.8p+0	0x1.8p+0
++0x.8	0x1p-1	0x1p-1
++0xA.8p1	0x1.5p+4	0x1.5p+4
++0x1p	nil	nil
++0x.	nil	nil
++0x1e+1	nil	nil
++0x1P-1074	0x1p-1074	0x1p-1074
++0x1p-1075	0x0p+0	0x0p+0
++0x1.8p-1075	0x1p-1074	0x1p-1074
++0xffffffffffffffffff	0x1p+72	0x1p+72
++0x1p1048576	nil	nil
++0x7fffffffffffffff	0x1p+63	0x1p+63
++0b	nil	nil
++0b101	0x1.4p+2	0x1.4p+2
++0B11	0x1.8p+1	0x1.8p+1
++0b2	nil	nil
++0b1.0	nil	nil
++0b1111111111111111111111111111...(66)...11111111111111111111	0x1p+64	0x1p+64
++0b1111111111111111111111111111...(67)...11111111111111111111	nil	nil
++0b111111111111111111111111111111111111111111111111111111	0x1p+54	0x1p+54
++0xg	nil	nil
++0x 1	nil	nil
++0 x1	nil	nil
++1LL	nil	nil
++1ULL	nil	nil
++1i	nil	nil
++1U	nil	nil
++1L	nil	nil
++0x10LL	nil	nil
++1.5i	nil	nil
++1 LL	nil	nil
++1LL 	nil	nil
++1 i	nil	nil
++780	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
++791	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
++800	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
++801	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
++900	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
++0x0p+0	nil
++0x1p+0
++10	-0.5	inf	nil	nil	nil
 --- a/testdata/compat/ref/lib_xpcall.out
 +++ b/testdata/compat/ref/lib_xpcall.out
 @@ -0,0 +1,18 @@
@@ -31953,6 +32797,194 @@ regenerates the diff below; this header is edited by hand.
 +index	196	1: chunk has too many syntax levels
 +assign	197	1: main function has more than 197 variables in assignment
 +nested assign	195	1: main function has more than 195 variables in assignment
+--- a/testdata/compat/ref/parse_numeral_on_luajit.jit.out
++++ b/testdata/compat/ref/parse_numeral_on_luajit.jit.out
+@@ -0,0 +1,185 @@
++0	0x0p+0
++00	0x0p+0
++1	0x1p+0
++007	0x1.cp+2
++1.	0x1p+0
++.5	0x1p-1
++1.5	0x1.8p+0
++0.1	0x1.999999999999ap-4
++1e5	0x1.86ap+16
++1E+5	0x1.86ap+16
++1e-5	0x1.4f8b588e368f1p-17
++1.e5	0x1.86ap+16
++1.5e-3	0x1.89374bc6a7efap-10
++123456789012345678901234567890	0x1.8ee90ff6c373ep+96
++9007199254740993	0x1p+53
++9007199254740995	0x1.0000000000002p+53
++1e308	0x1.1ccf385ebc8ap+1023
++1.7976931348623157e308	0x1.fffffffffffffp+1023
++1.7976931348623158e308	0x1.fffffffffffffp+1023
++1.7976931348623159e308	inf
++1e309	inf
++1e400	inf
++4.9406564584124654e-324	0x1p-1074
++2.4703282292062328e-324	0x1p-1074
++2.4703282292062327e-324	0x0p+0
++1e-400	0x0p+0
++2.2250738585072011e-308	0x1.ffffffffffffep-1023
++2.2250738585072012e-308	0x1p-1022
++1e	1: malformed number near '1e'
++1e+	1: malformed number near '1e+'
++1e-	1: malformed number near '1e-'
++1.5e	1: malformed number near '1.5e'
++1..5	1: malformed number near '1..5'
++3.4.5	1: malformed number near '3.4.5'
++1e1.5	1: malformed number near '1e1.5'
++1e5.	1: malformed number near '1e5.'
++1x	1: malformed number near '1x'
++1a	1: malformed number near '1a'
++1f	1: malformed number near '1f'
++1_000	1: malformed number near '1_000'
++1end	1: malformed number near '1end'
++1e+5+3	0x1.86a3p+16
++1-1	0x0p+0
++1e-1-1	-0x1.ccccccccccccdp-1
++1E-2	0x1.47ae147ae147bp-7
++1e1048575	inf
++1e1048576	1: malformed number near '1e1048576'
++1e-1048575	0x0p+0
++0e1048575	0x0p+0
++0e1048576	1: malformed number near '0e1048576'
++1e00000000000000000005	0x1.86ap+16
++0x	1: malformed number near '0x'
++0X	1: malformed number near '0X'
++0x.	1: malformed number near '0x.'
++0x.8	0x1p-1
++0x1.	0x1p+0
++0x1p	1: malformed number near '0x1p'
++0x1p+	1: malformed number near '0x1p+'
++0x1p-	1: malformed number near '0x1p-'
++0x1p4	0x1p+4
++0X1P-4	0x1p-4
++0xA.8p1	0x1.5p+4
++0x1e+1	0x1.fp+4
++0xe+1	0x1.ep+3
++0xep1	0x1.cp+4
++0xg	1: malformed number near '0xg'
++0x1g	1: malformed number near '0x1g'
++0x1.8	0x1.8p+0
++0x.p1	1: malformed number near '0x.p1'
++0x1p1023	0x1p+1023
++0x1p1024	inf
++0x1.fffffffffffffp1023	0x1.fffffffffffffp+1023
++0x1.fffffffffffff8p1023	inf
++0x1p-1022	0x1p-1022
++0x1p-1074	0x1p-1074
++0x1p-1075	0x0p+0
++0x1.0000000000001p-1075	0x1p-1074
++0x1.8p-1074	0x1p-1073
++0x1.8p-1075	0x1p-1074
++0x3p-1076	0x1p-1074
++0x1.00000000000008p0	0x1p+0
++0x1.000000000000080000000001p0	0x1.0000000000001p+0
++0x1.00000000000018p0	0x1.0000000000002p+0
++0x1.000000000000180p0	0x1.0000000000002p+0
++0xffffffffffffffff	0x1p+64
++0xffffffffffffffffff	0x1p+72
++0x123456789abcdef0123	0x1.23456789abcdfp+72
++0x00000000000000000001	0x1p+0
++0x1P	1: malformed number near '0x1P'
++0x1p1048575	inf
++0x1p1048576	1: malformed number near '0x1p1048576'
++0x10e	0x1.0ep+8
++0x1.p1	0x1p+1
++0x1..2	1: malformed number near '0x1..2'
++0b	1: malformed number near '0b'
++0B	1: malformed number near '0B'
++0b0	0x0p+0
++0b1	0x1p+0
++0b101	0x1.4p+2
++0B11	0x1.8p+1
++0b2	1: malformed number near '0b2'
++0b12	1: malformed number near '0b12'
++0b1.0	1: malformed number near '0b1.0'
++0b.1	1: malformed number near '0b.1'
++0b1.	1: malformed number near '0b1.'
++0b11e1	1: malformed number near '0b11e1'
++0b1p1	1: malformed number near '0b1p1'
++0b11111111111111111111111111111111111111111111111111111	0x1.fffffffffffffp+52
++0b111111111111111111111111111111111111111111111111111111	0x1p+54
++0b1111111111111111111111111111111111111111111111111111111111111111	0x1p+64
++0b11111111111111111111111111111111111111111111111111111111111111111	1: malformed number near '0b11111111111111111111111111111111111111111111111111111111111111111'
++0b00000000000000000000000000000000000000000000000000000000000000000000001	0x1p+0
++0b1000000000000000000000000000000000000000000000000000000000000000	0x1p+63
++1LL	cdata
++1ll	cdata
++1lL	cdata
++1uLL	cdata
++1ULL	cdata
++1ull	cdata
++1LLU	cdata
++1llu	cdata
++1LLu	cdata
++1U	1: malformed number near '1U'
++1u	1: malformed number near '1u'
++1L	1: malformed number near '1L'
++1l	1: malformed number near '1l'
++1UL	1: malformed number near '1UL'
++1LU	1: malformed number near '1LU'
++1LLL	1: malformed number near '1LLL'
++1ULLU	1: malformed number near '1ULLU'
++1LLUU	1: malformed number near '1LLUU'
++1UU	1: malformed number near '1UU'
++1i	cdata
++1I	cdata
++1.5i	cdata
++.5i	cdata
++1e3i	cdata
++1e-3I	cdata
++0x10i	cdata
++0x1p4i	cdata
++0b11i	cdata
++1ii	1: malformed number near '1ii'
++1iLL	1: malformed number near '1iLL'
++1LLi	1: malformed number near '1LLi'
++1.5LL	1: malformed number near '1.5LL'
++1e2LL	1: malformed number near '1e2LL'
++1.LL	1: malformed number near '1.LL'
++0x1p4LL	1: malformed number near '0x1p4LL'
++0x10LL	cdata
++0x10ULL	cdata
++0xffffffffffffffffULL	cdata
++0xffffffffffffffffLL	cdata
++0x10000000000000000LL	1: malformed number near '0x10000000000000000LL'
++0x00000000000000000001LL	cdata
++18446744073709551615ULL	cdata
++18446744073709551616ULL	1: malformed number near '18446744073709551616ULL'
++18446744073709551615LL	cdata
++9223372036854775808LL	cdata
++99999999999999999999LL	1: malformed number near '99999999999999999999LL'
++100000000000000000000LL	1: malformed number near '100000000000000000000LL'
++00000000000000000000000001LL	cdata
++0LL	cdata
++0ll	cdata
++0ULL	cdata
++00LL	cdata
++0b1LL	cdata
++0b1111111111111111111111111111111111111111111111111111111111111111ULL	cdata
++0b11111111111111111111111111111111111111111111111111111111111111111ULL	1: malformed number near '0b11111111111111111111111111111111111111111111111111111111111111111ULL'
++0b2LL	1: malformed number near '0b2LL'
++0xLL	1: malformed number near '0xLL'
++0bLL	1: malformed number near '0bLL'
++1LLx	1: malformed number near '1LLx'
++1i5	1: malformed number near '1i5'
++1e5LL	1: malformed number near '1e5LL'
++780	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
++791	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
++800	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
++801	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
++900	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
++inf	0x0p+0
++0x0p+0	1: malformed number near '0.00000000000000000000000000000000...(1048605)...000000000000000000000000000000000000001'
++0x1p+0	0x1.999999999999ap-4
++0x1.b6b667e83f483p+594	0x1p+4	inf
++1: malformed number near '1000000000000000000000000000000000...(1048606)...0000000000000000000000000000000000000LL'	cdata
++100003	-0.5	15	0	0.5	16	12
 --- a/testdata/compat/ref/perf_patterns.out
 +++ b/testdata/compat/ref/perf_patterns.out
 @@ -0,0 +1,56 @@
