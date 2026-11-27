@@ -535,6 +535,36 @@ that change.
       testdata/compat/files), chunkname_fix_test.go; compat scripts run
       as "@<name>.lua" in testdata/compat.
 
+  - Table API for the libraries built on the fork (go-moonscript):
+    - table.go: LTable.All, an iter.Seq2 over the pairs in next's order
+      (array part, then the hash part in node or insertion order), with
+      next's semantics under modification: assigning to existing fields,
+      nil included, skips or repeats no pair; adding keys is undefined but
+      never panics nor runs forever (the parts are walked as they were, at
+      most one step per node in insertion order). LTable.Array is the raw
+      ipairs. ForEach unchanged. Tests and benchmarks:
+      table_iter_fix_test.go.
+    - table.go, table_hash.go, _vm.go/vm.go, _state.go/state.go, auxlib.go,
+      baselib.go, tablelib.go, luajitlib.go: frozen tables: LTable.Freeze
+      (for good, shallow), Frozen, FreezeDeep (keys, values, metatables),
+      ErrFrozenTable. Lua code gets "attempt to modify a read-only table"
+      (catchable by pcall, at the assignment's or the library caller's
+      position) from assignments (SETTABLE, SETTABLEKS, SETGLOBAL, the
+      mainLoop fast path, __newindex chains that reach a frozen table; a
+      frozen table's own __newindex is not called), SETLIST, rawset,
+      table.insert/remove/sort, LuaJIT's table.clear/table.move,
+      setmetatable and debug.setmetatable; LState's SetField, SetTable,
+      SetGlobal, RawSet, RawSetInt and SetMetatable raise the Lua error,
+      LTable's RawSet/RawSetInt/RawSetString/RawSetH/Append/Insert/Remove
+      panic with ErrFrozenTable. The mark is hashPart.lastfree = -1 (a
+      frozen table gets no new key; the field moves next to the array
+      part); the VM tests it only on assignments. Weak entries of a frozen
+      table are still cleared. Tests: table_frozen_fix_test.go (both
+      dialects).
+    - sandbox/: Env freezes the library copies it gives;
+      sandbox.FreezeLibraries freezes the state's library tables and the
+      string and file metatables (the globals and package stay writable).
+
   Performance, numbers (go-moonscript):
     - LNumber2I builds the interface value in a local, without a scratch
       LValue (a write barrier per boxed number) or reflect.SliceHeader;
@@ -1140,7 +1170,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return LNil
  		}
-@@ -1118,24 +1313,103 @@
+@@ -1118,24 +1313,109 @@
  			curobj = metaindex
  		}
  	}
@@ -1199,6 +1229,9 @@ regenerates the diff below; this header is edited by hand.
 +		tb, istable := curobj.(*LTable)
 +		j := int32(-1)
 +		if istable {
++			if tb.Frozen() { // go-moonscript patch: before __newindex
++				ls.frozenTableError()
++			}
 +			// go-moonscript patch: one lookup for the key
 +			j = tb.hash.findString(skey, h)
 +			if j >= 0 && tb.hash.nodes[j].val != LNil || tb.Metatable == LNil {
@@ -1234,6 +1267,9 @@ regenerates the diff below; this header is edited by hand.
  		tb, istable := curobj.(*LTable)
  		if istable {
 -			if tb.RawGet(key) != LNil {
++			if tb.Frozen() { // go-moonscript patch: before __newindex
++				ls.frozenTableError()
++			}
 +			if tb.Metatable == LNil || tb.RawGet(key) != LNil { // go-moonscript patch
  				ls.RawSet(tb, key, value)
  				return
@@ -1248,7 +1284,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			ls.RawSet(tb, key, value)
  			return
-@@ -1151,7 +1425,7 @@
+@@ -1151,7 +1431,7 @@
  			curobj = metaindex
  		}
  	}
@@ -1257,11 +1293,14 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) setFieldString(obj LValue, key string, value LValue) {
-@@ -1159,15 +1433,15 @@
+@@ -1159,15 +1439,18 @@
  	for i := 0; i < MaxTableGetLoop; i++ {
  		tb, istable := curobj.(*LTable)
  		if istable {
 -			if tb.RawGetString(key) != LNil {
++			if tb.Frozen() { // go-moonscript patch: before __newindex
++				ls.frozenTableError()
++			}
 +			if tb.Metatable == LNil || tb.RawGetString(key) != LNil { // go-moonscript patch
  				tb.RawSetString(key, value)
  				return
@@ -1276,7 +1315,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			tb.RawSetString(key, value)
  			return
-@@ -1183,7 +1457,7 @@
+@@ -1183,7 +1466,7 @@
  			curobj = metaindex
  		}
  	}
@@ -1285,7 +1324,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -1197,6 +1471,7 @@
+@@ -1197,6 +1480,7 @@
  			CallStackSize: CallStackSize,
  			RegistrySize:  RegistrySize,
  		})
@@ -1293,7 +1332,7 @@ regenerates the diff below; this header is edited by hand.
  		ls.OpenLibs()
  	} else {
  		if opts[0].CallStackSize < 1 {
-@@ -1214,6 +1489,10 @@
+@@ -1214,6 +1498,10 @@
  			}
  		}
  		ls = newLState(opts[0])
@@ -1304,7 +1343,7 @@ regenerates the diff below; this header is edited by hand.
  		if !opts[0].SkipOpenLibs {
  			ls.OpenLibs()
  		}
-@@ -1226,7 +1505,12 @@
+@@ -1226,7 +1514,12 @@
  }
  
  func (ls *LState) Close() {
@@ -1317,7 +1356,7 @@ regenerates the diff below; this header is edited by hand.
  	for _, file := range ls.G.tempFiles {
  		// ignore errors in these operations
  		file.Close()
-@@ -1399,9 +1683,8 @@
+@@ -1399,9 +1692,8 @@
  // NewThread returns a new LState that shares with the original state all global objects.
  // If the original state has context.Context, the new state has a new child context of the original state and this function returns its cancel function.
  func (ls *LState) NewThread() (*LState, context.CancelFunc) {
@@ -1329,7 +1368,7 @@ regenerates the diff below; this header is edited by hand.
  	var f context.CancelFunc = nil
  	if ls.ctx != nil {
  		thread.mainLoop = mainLoopWithContext
-@@ -1411,6 +1694,19 @@
+@@ -1411,6 +1703,19 @@
  	return thread, f
  }
  
@@ -1349,7 +1388,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) NewFunctionFromProto(proto *FunctionProto) *LFunction {
  	return newLFunctionL(proto, ls.Env, int(proto.NumUpvalues))
  }
-@@ -1473,7 +1769,7 @@
+@@ -1473,7 +1778,7 @@
  }
  
  func (ls *LState) ToString(n int) string {
@@ -1358,9 +1397,19 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) ToTable(n int) *LTable {
-@@ -1518,13 +1814,20 @@
+@@ -1517,14 +1822,30 @@
+ 	ls.raiseError(1, format, args...)
  }
  
++// frozenTableError raises the error of a change to a frozen table, at the
++// running Lua function's line or the caller's of the running Go function
++// (go-moonscript patch: LTable.Freeze).
++//
++//go:noinline
++func (ls *LState) frozenTableError() {
++	ls.raiseError(1, frozenTableMessage)
++}
++
  // This function is equivalent to lua_error( http://www.lua.org/manual/5.1/manual.html#lua_error ).
 +// A string value is prefixed with the position of the function at level,
 +// as Lua 5.1's error function does (luaL_where: 1 is the caller of the
@@ -1383,7 +1432,7 @@ regenerates the diff below; this header is edited by hand.
  		ls.Push(lv)
  		ls.Panic(ls)
  	}
-@@ -1547,19 +1850,26 @@
+@@ -1547,19 +1868,26 @@
  		case 'f':
  			retfn = true
  		case 'S':
@@ -1418,7 +1467,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  		case 'l':
  			if !f.IsG && dbg.frame != nil {
-@@ -1572,8 +1882,10 @@
+@@ -1572,8 +1900,10 @@
  		case 'u':
  			dbg.NUpvalues = len(f.Upvalues)
  		case 'n':
@@ -1430,7 +1479,39 @@ regenerates the diff below; this header is edited by hand.
  			}
  		default:
  			return LNil, newApiErrorS(ApiErrorRun, "invalid what: "+string(c))
-@@ -1797,15 +2109,62 @@
+@@ -1699,7 +2029,12 @@
+ 	return ls.getField(obj, key)
+ }
+ 
++// RawSet is rawset: go-moonscript patch: a frozen table raises the Lua
++// error "attempt to modify a read-only table" (LTable.Freeze).
+ func (ls *LState) RawSet(tb *LTable, key LValue, value LValue) {
++	if tb.Frozen() {
++		ls.frozenTableError()
++	}
+ 	if n, ok := key.(LNumber); ok && math.IsNaN(float64(n)) {
+ 		ls.RaiseError("table index is NaN")
+ 	} else if key == LNil {
+@@ -1708,10 +2043,18 @@
+ 	tb.RawSet(key, value)
+ }
+ 
++// RawSetInt is lua_rawseti: go-moonscript patch: a frozen table raises the
++// Lua error "attempt to modify a read-only table" (LTable.Freeze).
+ func (ls *LState) RawSetInt(tb *LTable, key int, value LValue) {
++	if tb.Frozen() {
++		ls.frozenTableError()
++	}
+ 	tb.RawSetInt(key, value)
+ }
+ 
++// SetField is t[key] = value, with __newindex. go-moonscript patch: a frozen
++// table raises the Lua error "attempt to modify a read-only table", before
++// any __newindex (LTable.Freeze); so do SetTable and SetGlobal.
+ func (ls *LState) SetField(obj LValue, key string, value LValue) {
+ 	ls.setFieldString(obj, key, value)
+ }
+@@ -1797,15 +2140,62 @@
  
  /* load and function call operations {{{ */
  
@@ -1464,7 +1545,7 @@ regenerates the diff below; this header is edited by hand.
  	}
 -	proto, err := Compile(chunk, name)
 +	chunk, err := parse.ParseBytes(src, parseName, dialect)
- 	if err != nil {
++	if err != nil {
 +		// go-moonscript patch: a function that needs too many registers
 +		// before the error, which lua5.1 finds while parsing (lua51Overflow)
 +		if dialect == parse.Lua51 {
@@ -1477,8 +1558,8 @@ regenerates the diff below; this header is edited by hand.
 +		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
 +			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: parseName}
 +		}
- 		return nil, newApiErrorE(ApiErrorSyntax, err)
- 	}
++		return nil, newApiErrorE(ApiErrorSyntax, err)
++	}
 +	proto, err := Compile(chunk, parseName)
 +	// go-moonscript patch: lua5.1 finds that a function needs too many
 +	// registers while parsing, and reports it near the token it is at; the
@@ -1488,14 +1569,14 @@ regenerates the diff below; this header is edited by hand.
 +			return nil, newApiErrorE(ApiErrorSyntax, pe)
 +		}
 +	}
-+	if err != nil {
-+		return nil, newApiErrorE(ApiErrorSyntax, err)
-+	}
+ 	if err != nil {
+ 		return nil, newApiErrorE(ApiErrorSyntax, err)
+ 	}
 +	setSource(proto, name, chunkname) // go-moonscript patch (chunkname.go)
  	return newLFunctionL(proto, ls.currentEnv(), 0), nil
  }
  
-@@ -1817,16 +2176,19 @@
+@@ -1817,16 +2207,19 @@
  	err = nil
  	sp := ls.stack.Sp()
  	base := ls.reg.Top() - nargs - 1
@@ -1516,7 +1597,7 @@ regenerates the diff below; this header is edited by hand.
  			if _, ok := rcv.(*ApiError); !ok {
  				err = newApiErrorS(ApiErrorPanic, fmt.Sprint(rcv))
  				if ls.Options.IncludeGoStackTrace {
-@@ -1856,6 +2218,8 @@
+@@ -1856,6 +2249,8 @@
  							err = rcv.(*ApiError)
  							err.(*ApiError).StackTrace = ls.stackTrace(0)
  						}
@@ -1525,7 +1606,7 @@ regenerates the diff below; this header is edited by hand.
  						ls.stack.SetSp(sp)
  						ls.currentFrame = ls.stack.Last()
  						ls.reg.SetTop(base)
-@@ -1866,6 +2230,8 @@
+@@ -1866,6 +2261,8 @@
  			} else if len(err.(*ApiError).StackTrace) == 0 {
  				err.(*ApiError).StackTrace = ls.stackTrace(0)
  			}
@@ -1534,7 +1615,25 @@ regenerates the diff below; this header is edited by hand.
  			ls.stack.SetSp(sp)
  			ls.currentFrame = ls.stack.Last()
  			ls.reg.SetTop(base)
-@@ -1922,7 +2288,9 @@
+@@ -1908,6 +2305,9 @@
+ 	return ls.metatable(obj, false)
+ }
+ 
++// SetMetatable sets the metatable of obj. go-moonscript patch: a frozen
++// table raises the Lua error "attempt to modify a read-only table"
++// (LTable.Freeze).
+ func (ls *LState) SetMetatable(obj LValue, mt LValue) {
+ 	switch mt.(type) {
+ 	case *LNilType, *LTable:
+@@ -1917,12 +2317,17 @@
+ 
+ 	switch v := obj.(type) {
+ 	case *LTable:
++		if v.Frozen() { // go-moonscript patch (LTable.Freeze)
++			ls.frozenTableError()
++		}
+ 		v.Metatable = mt
+ 	case *LUserData:
  		v.Metatable = mt
  	default:
  		ls.G.builtinMts[int(obj.Type())] = mt
@@ -1544,7 +1643,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -1935,7 +2303,10 @@
+@@ -1935,7 +2340,10 @@
  		status = "dead"
  	} else if ls.G.CurrentThread == th {
  		status = "running"
@@ -1556,7 +1655,7 @@ regenerates the diff below; this header is edited by hand.
  		status = "normal"
  	}
  	return status
-@@ -1943,7 +2314,7 @@
+@@ -1943,7 +2351,7 @@
  
  func (ls *LState) Resume(th *LState, fn *LFunction, args ...LValue) (ResumeState, error, []LValue) {
  	isstarted := th.isStarted()
@@ -1565,7 +1664,7 @@ regenerates the diff below; this header is edited by hand.
  		base := 0
  		th.stack.Push(callFrame{
  			Fn:         fn,
-@@ -1964,8 +2335,18 @@
+@@ -1964,8 +2372,18 @@
  	if th.Dead {
  		return ResumeError, newApiErrorS(ApiErrorRun, "can not resume a dead thread"), nil
  	}
@@ -1584,7 +1683,7 @@ regenerates the diff below; this header is edited by hand.
  	if !isstarted {
  		cf := th.stack.Last()
  		th.currentFrame = cf
-@@ -1976,10 +2357,13 @@
+@@ -1976,10 +2394,13 @@
  		cf.NArgs = len(args)
  		th.initCallFrame(cf)
  		th.Panic = panicWithoutTraceback
@@ -1598,7 +1697,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	top := ls.GetTop()
  	threadRun(th)
-@@ -1995,7 +2379,7 @@
+@@ -1995,7 +2416,7 @@
  
  	if haserror {
  		return ResumeError, newApiError(ApiErrorRun, ret[0]), nil
@@ -1607,7 +1706,7 @@ regenerates the diff below; this header is edited by hand.
  		return ResumeOK, nil, ret
  	}
  	return ResumeYield, nil, ret
-@@ -2015,8 +2399,15 @@
+@@ -2015,8 +2436,15 @@
  	}
  	top := ls.GetTop()
  	n = intMin(n, top)
@@ -1642,7 +1741,7 @@ regenerates the diff below; this header is edited by hand.
  	if L.stack.IsEmpty() {
  		return
  	}
-@@ -20,16 +18,354 @@
+@@ -20,16 +18,355 @@
  		return
  	}
  
@@ -1752,7 +1851,8 @@ regenerates the diff below; this header is edited by hand.
 +			B := int(inst & 0x1ff)    //GETB
 +			if tb, ok := reg.Get(lbase + A).(*LTable); ok {
 +				if k, isnum := rk(reg, consts, lbase, B).(LNumber); isnum {
-+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
++					// go-moonscript patch: a frozen table takes the slow path, which raises the error
++					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && !tb.Frozen() && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
 +						C := int(inst>>9) & 0x1ff //GETC
 +						tb.array[i-1] = rk(reg, consts, lbase, C)
 +						continue
@@ -2000,7 +2100,7 @@ regenerates the diff below; this header is edited by hand.
  func mainLoopWithContext(L *LState, baseframe *callFrame) {
  	var inst uint32
  	var cf *callFrame
-@@ -46,11 +382,14 @@
+@@ -46,11 +383,14 @@
  
  	for {
  		cf = L.currentFrame
@@ -2016,7 +2116,7 @@ regenerates the diff below; this header is edited by hand.
  			return
  		default:
  			if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
-@@ -94,17 +433,55 @@
+@@ -94,17 +434,55 @@
  	}
  	L.XMoveTo(parent, nargs)
  	L.stack.Pop()
@@ -2072,7 +2172,7 @@ regenerates the diff below; this header is edited by hand.
  	if tailcall {
  		L.currentFrame = L.RemoveCallerFrame()
  	}
-@@ -119,12 +496,21 @@
+@@ -119,12 +497,21 @@
  		wantret = gfnret
  	}
  
@@ -2095,7 +2195,7 @@ regenerates the diff below; this header is edited by hand.
  	L.stack.Pop()
  	L.currentFrame = L.stack.Last()
  	return false
-@@ -132,6 +518,16 @@
+@@ -132,6 +519,16 @@
  
  func threadRun(L *LState) {
  	if L.stack.IsEmpty() {
@@ -2112,7 +2212,7 @@ regenerates the diff below; this header is edited by hand.
  		return
  	}
  
-@@ -140,12 +536,31 @@
+@@ -140,12 +537,31 @@
  			var lv LValue
  			if v, ok := rcv.(*ApiError); ok {
  				lv = v.Object
@@ -2144,7 +2244,7 @@ regenerates the diff below; this header is edited by hand.
  					parent.Panic(L)
  				} else {
  					L.SetTop(0)
-@@ -157,6 +572,10 @@
+@@ -157,6 +573,10 @@
  			}
  		}
  	}()
@@ -2155,7 +2255,7 @@ regenerates the diff below; this header is edited by hand.
  	L.mainLoop(L, nil)
  }
  
-@@ -259,7 +678,13 @@
+@@ -259,7 +679,13 @@
  			RA := lbase + A
  			Bx := int(inst & 0x3ffff) //GETBX
  			//reg.Set(RA, L.getField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx]))
@@ -2170,7 +2270,7 @@ regenerates the diff below; this header is edited by hand.
  			// +inline-call reg.Set RA v
  			return 0
  		},
-@@ -271,7 +696,27 @@
+@@ -271,7 +697,27 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
@@ -2199,7 +2299,7 @@ regenerates the diff below; this header is edited by hand.
  			// +inline-call reg.Set RA v
  			return 0
  		},
-@@ -281,9 +726,20 @@
+@@ -281,9 +727,20 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -2223,7 +2323,7 @@ regenerates the diff below; this header is edited by hand.
  			// +inline-call reg.Set RA v
  			return 0
  		},
-@@ -295,7 +751,8 @@
+@@ -295,7 +752,8 @@
  			RA := lbase + A
  			Bx := int(inst & 0x3ffff) //GETBX
  			//L.setField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx], reg.Get(RA))
@@ -2233,16 +2333,17 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETUPVAL
-@@ -316,7 +773,23 @@
+@@ -316,7 +774,24 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
 -			L.setField(reg.Get(RA), L.rkValue(B), L.rkValue(C))
 +			obj := reg.Get(RA)
 +			key := L.rkValue(B)
-+			if tb, ok := obj.(*LTable); ok {
++			if tb, ok := obj.(*LTable); ok && !tb.Frozen() {
 +				// go-moonscript patch: an existing key of the array part, or
 +				// any key of a table without a metatable, without setField
++				// (a frozen table: setField raises the error)
 +				if k, isnum := key.(LNumber); isnum {
 +					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
 +						tb.array[i-1] = L.rkValue(C)
@@ -2258,7 +2359,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETTABLEKS
-@@ -325,9 +798,18 @@
+@@ -325,9 +800,19 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -2269,8 +2370,9 @@ regenerates the diff below; this header is edited by hand.
 +			C := int(inst>>9) & 0x1ff      //GETC
 +			lkey, key, h := L.rkStringK(B) // go-moonscript patch: with the key's hash
 +			obj := reg.Get(RA)
-+			if tb, ok := obj.(*LTable); ok {
++			if tb, ok := obj.(*LTable); ok && !tb.Frozen() {
 +				// go-moonscript patch: setFieldStringK only for __newindex
++				// (and for a frozen table, to raise the error)
 +				if j := tb.hash.findString(key, h); j >= 0 && tb.hash.nodes[j].val != LNil || tb.Metatable == LNil {
 +					tb.setStringAt(j, lkey, key, h, L.rkValue(C))
 +					return 0
@@ -2280,7 +2382,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_NEWTABLE
-@@ -336,10 +818,13 @@
+@@ -336,10 +821,13 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -2297,7 +2399,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SELF
-@@ -351,17 +836,26 @@
+@@ -351,17 +839,26 @@
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
  			selfobj := reg.Get(lbase + B)
@@ -2331,7 +2433,7 @@ regenerates the diff below; this header is edited by hand.
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
  			reg := L.reg
  			cf := L.currentFrame
-@@ -383,10 +877,10 @@
+@@ -383,10 +880,10 @@
  					if num, err := parseNumber(string(str)); err == nil {
  						// +inline-call reg.Set RA -num
  					} else {
@@ -2344,7 +2446,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -415,6 +909,10 @@
+@@ -415,6 +912,10 @@
  			switch lv := L.rkValue(B).(type) {
  			case LString:
  				// +inline-call reg.SetNumber RA LNumber(len(lv))
@@ -2355,7 +2457,7 @@ regenerates the diff below; this header is edited by hand.
  			default:
  				op := L.metaOp1(lv, "__len")
  				if op.Type() == LTFunction {
-@@ -428,10 +926,8 @@
+@@ -428,10 +929,8 @@
  					} else {
  						// +inline-call reg.Set RA ret
  					}
@@ -2367,7 +2469,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -448,6 +944,9 @@
+@@ -448,6 +947,9 @@
  			RB := lbase + B
  			v := stringConcat(L, RC-RB+1, RC)
  			// +inline-call reg.Set RA v
@@ -2377,7 +2479,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_JMP
-@@ -491,35 +990,7 @@
+@@ -491,35 +993,7 @@
  			A := int(inst>>18) & 0xff //GETA
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
@@ -2414,7 +2516,7 @@ regenerates the diff below; this header is edited by hand.
  			v := 1
  			if ret {
  				v = 0
-@@ -605,7 +1076,7 @@
+@@ -605,7 +1079,7 @@
  				callable, meta = L.metaCall(lv)
  			}
  			if callable == nil {
@@ -2423,7 +2525,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			// +inline-call L.closeUpvalues lbase
  			if callable.IsG {
-@@ -646,6 +1117,9 @@
+@@ -646,6 +1120,9 @@
  				// +inline-call L.reg.CopyRange base RA -1 reg.Top()-RA-1
  				cf.Base = base
  				cf.LocalBase = base + (cf.LocalBase - lbase + 1)
@@ -2433,7 +2535,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return 0
  		},
-@@ -657,6 +1131,9 @@
+@@ -657,6 +1134,9 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff) //GETB
  			// +inline-call L.closeUpvalues lbase
@@ -2443,7 +2545,7 @@ regenerates the diff below; this header is edited by hand.
  			nret := B - 1
  			if B == 0 {
  				nret = reg.Top() - RA
-@@ -671,9 +1148,22 @@
+@@ -671,9 +1151,22 @@
  				switchToParentThread(L, n, false, true)
  				return 1
  			}
@@ -2468,7 +2570,7 @@ regenerates the diff below; this header is edited by hand.
  			if islast || L.currentFrame == nil || L.currentFrame.Fn.IsG {
  				return 1
  			}
-@@ -689,23 +1179,24 @@
+@@ -689,23 +1182,24 @@
  				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
  					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
  						init += step
@@ -2499,7 +2601,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return 0
  		},
-@@ -716,15 +1207,14 @@
+@@ -716,15 +1210,14 @@
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
  			Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
@@ -2522,7 +2624,16 @@ regenerates the diff below; this header is edited by hand.
  			cf.Pc += Sbx
  			return 0
  		},
-@@ -767,9 +1257,9 @@
+@@ -763,13 +1256,18 @@
+ 			}
+ 			offset := (C - 1) * FieldsPerFlush
+ 			table := reg.Get(RA).(*LTable)
++			if table.Frozen() {
++				// go-moonscript patch: a constructor's table cannot be
++				// frozen yet, unless Go code that got it from the stack froze it
++				L.frozenTableError()
++			}
+ 			nelem := B
  			if B == 0 {
  				nelem = reg.Top() - RA - 1
  			}
@@ -2535,7 +2646,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_CLOSE
-@@ -801,6 +1291,9 @@
+@@ -801,6 +1299,9 @@
  					closure.Upvalues[i] = cf.Fn.Upvalues[B]
  				}
  			}
@@ -2545,7 +2656,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_VARARG
-@@ -828,6 +1321,99 @@
+@@ -828,6 +1329,99 @@
  	}
  }
  
@@ -2645,7 +2756,7 @@ regenerates the diff below; this header is edited by hand.
  func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_POW
  	reg := L.reg
  	cf := L.currentFrame
-@@ -851,14 +1437,34 @@
+@@ -851,14 +1445,34 @@
  	return 0
  }
  
@@ -2685,7 +2796,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
-@@ -906,24 +1512,12 @@
+@@ -906,24 +1520,12 @@
  		L.Call(2, 1)
  		return L.reg.Pop()
  	}
@@ -2714,7 +2825,7 @@ regenerates the diff below; this header is edited by hand.
  	return LNil
  }
  
-@@ -943,21 +1537,26 @@
+@@ -943,21 +1545,26 @@
  				total--
  				i--
  			} else {
@@ -2744,7 +2855,7 @@ regenerates the diff below; this header is edited by hand.
  			rhs = LString(strings.Join(buf, ""))
  		}
  	}
-@@ -970,10 +1569,10 @@
+@@ -970,10 +1577,10 @@
  		if v2, ok2 := rhs.(LNumber); ok2 {
  			return v1 < v2
  		}
@@ -2757,7 +2868,7 @@ regenerates the diff below; this header is edited by hand.
  		return false
  	}
  	ret := false
-@@ -986,6 +1585,37 @@
+@@ -986,6 +1593,37 @@
  	return ret
  }
  
@@ -2795,7 +2906,7 @@ regenerates the diff below; this header is edited by hand.
  func equals(L *LState, lhs, rhs LValue, raw bool) bool {
  	lt := lhs.Type()
  	if lt != rhs.Type() {
-@@ -1028,7 +1658,7 @@
+@@ -1028,7 +1666,7 @@
  	case 0:
  		return false
  	}
@@ -3026,7 +3137,25 @@ regenerates the diff below; this header is edited by hand.
  		return int64(intv)
  	}
  	ls.TypeError(n, LTNumber)
-@@ -123,7 +138,7 @@
+@@ -78,6 +93,17 @@
+ 	return nil
+ }
+ 
++// checkWritableTable is CheckTable for a table the function changes: a
++// frozen table raises "attempt to modify a read-only table" (go-moonscript
++// patch: LTable.Freeze).
++func (ls *LState) checkWritableTable(n int) *LTable {
++	tb := ls.CheckTable(n)
++	if tb.Frozen() {
++		ls.frozenTableError()
++	}
++	return tb
++}
++
+ func (ls *LState) CheckFunction(n int) *LFunction {
+ 	v := ls.Get(n)
+ 	if lv, ok := v.(*LFunction); ok {
+@@ -123,7 +149,7 @@
  	for _, typ := range typs {
  		buf = append(buf, typ.String())
  	}
@@ -3035,7 +3164,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) CheckOption(n int, options []string) int {
-@@ -146,7 +161,7 @@
+@@ -146,7 +172,7 @@
  	if v == LNil {
  		return d
  	}
@@ -3044,7 +3173,7 @@ regenerates the diff below; this header is edited by hand.
  		return int(intv)
  	}
  	ls.TypeError(n, LTNumber)
-@@ -158,7 +173,7 @@
+@@ -158,7 +184,7 @@
  	if v == LNil {
  		return d
  	}
@@ -3053,7 +3182,7 @@ regenerates the diff below; this header is edited by hand.
  		return int64(intv)
  	}
  	ls.TypeError(n, LTNumber)
-@@ -170,7 +185,7 @@
+@@ -170,7 +196,7 @@
  	if v == LNil {
  		return d
  	}
@@ -3062,7 +3191,7 @@ regenerates the diff below; this header is edited by hand.
  		return lv
  	}
  	ls.TypeError(n, LTNumber)
-@@ -184,6 +199,8 @@
+@@ -184,6 +210,8 @@
  	}
  	if lv, ok := v.(LString); ok {
  		return string(lv)
@@ -3071,7 +3200,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	ls.TypeError(n, LTString)
  	return ""
-@@ -241,12 +258,36 @@
+@@ -241,12 +269,36 @@
  
  /* error operations {{{ */
  
@@ -3110,7 +3239,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -294,8 +335,8 @@
+@@ -294,8 +346,8 @@
  		if newmodtb, ok := newmod.(*LTable); !ok {
  			ls.RaiseError("name conflict for module(%v)", name)
  		} else {
@@ -3121,7 +3250,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			ls.SetField(tb, name, newmodtb)
  			return newmodtb
-@@ -305,12 +346,20 @@
+@@ -305,12 +357,20 @@
  }
  
  func (ls *LState) SetFuncs(tb *LTable, funcs map[string]LGFunction, upvalues ...LValue) *LTable {
@@ -3144,7 +3273,7 @@ regenerates the diff below; this header is edited by hand.
  /* }}} */
  
  /* metatable operations {{{ */
-@@ -349,44 +398,16 @@
+@@ -349,44 +409,16 @@
  
  /* load and function call operations {{{ */
  
@@ -3198,7 +3327,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) LoadString(source string) (*LFunction, error) {
-@@ -423,6 +444,8 @@
+@@ -423,6 +455,8 @@
  		ls.Push(lv)
  		ls.Call(1, 1)
  		return ls.reg.Pop()
@@ -3403,8 +3532,8 @@ regenerates the diff below; this header is edited by hand.
  	}
 +	L.Push(fn)
 +	return 1
-+}
-+
+ }
+ 
 +// loadErrorValue is the error value of a failed load: the message of an
 +// ApiError without its stack trace (go-moonscript patch).
 +func loadErrorValue(err error) LValue {
@@ -3412,8 +3541,8 @@ regenerates the diff below; this header is edited by hand.
 +		return ae.Object
 +	}
 +	return LString(err.Error())
- }
- 
++}
++
 +// go-moonscript patch: load is Lua 5.1's load(func [, chunkname]): the
 +// pieces the reader function returns are loaded as one chunk (an error in
 +// the reader is returned as the load's); LuaJIT's load(chunk [, chunkname
@@ -3569,13 +3698,16 @@ regenerates the diff below; this header is edited by hand.
  	return 0
  }
  
-@@ -312,84 +381,62 @@
+@@ -312,84 +381,65 @@
  }
  
  func baseRawSet(L *LState) int {
 -	L.RawSet(L.CheckTable(1), L.CheckAny(2), L.CheckAny(3))
 -	return 0
 +	tb, key, value := L.CheckTable(1), L.CheckAny(2), L.CheckAny(3)
++	if tb.Frozen() { // go-moonscript patch (LTable.Freeze)
++		L.frozenTableError()
++	}
 +	// go-moonscript patch: Lua 5.1 raises these errors without a position
 +	// (yuin/gopher-lua#319), and rawset returns the table.
 +	if key == LNil {
@@ -3694,7 +3826,7 @@ regenerates the diff below; this header is edited by hand.
  	mt := L.Get(2)
  	if m := L.metatable(obj, true); m != LNil {
  		if tb, ok := m.(*LTable); ok && tb.RawGetString("__metatable") != LNil {
-@@ -401,39 +448,144 @@
+@@ -401,39 +451,144 @@
  	return 1
  }
  
@@ -3858,7 +3990,7 @@ regenerates the diff below; this header is edited by hand.
  	L.Push(L.ToStringMeta(v1))
  	return 1
  }
-@@ -457,24 +609,54 @@
+@@ -457,24 +612,54 @@
  	return ret
  }
  
@@ -3923,7 +4055,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -521,77 +703,10 @@
+@@ -521,77 +706,10 @@
  	return 1
  }
  
@@ -13389,7 +13521,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/luajitlib.go
 +++ b/luajitlib.go
-@@ -0,0 +1,947 @@
+@@ -0,0 +1,950 @@
 +package lua
 +
 +// go-moonscript patch: the library side of DialectLuaJIT, LuaJIT 2.1 as the
@@ -13976,7 +14108,7 @@ regenerates the diff below; this header is edited by hand.
 +
 +// jitTableClear is table.clear(t): removes every key of t (raw).
 +func jitTableClear(L *LState) int {
-+	tb := L.CheckTable(1)
++	tb := L.checkWritableTable(1) // LTable.Freeze
 +	for k, _ := tb.Next(LNil); k != LNil; k, _ = tb.Next(k) {
 +		tb.RawSet(k, LNil)
 +	}
@@ -13995,6 +14127,9 @@ regenerates the diff below; this header is edited by hand.
 +	a2 := a1
 +	if L.Get(5) != LNil {
 +		a2 = L.CheckTable(5)
++	}
++	if a2.Frozen() { // LTable.Freeze
++		L.frozenTableError()
 +	}
 +	move := func(i, d float64) {
 +		a2.RawSetInt(int(jitNum2Int(i+d)), a1.RawGetInt(int(jitNum2Int(i))))
@@ -23017,17 +23152,20 @@ regenerates the diff below; this header is edited by hand.
  /* }}} */
 --- a/sandbox/sandbox.go
 +++ b/sandbox/sandbox.go
-@@ -0,0 +1,262 @@
+@@ -0,0 +1,315 @@
 +// Package sandbox builds an environment for untrusted Lua code from an
 +// allow-list of globals and modules, and loads chunks into it.
 +//
 +// This is a first, minimal version: it decides what the code can reach by
-+// name, and nothing more. It sets no limits (use the state's context,
++// name, and gives it library tables it cannot change (frozen copies,
++// lua.LTable.Freeze), and nothing more. It sets no limits (use the state's context,
 +// Options.MemoryLimit and CallStackSize), does not restrict the file system
 +// or the language, and shares the state with the host: getmetatable("")
 +// returns the state's string metatable, whose __index is the state's real
-+// string table. Give sandboxed code a state of its own. See the design issue
-+// for the full mechanism. (go-moonscript)
++// string table, not the environment's copy. FreezeLibraries freezes those
++// of the state, so that sandboxed code cannot change them for the host;
++// better, give sandboxed code a state of its own. See the design issue for
++// the full mechanism. (go-moonscript)
 +package sandbox
 +
 +import (
@@ -23080,9 +23218,15 @@ regenerates the diff below; this header is edited by hand.
 +}
 +
 +// Env returns a new environment table holding what rules allow, taken from
-+// the globals of L. Library tables are copied, so code changing env.string
-+// does not change the host's string table. env._G is env. A name that
-+// L's globals do not have, or a mask that matches nothing, is an error.
++// the globals of L. Library tables are copied, with the fields rules allow,
++// and the copies are frozen: assigning to string.format, rawset(string, ...)
++// or setmetatable(string, ...) raises "attempt to modify a read-only
++// table", so that code cannot change the library for other code sharing the
++// environment, and the host's library tables are not the environment's.
++// The copies are shallow: a field that is a table (only package has some)
++// is the host's. The environment itself is not frozen: code may set
++// globals. env._G is env. A name that L's globals do not have, or a mask
++// that matches nothing, is an error.
 +func Env(L *lua.LState, rules Rules) (*lua.LTable, error) {
 +	globals := L.G.Global
 +	env := L.NewTable()
@@ -23107,8 +23251,52 @@ regenerates the diff below; this header is edited by hand.
 +			env.RawSetString(name, textLoader(L, fn, env))
 +		}
 +	}
++	for _, v := range env.All() {
++		if lib, ok := v.(*lua.LTable); ok {
++			lib.Freeze() // a copy made by add
++		}
++	}
 +	env.RawSetString("_G", env)
 +	return env, nil
++}
++
++// libraries are the library tables FreezeLibraries freezes.
++var libraries = []string{
++	lua.StringLibName, lua.TabLibName, lua.MathLibName, lua.OsLibName,
++	lua.IoLibName, lua.CoroutineLibName, lua.DebugLibName,
++	lua.ChannelLibName, lua.BitLibName, lua.JitLibName,
++}
++
++// FreezeLibraries freezes the library tables of L that its globals have
++// (string, table, math, os, io, coroutine, debug, channel, and LuaJIT's
++// bit and jit), the metatable of strings (getmetatable(""), whose __index
++// is the string table) and the metatable of files: code
++// running in L, sandboxed or not, can no longer change string.format or
++// the string methods for the host and for other code. The libraries work
++// as before, as they do not change their tables once opened. Call it once
++// the state is set up: from then on, the host cannot change these tables
++// either (lua.LTable.Freeze is for good).
++//
++// The globals table and package are not frozen: package.path,
++// package.preload and package.loaded are the state's configuration and
++// module cache, which require and programs write. debug.setmetatable can
++// still replace the metatable of strings, as it is not a change to a
++// table; the sandbox does not give the debug library by mask.
++func FreezeLibraries(L *lua.LState) {
++	globals := L.G.Global
++	for _, name := range libraries {
++		if lib, ok := globals.RawGetString(name).(*lua.LTable); ok {
++			lib.Freeze()
++		}
++	}
++	if mt, ok := L.GetMetatable(lua.LString("")).(*lua.LTable); ok {
++		mt.Freeze()
++	}
++	if io, ok := globals.RawGetString(lua.IoLibName).(*lua.LTable); ok {
++		if mt, ok := L.GetMetatable(io.RawGetString("stdout")).(*lua.LTable); ok {
++			mt.Freeze()
++		}
++	}
 +}
 +
 +// add adds what pattern names to env and returns how many values it added.
@@ -23167,11 +23355,11 @@ regenerates the diff below; this header is edited by hand.
 +
 +func sortedKeys(t *lua.LTable) []string {
 +	var keys []string
-+	t.ForEach(func(k, _ lua.LValue) {
++	for k := range t.All() {
 +		if s, ok := k.(lua.LString); ok {
 +			keys = append(keys, string(s))
 +		}
-+	})
++	}
 +	sort.Strings(keys)
 +	return keys
 +}
@@ -23282,7 +23470,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/sandbox/sandbox_test.go
 +++ b/sandbox/sandbox_test.go
-@@ -0,0 +1,174 @@
+@@ -0,0 +1,306 @@
 +package sandbox_test
 +
 +import (
@@ -23338,8 +23526,9 @@ regenerates the diff below; this header is edited by hand.
 +			`return type(os.getenv), type(os.time)`, "function nil"},
 +		{"_G is the environment", sandbox.Rules{Globals: []string{"type"}},
 +			`x = 1; return _G.x, _G._G == _G`, "1 true"},
-+		{"library tables are copies", sandbox.Rules{Globals: []string{"string.*"}},
-+			`string.format = nil; return string.format`, "nil"},
++		{"library tables are frozen copies", sandbox.Rules{Globals: []string{"pcall", "type", "string.*"}},
++			`local ok, err = pcall(function() string.format = nil end); return ok, err, type(string.format)`,
++			"false sandboxed:1: attempt to modify a read-only table function"},
 +	} {
 +		t.Run(c.name, func(t *testing.T) {
 +			got, err := run(t, L, c.rules, c.code)
@@ -23455,6 +23644,137 @@ regenerates the diff below; this header is edited by hand.
 +	}
 +	if _, err := sandbox.Env(L, sandbox.Rules{Globals: []string{"jit.*"}}); err == nil {
 +		t.Error(`"jit.*" matched risky functions`)
++	}
++}
++
++// Sandboxed code cannot change the library tables of its environment, by
++// any means, in either dialect; it can still set globals.
++func TestEnvFrozenLibraries(t *testing.T) {
++	for _, dialect := range []lua.Dialect{lua.DialectLua51, lua.DialectLuaJIT} {
++		L := lua.NewState(lua.Options{Dialect: dialect})
++		globals := []string{"*", "string.*", "table.*", "math.*", "os.time", "os.clock", "coroutine.*"}
++		libs := []string{"string", "table", "math", "os", "coroutine"}
++		if dialect == lua.DialectLuaJIT {
++			globals = append(globals, "bit.*")
++			libs = append(libs, "bit")
++		}
++		rules := sandbox.Rules{Globals: globals}
++		for _, lib := range libs {
++			for _, code := range []string{
++				lib + ".x = 1",
++				lib + "[1] = 1",
++				"for k in pairs(" + lib + ") do " + lib + "[k] = nil end",
++				"rawset(" + lib + ", 'x', 1)",
++				"setmetatable(" + lib + ", {})",
++				"table.insert(" + lib + ", 1)",
++				"table.remove(" + lib + ")",
++				"table.sort(" + lib + ")",
++			} {
++				got, err := run(t, L, rules, "local ok, err = pcall(function() "+code+" end) return ok, err")
++				if err != nil {
++					t.Fatal(err)
++				}
++				if want := "false sandboxed:1: attempt to modify a read-only table"; got != want {
++					t.Errorf("%s: got %q, want %q", code, got, want)
++				}
++			}
++		}
++		got, err := run(t, L, rules, `x = 1; string = "mine"; return x, string, _G.string`)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if want := "1 mine mine"; got != want {
++			t.Errorf("globals: got %q, want %q", got, want)
++		}
++		if err := L.DoString(`assert(type(string.format) == "function" and string.x == nil and x == nil)
++			assert(getmetatable(string) == nil and table.x == nil)
++			string.x = 1 -- the host's tables are not frozen
++			assert(string.x == 1)`); err != nil {
++			t.Errorf("the host's libraries: %v", err)
++		}
++		L.Close()
++	}
++}
++
++// Without FreezeLibraries, sandboxed code reaches the state's string table
++// through the string metatable; with it, it cannot change it, nor the
++// other libraries of the state, which still work.
++func TestFreezeLibraries(t *testing.T) {
++	for _, dialect := range []lua.Dialect{lua.DialectLua51, lua.DialectLuaJIT} {
++		L := lua.NewState(lua.Options{Dialect: dialect})
++		rules := sandbox.Rules{Globals: []string{"*"}}
++		got, err := run(t, L, rules, `return pcall(function() getmetatable("").__index.upper = function() return "patched" end end)`)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if got != "true" {
++			t.Fatalf("without FreezeLibraries: got %q", got)
++		}
++		if err := L.DoString(`assert(("x"):upper() == "patched")`); err != nil {
++			t.Fatalf("without FreezeLibraries: %v", err)
++		}
++		L.Close()
++
++		L = lua.NewState(lua.Options{Dialect: dialect})
++		if err := L.DoString(`package.preload.mod = function(...) return {name = ...} end`); err != nil {
++			t.Fatal(err)
++		}
++		sandbox.FreezeLibraries(L)
++		for _, code := range []string{
++			`getmetatable("").__index.upper = nil`,
++			`getmetatable("").__index = {}`,
++			`getmetatable("").__call = print`,
++			`rawset(getmetatable(""), "__index", {})`,
++			`setmetatable(getmetatable(""), {})`,
++		} {
++			got, err := run(t, L, rules, "return pcall(function() "+code+" end)")
++			if err != nil {
++				t.Fatal(err)
++			}
++			if want := "false sandboxed:1: attempt to modify a read-only table"; got != want {
++				t.Errorf("%s: got %q, want %q", code, got, want)
++			}
++		}
++		// the host cannot change them either, and the libraries work
++		if err := L.DoString(`
++			for _, lib in ipairs{"string", "table", "math", "os", "io", "coroutine", "debug"} do
++				local ok, err = pcall(function() _G[lib].x = 1 end)
++				assert(not ok and err:find("read-only", 1, true), lib)
++			end
++			assert(not pcall(function() getmetatable(io.stdout).write = nil end))
++			assert(not pcall(rawset, getmetatable(io.stdout), "x", 1))
++			assert(("abc"):upper() == "ABC" and string.format("%5.1f", 1.5) == "  1.5")
++			assert(("a,b"):gsub(",", ";") == "a;b" and select(2, ("aaa"):gsub("a", "b")) == 3)
++			assert(("x"):rep(3) == "xxx" and ("hello"):find("l") == 3)
++			for w in ("a b"):gmatch("%a") do end
++			local t = {3, 1, 2}
++			table.sort(t) table.insert(t, 4) table.remove(t, 1)
++			assert(table.concat(t, ",") == "2,3,4")
++			math.randomseed(42) assert(math.random(10) >= 1 and math.floor(math.pi) == 3)
++			assert(type(os.time()) == "number" and type(os.date("*t")) == "table")
++			local co = coroutine.wrap(function(a) local b = coroutine.yield(a + 1) return b * 2 end)
++			assert(co(1) == 2 and co(5) == 10)
++			assert(type(debug.traceback()) == "string" and debug.getinfo(1, "S").what == "main")
++			assert(require("mod").name == "mod" and package.loaded.mod)
++			package.path = "./?.lua"
++			local f = io.tmpfile() f:write("data") f:seek("set") assert(f:read("*a") == "data") f:close()
++			x = 1
++			assert(x == 1)
++		`); err != nil {
++			t.Errorf("libraries after FreezeLibraries: %v", err)
++		}
++		if dialect == lua.DialectLuaJIT {
++			if err := L.DoString(`
++				assert(bit.band(6, 3) == 2 and type(jit.version) == "string")
++				assert(not pcall(function() bit.x = 1 end) and not pcall(function() jit.x = 1 end))
++				local new, clear = require("table.new"), require("table.clear")
++				local t = new(4, 0) t[1] = 1 clear(t) assert(next(t) == nil)
++				t = table.move({1, 2}, 1, 2, 1, {}) assert(t[2] == 2)
++			`); err != nil {
++				t.Errorf("LuaJIT libraries after FreezeLibraries: %v", err)
++			}
++		}
++		L.Close()
 +	}
 +}
 --- a/state.go
@@ -24025,7 +24345,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return LNil
  		}
-@@ -1331,24 +1526,103 @@
+@@ -1331,24 +1526,109 @@
  			curobj = metaindex
  		}
  	}
@@ -24084,6 +24404,9 @@ regenerates the diff below; this header is edited by hand.
 +		tb, istable := curobj.(*LTable)
 +		j := int32(-1)
 +		if istable {
++			if tb.Frozen() { // go-moonscript patch: before __newindex
++				ls.frozenTableError()
++			}
 +			// go-moonscript patch: one lookup for the key
 +			j = tb.hash.findString(skey, h)
 +			if j >= 0 && tb.hash.nodes[j].val != LNil || tb.Metatable == LNil {
@@ -24119,6 +24442,9 @@ regenerates the diff below; this header is edited by hand.
  		tb, istable := curobj.(*LTable)
  		if istable {
 -			if tb.RawGet(key) != LNil {
++			if tb.Frozen() { // go-moonscript patch: before __newindex
++				ls.frozenTableError()
++			}
 +			if tb.Metatable == LNil || tb.RawGet(key) != LNil { // go-moonscript patch
  				ls.RawSet(tb, key, value)
  				return
@@ -24133,7 +24459,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			ls.RawSet(tb, key, value)
  			return
-@@ -1364,7 +1638,7 @@
+@@ -1364,7 +1644,7 @@
  			curobj = metaindex
  		}
  	}
@@ -24142,11 +24468,14 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) setFieldString(obj LValue, key string, value LValue) {
-@@ -1372,15 +1646,15 @@
+@@ -1372,15 +1652,18 @@
  	for i := 0; i < MaxTableGetLoop; i++ {
  		tb, istable := curobj.(*LTable)
  		if istable {
 -			if tb.RawGetString(key) != LNil {
++			if tb.Frozen() { // go-moonscript patch: before __newindex
++				ls.frozenTableError()
++			}
 +			if tb.Metatable == LNil || tb.RawGetString(key) != LNil { // go-moonscript patch
  				tb.RawSetString(key, value)
  				return
@@ -24161,7 +24490,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			tb.RawSetString(key, value)
  			return
-@@ -1396,7 +1670,7 @@
+@@ -1396,7 +1679,7 @@
  			curobj = metaindex
  		}
  	}
@@ -24170,7 +24499,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -1410,6 +1684,7 @@
+@@ -1410,6 +1693,7 @@
  			CallStackSize: CallStackSize,
  			RegistrySize:  RegistrySize,
  		})
@@ -24178,7 +24507,7 @@ regenerates the diff below; this header is edited by hand.
  		ls.OpenLibs()
  	} else {
  		if opts[0].CallStackSize < 1 {
-@@ -1427,6 +1702,10 @@
+@@ -1427,6 +1711,10 @@
  			}
  		}
  		ls = newLState(opts[0])
@@ -24189,7 +24518,7 @@ regenerates the diff below; this header is edited by hand.
  		if !opts[0].SkipOpenLibs {
  			ls.OpenLibs()
  		}
-@@ -1439,7 +1718,12 @@
+@@ -1439,7 +1727,12 @@
  }
  
  func (ls *LState) Close() {
@@ -24202,7 +24531,7 @@ regenerates the diff below; this header is edited by hand.
  	for _, file := range ls.G.tempFiles {
  		// ignore errors in these operations
  		file.Close()
-@@ -1612,9 +1896,8 @@
+@@ -1612,9 +1905,8 @@
  // NewThread returns a new LState that shares with the original state all global objects.
  // If the original state has context.Context, the new state has a new child context of the original state and this function returns its cancel function.
  func (ls *LState) NewThread() (*LState, context.CancelFunc) {
@@ -24214,7 +24543,7 @@ regenerates the diff below; this header is edited by hand.
  	var f context.CancelFunc = nil
  	if ls.ctx != nil {
  		thread.mainLoop = mainLoopWithContext
-@@ -1624,6 +1907,19 @@
+@@ -1624,6 +1916,19 @@
  	return thread, f
  }
  
@@ -24234,7 +24563,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) NewFunctionFromProto(proto *FunctionProto) *LFunction {
  	return newLFunctionL(proto, ls.Env, int(proto.NumUpvalues))
  }
-@@ -1686,7 +1982,7 @@
+@@ -1686,7 +1991,7 @@
  }
  
  func (ls *LState) ToString(n int) string {
@@ -24243,9 +24572,19 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) ToTable(n int) *LTable {
-@@ -1731,13 +2027,20 @@
+@@ -1730,14 +2035,30 @@
+ 	ls.raiseError(1, format, args...)
  }
  
++// frozenTableError raises the error of a change to a frozen table, at the
++// running Lua function's line or the caller's of the running Go function
++// (go-moonscript patch: LTable.Freeze).
++//
++//go:noinline
++func (ls *LState) frozenTableError() {
++	ls.raiseError(1, frozenTableMessage)
++}
++
  // This function is equivalent to lua_error( http://www.lua.org/manual/5.1/manual.html#lua_error ).
 +// A string value is prefixed with the position of the function at level,
 +// as Lua 5.1's error function does (luaL_where: 1 is the caller of the
@@ -24268,7 +24607,7 @@ regenerates the diff below; this header is edited by hand.
  		ls.Push(lv)
  		ls.Panic(ls)
  	}
-@@ -1760,19 +2063,26 @@
+@@ -1760,19 +2081,26 @@
  		case 'f':
  			retfn = true
  		case 'S':
@@ -24303,7 +24642,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  		case 'l':
  			if !f.IsG && dbg.frame != nil {
-@@ -1785,8 +2095,10 @@
+@@ -1785,8 +2113,10 @@
  		case 'u':
  			dbg.NUpvalues = len(f.Upvalues)
  		case 'n':
@@ -24315,7 +24654,39 @@ regenerates the diff below; this header is edited by hand.
  			}
  		default:
  			return LNil, newApiErrorS(ApiErrorRun, "invalid what: "+string(c))
-@@ -2010,15 +2322,62 @@
+@@ -1912,7 +2242,12 @@
+ 	return ls.getField(obj, key)
+ }
+ 
++// RawSet is rawset: go-moonscript patch: a frozen table raises the Lua
++// error "attempt to modify a read-only table" (LTable.Freeze).
+ func (ls *LState) RawSet(tb *LTable, key LValue, value LValue) {
++	if tb.Frozen() {
++		ls.frozenTableError()
++	}
+ 	if n, ok := key.(LNumber); ok && math.IsNaN(float64(n)) {
+ 		ls.RaiseError("table index is NaN")
+ 	} else if key == LNil {
+@@ -1921,10 +2256,18 @@
+ 	tb.RawSet(key, value)
+ }
+ 
++// RawSetInt is lua_rawseti: go-moonscript patch: a frozen table raises the
++// Lua error "attempt to modify a read-only table" (LTable.Freeze).
+ func (ls *LState) RawSetInt(tb *LTable, key int, value LValue) {
++	if tb.Frozen() {
++		ls.frozenTableError()
++	}
+ 	tb.RawSetInt(key, value)
+ }
+ 
++// SetField is t[key] = value, with __newindex. go-moonscript patch: a frozen
++// table raises the Lua error "attempt to modify a read-only table", before
++// any __newindex (LTable.Freeze); so do SetTable and SetGlobal.
+ func (ls *LState) SetField(obj LValue, key string, value LValue) {
+ 	ls.setFieldString(obj, key, value)
+ }
+@@ -2010,15 +2353,62 @@
  
  /* load and function call operations {{{ */
  
@@ -24349,7 +24720,7 @@ regenerates the diff below; this header is edited by hand.
  	}
 -	proto, err := Compile(chunk, name)
 +	chunk, err := parse.ParseBytes(src, parseName, dialect)
- 	if err != nil {
++	if err != nil {
 +		// go-moonscript patch: a function that needs too many registers
 +		// before the error, which lua5.1 finds while parsing (lua51Overflow)
 +		if dialect == parse.Lua51 {
@@ -24362,8 +24733,8 @@ regenerates the diff below; this header is edited by hand.
 +		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
 +			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: parseName}
 +		}
- 		return nil, newApiErrorE(ApiErrorSyntax, err)
- 	}
++		return nil, newApiErrorE(ApiErrorSyntax, err)
++	}
 +	proto, err := Compile(chunk, parseName)
 +	// go-moonscript patch: lua5.1 finds that a function needs too many
 +	// registers while parsing, and reports it near the token it is at; the
@@ -24373,14 +24744,14 @@ regenerates the diff below; this header is edited by hand.
 +			return nil, newApiErrorE(ApiErrorSyntax, pe)
 +		}
 +	}
-+	if err != nil {
-+		return nil, newApiErrorE(ApiErrorSyntax, err)
-+	}
+ 	if err != nil {
+ 		return nil, newApiErrorE(ApiErrorSyntax, err)
+ 	}
 +	setSource(proto, name, chunkname) // go-moonscript patch (chunkname.go)
  	return newLFunctionL(proto, ls.currentEnv(), 0), nil
  }
  
-@@ -2030,16 +2389,19 @@
+@@ -2030,16 +2420,19 @@
  	err = nil
  	sp := ls.stack.Sp()
  	base := ls.reg.Top() - nargs - 1
@@ -24401,7 +24772,7 @@ regenerates the diff below; this header is edited by hand.
  			if _, ok := rcv.(*ApiError); !ok {
  				err = newApiErrorS(ApiErrorPanic, fmt.Sprint(rcv))
  				if ls.Options.IncludeGoStackTrace {
-@@ -2069,6 +2431,8 @@
+@@ -2069,6 +2462,8 @@
  							err = rcv.(*ApiError)
  							err.(*ApiError).StackTrace = ls.stackTrace(0)
  						}
@@ -24410,7 +24781,7 @@ regenerates the diff below; this header is edited by hand.
  						ls.stack.SetSp(sp)
  						ls.currentFrame = ls.stack.Last()
  						ls.reg.SetTop(base)
-@@ -2079,6 +2443,8 @@
+@@ -2079,6 +2474,8 @@
  			} else if len(err.(*ApiError).StackTrace) == 0 {
  				err.(*ApiError).StackTrace = ls.stackTrace(0)
  			}
@@ -24419,7 +24790,25 @@ regenerates the diff below; this header is edited by hand.
  			ls.stack.SetSp(sp)
  			ls.currentFrame = ls.stack.Last()
  			ls.reg.SetTop(base)
-@@ -2135,7 +2501,9 @@
+@@ -2121,6 +2518,9 @@
+ 	return ls.metatable(obj, false)
+ }
+ 
++// SetMetatable sets the metatable of obj. go-moonscript patch: a frozen
++// table raises the Lua error "attempt to modify a read-only table"
++// (LTable.Freeze).
+ func (ls *LState) SetMetatable(obj LValue, mt LValue) {
+ 	switch mt.(type) {
+ 	case *LNilType, *LTable:
+@@ -2130,12 +2530,17 @@
+ 
+ 	switch v := obj.(type) {
+ 	case *LTable:
++		if v.Frozen() { // go-moonscript patch (LTable.Freeze)
++			ls.frozenTableError()
++		}
+ 		v.Metatable = mt
+ 	case *LUserData:
  		v.Metatable = mt
  	default:
  		ls.G.builtinMts[int(obj.Type())] = mt
@@ -24429,7 +24818,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -2148,7 +2516,10 @@
+@@ -2148,7 +2553,10 @@
  		status = "dead"
  	} else if ls.G.CurrentThread == th {
  		status = "running"
@@ -24441,7 +24830,7 @@ regenerates the diff below; this header is edited by hand.
  		status = "normal"
  	}
  	return status
-@@ -2156,7 +2527,7 @@
+@@ -2156,7 +2564,7 @@
  
  func (ls *LState) Resume(th *LState, fn *LFunction, args ...LValue) (ResumeState, error, []LValue) {
  	isstarted := th.isStarted()
@@ -24450,7 +24839,7 @@ regenerates the diff below; this header is edited by hand.
  		base := 0
  		th.stack.Push(callFrame{
  			Fn:         fn,
-@@ -2177,8 +2548,18 @@
+@@ -2177,8 +2585,18 @@
  	if th.Dead {
  		return ResumeError, newApiErrorS(ApiErrorRun, "can not resume a dead thread"), nil
  	}
@@ -24469,7 +24858,7 @@ regenerates the diff below; this header is edited by hand.
  	if !isstarted {
  		cf := th.stack.Last()
  		th.currentFrame = cf
-@@ -2189,10 +2570,13 @@
+@@ -2189,10 +2607,13 @@
  		cf.NArgs = len(args)
  		th.initCallFrame(cf)
  		th.Panic = panicWithoutTraceback
@@ -24483,7 +24872,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	top := ls.GetTop()
  	threadRun(th)
-@@ -2208,7 +2592,7 @@
+@@ -2208,7 +2629,7 @@
  
  	if haserror {
  		return ResumeError, newApiError(ApiErrorRun, ret[0]), nil
@@ -24492,7 +24881,7 @@ regenerates the diff below; this header is edited by hand.
  		return ResumeOK, nil, ret
  	}
  	return ResumeYield, nil, ret
-@@ -2228,8 +2612,15 @@
+@@ -2228,8 +2649,15 @@
  	}
  	top := ls.GetTop()
  	n = intMin(n, top)
@@ -25362,7 +25751,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/table.go
 +++ b/table.go
-@@ -1,387 +1,585 @@
+@@ -1,387 +1,782 @@
  package lua
  
 -const defaultArrayCap = 32
@@ -25393,6 +25782,8 @@ regenerates the diff below; this header is edited by hand.
 -	return lessThan(lv.L, lv.Values[i], lv.Values[j])
 -}
 +import (
++	"errors"
++	"iter"
 +	"math/bits"
 +	"unsafe"
 +)
@@ -25564,6 +25955,7 @@ regenerates the diff below; this header is edited by hand.
 +// go-moonscript patch: at Len()+1, as table.insert(t, v) does (it was after
 +// the last non-nil element of the array part).
  func (tb *LTable) Append(value LValue) {
++	tb.checkWritable()
  	if value == LNil {
  		return
  	}
@@ -25592,6 +25984,7 @@ regenerates the diff below; this header is edited by hand.
 -		tb.array = make([]LValue, 0, defaultArrayCap)
 -	}
 -	if i > len(tb.array) {
++	tb.checkWritable()
 +	if i < 1 {
  		tb.RawSetInt(i, value)
  		return
@@ -25652,6 +26045,7 @@ regenerates the diff below; this header is edited by hand.
  func (tb *LTable) Remove(pos int) LValue {
 -	if tb.array == nil {
 -		return LNil
++	tb.checkWritable()
 +	e := tb.Len()
 +	if pos < 1 {
 +		pos = e
@@ -25694,6 +26088,7 @@ regenerates the diff below; this header is edited by hand.
 +// Lua functions raise "table index is nil" or "table index is NaN").
  func (tb *LTable) RawSet(key LValue, value LValue) {
 -	switch v := key.(type) {
++	tb.checkWritable()
 +	switch k := key.(type) {
  	case LNumber:
 -		if isArrayKey(v) {
@@ -25802,10 +26197,10 @@ regenerates the diff below; this header is edited by hand.
 +	if j >= 0 {
 +		tb.hash.nodes[j].val = value
 +		return
- 	}
++	}
 +	if lkey == nil {
 +		lkey = LString(key)
-+	}
+ 	}
 +	tb.newKey(lkey, h, false, value)
  }
  
@@ -25822,10 +26217,6 @@ regenerates the diff below; this header is edited by hand.
  	}
 -	if tb.dict == nil {
 -		tb.dict = make(map[LValue]LValue, len(tb.strdict))
--	}
--	if tb.keys == nil {
--		tb.keys = []LValue{}
--		tb.k2i = map[LValue]int{}
 +	tb.rehash(key)
 +	if n, ok := key.(LNumber); ok {
 +		if i := tb.arrayIndex(n); i >= 0 {
@@ -25833,7 +26224,22 @@ regenerates the diff below; this header is edited by hand.
 +			return
 +		}
  	}
+-	if tb.keys == nil {
+-		tb.keys = []LValue{}
+-		tb.k2i = map[LValue]int{}
 +	tb.hash.mustAdd(key, value, h, isptr)
++}
++
++// countInt counts key in nums if it may go in the array part (Lua's
++// countint).
++func countInt(key LValue, nums *[maxArrayBits + 1]int) int {
++	if n, ok := key.(LNumber); ok {
++		if k := int(n); LNumber(k) == n && k >= 1 && k <= 1<<maxArrayBits && k <= MaxArrayIndex {
++			nums[bits.Len(uint(k-1))]++
++			return 1
++		}
+ 	}
++	return 0
 +}
  
 -	if value == LNil {
@@ -25844,25 +26250,6 @@ regenerates the diff below; this header is edited by hand.
 -		if _, ok := tb.k2i[key]; !ok {
 -			tb.k2i[key] = len(tb.keys)
 -			tb.keys = append(tb.keys, key)
-+// countInt counts key in nums if it may go in the array part (Lua's
-+// countint).
-+func countInt(key LValue, nums *[maxArrayBits + 1]int) int {
-+	if n, ok := key.(LNumber); ok {
-+		if k := int(n); LNumber(k) == n && k >= 1 && k <= 1<<maxArrayBits && k <= MaxArrayIndex {
-+			nums[bits.Len(uint(k-1))]++
-+			return 1
- 		}
- 	}
-+	return 0
- }
- 
--// RawGet returns an LValue associated with a given key without __index metamethod.
--func (tb *LTable) RawGet(key LValue) LValue {
--	switch v := key.(type) {
--	case LNumber:
--		if isArrayKey(v) {
--			if tb.array == nil {
--				return LNil
 +// rehash resizes the table for the new key ek as Lua 5.1's rehash does.
 +func (tb *LTable) rehash(ek LValue) {
 +	var nums [maxArrayBits + 1]int // nums[i]: the keys in (2^(i-1), 2^i]
@@ -25889,18 +26276,26 @@ regenerates the diff below; this header is edited by hand.
 +			if a > twotoi/2 {
 +				n = twotoi
 +				na = a
- 			}
--			index := int(v) - 1
--			if index >= len(tb.array) {
--				return LNil
++			}
 +		}
 +		if a == nasize {
 +			break
-+		}
-+	}
+ 		}
+ 	}
 +	tb.resize(n, totaluse-na)
-+}
-+
+ }
+ 
+-// RawGet returns an LValue associated with a given key without __index metamethod.
+-func (tb *LTable) RawGet(key LValue) LValue {
+-	switch v := key.(type) {
+-	case LNumber:
+-		if isArrayKey(v) {
+-			if tb.array == nil {
+-				return LNil
+-			}
+-			index := int(v) - 1
+-			if index >= len(tb.array) {
+-				return LNil
 +// resize gives the table an array part of nasize elements and a hash part
 +// for nhsize keys, as Lua 5.1's resize does (in the same order, so that the
 +// keys get the same nodes). The dead keys go.
@@ -26041,6 +26436,7 @@ regenerates the diff below; this header is edited by hand.
 +
 +// RawSetInt sets a given LValue at a position `key` without the __newindex metamethod.
 +func (tb *LTable) RawSetInt(key int, value LValue) {
++	tb.checkWritable()
 +	if uint(key-1) < uint(len(tb.array)) {
 +		tb.array[key-1] = value
 +		return
@@ -26050,6 +26446,7 @@ regenerates the diff below; this header is edited by hand.
 +
 +// RawSetString sets a given LValue to a given string index without the __newindex metamethod.
 +func (tb *LTable) RawSetString(key string, value LValue) {
++	tb.checkWritable()
 +	tb.setString(nil, key, hashString(key), value)
 +}
 +
@@ -26116,6 +26513,96 @@ regenerates the diff below; this header is edited by hand.
 -	}
 -	return LNil
 +	return tb.hash.getString(key)
++}
++
++// Frozen (read-only) tables. (go-moonscript patch)
++//
++// A frozen table cannot be changed: its fields and its metatable stay as
++// they are. Freezing is for tables shared with code that must not change
++// them, such as the library tables of a sandbox (see the sandbox package).
++//
++// Every way Lua code has to change a table raises the Lua error
++// "attempt to modify a read-only table" (catchable by pcall, with the
++// position of the assignment, or of the caller of the library function):
++// an assignment t[k] = v, also through __newindex chains; rawset;
++// table.insert, table.remove, table.sort, LuaJIT's table.clear and
++// table.move into it (even when they would change nothing);
++// setmetatable and debug.setmetatable. The assignment raises the error
++// whether the key exists or not, and does not call a __newindex
++// metamethod of the frozen table: the table is read-only, not a proxy
++// (a table whose __newindex is a frozen table raises it when the chain
++// gets there). The LState functions follow Lua: SetField, SetTable,
++// SetGlobal, RawSet, RawSetInt and SetMetatable raise the same Lua error.
++//
++// The LTable methods that change the table (RawSet, RawSetInt,
++// RawSetString, RawSetH, Append, Insert, Remove) panic with
++// ErrFrozenTable instead: changing a frozen table from Go is a
++// programming error. (A panic in a Go function called by Lua becomes an
++// error of PCall, as every Go panic does.) Go code that assigns the
++// Metatable field directly is not checked.
++//
++// A frozen table is read and iterated as any other (next, pairs, ipairs,
++// All, Array), may be the metatable or the __index of other tables, and
++// is collected as any other. Freezing is shallow: the tables it holds are
++// not frozen (see FreezeDeep). The entries of a frozen weak table are
++// still cleared when their objects are collected, as weakness is not a
++// change to the table made by a program.
++
++// ErrFrozenTable is the panic value of the LTable methods that change a
++// frozen table; its text is the message of the Lua error.
++var ErrFrozenTable = errors.New(frozenTableMessage)
++
++const frozenTableMessage = "attempt to modify a read-only table"
++
++// Freeze makes the table read-only, for good. Its parts keep their size:
++// a frozen table never gets a new key, so it no longer needs the free
++// node pointer of its hash part, which marks it.
++func (tb *LTable) Freeze() {
++	tb.hash.lastfree = -1
++}
++
++// Frozen reports whether the table is read-only (Freeze).
++func (tb *LTable) Frozen() bool {
++	return tb.hash.lastfree < 0
++}
++
++// FreezeDeep freezes the table and, recursively, the tables that are its
++// keys, its values and its metatable, and theirs: all the tables a program
++// can reach from it without calling a function (the environments and
++// upvalues of functions are not followed). Use it for a tree of data, not
++// for a table that holds tables of the state, such as package (whose
++// package.loaded holds the globals).
++func (tb *LTable) FreezeDeep() {
++	seen := map[*LTable]bool{tb: true}
++	todo := []*LTable{tb}
++	add := func(v LValue) {
++		if t, ok := v.(*LTable); ok && !seen[t] {
++			seen[t] = true
++			todo = append(todo, t)
++		}
++	}
++	for len(todo) > 0 {
++		t := todo[len(todo)-1]
++		todo = todo[:len(todo)-1]
++		t.Freeze()
++		add(t.Metatable)
++		for k, v := range t.All() {
++			add(k)
++			add(v)
++		}
++	}
++}
++
++// checkWritable panics with ErrFrozenTable if the table is frozen.
++func (tb *LTable) checkWritable() {
++	if tb.Frozen() {
++		panicFrozen()
++	}
++}
++
++//go:noinline
++func panicFrozen() {
++	panic(ErrFrozenTable)
  }
  
  // ForEach iterates over this table of elements, yielding each in turn to a given function.
@@ -26126,27 +26613,120 @@ regenerates the diff below; this header is edited by hand.
 -		for i, v := range tb.array {
 -			if v != LNil {
 -				cb(LNumber(i+1), v)
--			}
--		}
++	for i, v := range tb.array {
++		if v != LNil {
++			cb(LNumber(i+1), v)
++		}
++	}
++	tb.hash.forEach(cb)
++}
++
++// All returns an iterator over the key/value pairs of the table, in the
++// order next and pairs give them: for k, v := range tb.All() visits the
++// pairs a loop of Next calls from LNil visits, and a break stops it.
++// (go-moonscript patch)
++//
++// While it runs, the loop body may assign to fields of the table that
++// exist, nil included, as with next: the other pairs are visited once
++// each, in the same order, and a field set to nil before the loop
++// reaches it is not visited. As in Lua, adding a field (assigning to a
++// key that has no value) during the loop is undefined: the loop may skip
++// pairs, visit some twice and may or may not visit the new ones, but it
++// does not panic and it ends; when the table has been resized, it goes
++// on over the keys the table had, with their current values.
++//
++// It reads the table raw (no __index, __pairs or metatable at all).
++func (tb *LTable) All() iter.Seq2[LValue, LValue] {
++	return func(yield func(LValue, LValue) bool) {
++		// the array part as it was: a key past it is either in the hash
++		// part as it was, or new
++		n := len(tb.array)
++		for i := 0; i < n; i++ {
++			var v LValue
++			if a := tb.array; i < len(a) {
++				v = a[i]
++			} else {
++				v = tb.hash.getNumber(LNumber(i + 1))
++			}
++			if v != LNil && !yield(LNumber(i+1), v) {
++				return
+ 			}
+ 		}
 -	}
 -	if tb.strdict != nil {
 -		for k, v := range tb.strdict {
 -			if v != LNil {
 -				cb(LString(k), v)
--			}
--		}
--	}
++		// the hash part: its nodes as they were; when the table has been
++		// resized (live is false), the table no longer writes them, so its
++		// keys and links are those it had then, and the values are read
++		// from the table
++		nodes := tb.hash.nodes
++		if len(nodes) == 0 {
++			return
++		}
++		live := func() bool { return unsafe.SliceData(tb.hash.nodes) == &nodes[0] }
++		if !tb.hash.inOrder() {
++			for i := range nodes {
++				nd := &nodes[i]
++				k, v := nd.key, nd.val
++				if k == nil {
++					continue
++				}
++				if !live() {
++					v = tb.RawGet(k)
++				}
++				if v != LNil && !yield(k, v) {
++					return
++				}
++			}
++			return
++		}
++		// insertion order: at most one step per node, which a traversal
++		// that adds no key never reaches, so that keys added during the
++		// loop (relinked nodes) cannot make it endless
++		for j, steps := tb.hash.first, 0; j > 0 && steps < len(nodes); steps++ {
++			k, v := nodes[j-1].key, nodes[j-1].val
++			if k == nil {
++				return // not a node of the chain: only an undefined traversal gets here
++			}
++			if !live() {
++				v = tb.RawGet(k)
++			}
++			if v != LNil && !yield(k, v) {
++				return
++			}
++			if live() && nodes[j-1].key != k {
++				// a new key moved k to another node (or took its dead
++				// node): go on from where k is, if it still is
++				i := tb.hash.findKey(k)
++				if i < 0 {
++					return
++				}
++				j = i + 1
+ 			}
++			j = nodes[j-1].ins
+ 		}
+ 	}
 -	if tb.dict != nil {
 -		for k, v := range tb.dict {
 -			if v != LNil {
 -				cb(k, v)
--			}
-+	for i, v := range tb.array {
-+		if v != LNil {
-+			cb(LNumber(i+1), v)
++}
++
++// Array returns an iterator over the elements 1, 2, ... of the table up to
++// the first nil, as ipairs: for i, v := range tb.Array() visits i, t[i]
++// read raw. Like ipairs, it reads t[i] when it gets there, so that the
++// loop body may change the table. (go-moonscript patch)
++func (tb *LTable) Array() iter.Seq2[int, LValue] {
++	return func(yield func(int, LValue) bool) {
++		for i := 1; ; i++ {
++			v := tb.RawGetInt(i)
++			if v == LNil || !yield(i, v) {
++				return
+ 			}
  		}
  	}
-+	tb.hash.forEach(cb)
  }
  
  // This function is equivalent to lua_next ( http://www.lua.org/manual/5.1/manual.html#lua_next ).
@@ -26644,9 +27224,432 @@ regenerates the diff below; this header is edited by hand.
 +		check("end")
 +	}
 +}
+--- a/table_frozen_fix_test.go
++++ b/table_frozen_fix_test.go
+@@ -0,0 +1,420 @@
++package lua
++
++// go-moonscript patch: tests of frozen tables (LTable.Freeze, table.go).
++
++import (
++	"errors"
++	"strings"
++	"testing"
++)
++
++// tzState returns a state of the dialect with a global frozen table
++// t = {1, 2, 3, x = 1}.
++func tzState(t *testing.T, dialect Dialect) *LState {
++	t.Helper()
++	L := NewState(Options{Dialect: dialect})
++	if err := L.DoString(`t = {1, 2, 3, x = 1}`); err != nil {
++		t.Fatal(err)
++	}
++	L.GetGlobal("t").(*LTable).Freeze()
++	return L
++}
++
++var tzDialects = []struct {
++	name    string
++	dialect Dialect
++}{{"lua51", DialectLua51}, {"luajit", DialectLuaJIT}}
++
++// Every way Lua has to change a table raises the error, catchable by
++// pcall, at the position of the assignment or of the library call, and
++// leaves the table as it was.
++func TestFrozenTableLua(t *testing.T) {
++	cases := []struct {
++		name, code string
++		jit        bool // DialectLuaJIT only
++		lua51      bool // DialectLua51 only
++		msg        string
++		where      string // the position, if not line 3 of the chunk
++	}{
++		{name: "existing string key (SETTABLEKS)", code: `t.x = 2`},
++		{name: "existing string key to nil", code: `t.x = nil`},
++		{name: "new string key", code: `t.y = 1`},
++		{name: "existing array key (SETTABLE fast path)", code: `t[1] = 10`},
++		{name: "array key in a loop", code: `for i = 1, 3 do t[i] = i end`},
++		{name: "array key to nil", code: `t[3] = nil`},
++		{name: "new array key", code: `t[4] = 4`},
++		{name: "far number key", code: `t[1000] = 1`},
++		{name: "float key", code: `t[1.5] = 1`},
++		{name: "boolean key", code: `t[true] = 1`},
++		{name: "table key", code: `t[{}] = 1`},
++		{name: "variable string key (SETTABLE)", code: `local k = "x" t[k] = 5`},
++		{name: "variable string new key", code: `local k = "z" t[k] = 5`},
++		{name: "method definition", code: `function t.f() end`},
++		{name: "multiple assignment", code: `local a; a, t.x = 1, 2`},
++		{name: "global of a frozen environment (SETGLOBAL)",
++			code: `local f = loadstring("y = 1", "=f") setfenv(f, t) f()`, where: "f:1: "},
++		{name: "through __newindex = frozen table",
++			code: `local p = setmetatable({}, {__newindex = t}) p.q = 1`},
++		{name: "through __newindex chain",
++			code: `local p = setmetatable({}, {__newindex = setmetatable({}, {__newindex = t})}) p[1] = 1`},
++		{name: "rawset", code: `rawset(t, "x", 2)`},
++		{name: "rawset new key", code: `rawset(t, 10, 2)`},
++		{name: "table.insert", code: `table.insert(t, 4)`},
++		{name: "table.insert at a position", code: `table.insert(t, 1, 0)`},
++		{name: "table.remove", code: `table.remove(t)`},
++		{name: "table.remove at a position", code: `table.remove(t, 1)`},
++		{name: "table.sort", code: `table.sort(t)`},
++		{name: "table.sort with a comparator", code: `table.sort(t, function(a, b) return a > b end)`},
++		{name: "table.foreach body", code: `table.foreach(t, function(k) t[k] = nil end)`},
++		{name: "table.foreachi body", code: `table.foreachi(t, function(i) t[i] = 0 end)`},
++		{name: "table.setn", code: `table.setn(t, 1)`, lua51: true, msg: "'setn' is obsolete"},
++		{name: "setmetatable", code: `setmetatable(t, {})`},
++		{name: "setmetatable nil", code: `setmetatable(t, nil)`},
++		{name: "debug.setmetatable", code: `debug.setmetatable(t, {})`},
++		{name: "table.clear", code: `require("table.clear")(t)`, jit: true},
++		{name: "table.move into it", code: `table.move({7, 8}, 1, 2, 1, t)`, jit: true},
++		{name: "table.move within it", code: `table.move(t, 1, 2, 2)`, jit: true},
++		{name: "table.move of nothing", code: `table.move({}, 1, 0, 1, t)`, jit: true},
++	}
++	for _, d := range tzDialects {
++		for _, c := range cases {
++			if c.jit && d.dialect != DialectLuaJIT || c.lua51 && d.dialect != DialectLua51 {
++				continue
++			}
++			t.Run(d.name+"/"+c.name, func(t *testing.T) {
++				L := tzState(t, d.dialect)
++				defer L.Close()
++				msg := c.msg
++				if msg == "" {
++					msg = "attempt to modify a read-only table"
++				}
++				// the code on line 3 of the chunk
++				src := "local ok, err = pcall(function()\n\n" + c.code + "\nend)\nreturn ok, err"
++				if err := L.DoString(src); err != nil {
++					t.Fatal(err)
++				}
++				ok, err := L.Get(-2), L.Get(-1)
++				if ok != LFalse {
++					t.Fatalf("no error")
++				}
++				where := c.where
++				if where == "" {
++					where = "<string>:3: "
++				}
++				if want := where + msg; err.String() != want {
++					t.Errorf("error %q, want %q", err, want)
++				}
++				// unchanged
++				if err := L.DoString(`return t[1], t[2], t[3], t[4], t.x, t.y, t[1000], getmetatable(t), next(t, "x")`); err != nil {
++					t.Fatal(err)
++				}
++				var got []string
++				for i := -9; i <= -1; i++ {
++					got = append(got, L.Get(i).String())
++				}
++				if want := "1 2 3 nil 1 nil nil nil nil"; strings.Join(got, " ") != want {
++					t.Errorf("table changed: %s, want %s", strings.Join(got, " "), want)
++				}
++			})
++		}
++	}
++}
++
++// A __newindex metamethod of the frozen table is not called: the
++// assignment raises the error.
++func TestFrozenTableNewIndex(t *testing.T) {
++	L := NewState()
++	defer L.Close()
++	if err := L.DoString(`
++		called = 0
++		ft = setmetatable({}, {__newindex = function() called = called + 1 end})
++	`); err != nil {
++		t.Fatal(err)
++	}
++	L.GetGlobal("ft").(*LTable).Freeze()
++	if err := L.DoString(`
++		local ok, err = pcall(function() ft.a = 1 end)
++		assert(not ok and err:find("attempt to modify a read-only table", 1, true), err)
++		ok, err = pcall(function() ft[1] = 1 end)
++		assert(not ok and err:find("attempt to modify a read-only table", 1, true), err)
++		assert(called == 0)
++	`); err != nil {
++		t.Fatal(err)
++	}
++}
++
++// pcall of a library function directly: no position (the caller of rawset
++// is pcall), as luaL_error in Lua 5.1.
++func TestFrozenTableErrorPosition(t *testing.T) {
++	L := tzState(t, DialectLua51)
++	defer L.Close()
++	if err := L.DoString(`
++		local ok, err = pcall(rawset, t, 1, 2)
++		assert(err == "attempt to modify a read-only table", err)
++		ok, err = pcall(setmetatable, t, nil)
++		assert(err == "attempt to modify a read-only table", err)
++		ok, err = pcall(table.insert, t, 1)
++		assert(err == "attempt to modify a read-only table", err)
++	`); err != nil {
++		t.Fatal(err)
++	}
++	err := L.DoString("local a = 1\nt.x = 2")
++	var apiErr *ApiError
++	if !errors.As(err, &apiErr) {
++		t.Fatalf("%v: not an *ApiError", err)
++	}
++	if got := apiErr.Object.String(); got != "<string>:2: attempt to modify a read-only table" {
++		t.Errorf("error %q", got)
++	}
++}
++
++// A frozen table is readable, iterable, usable as a metatable and an
++// __index, and its weak entries are still cleared.
++func TestFrozenTableRead(t *testing.T) {
++	for _, d := range tzDialects {
++		t.Run(d.name, func(t *testing.T) {
++			L := tzState(t, d.dialect)
++			defer L.Close()
++			mt := L.NewTable()
++			L.SetField(mt, "__index", L.NewFunction(func(L *LState) int {
++				L.Push(LString("from __index " + L.CheckString(2)))
++				return 1
++			}))
++			L.SetField(mt, "__len", L.NewFunction(func(L *LState) int { L.Push(LNumber(42)); return 1 }))
++			mt.Freeze()
++			L.SetGlobal("mt", mt)
++			if err := L.DoString(`
++				assert(t.x == 1 and t[2] == 2 and rawget(t, 3) == 3 and t.nothing == nil)
++				assert(#t == 3 and select("#", unpack(t)) == 3)
++				local n = 0
++				for k, v in pairs(t) do n = n + 1 end
++				assert(n == 4)
++				n = 0
++				for i, v in ipairs(t) do n = n + 1 end
++				assert(n == 3)
++				assert(next(t) == 1)
++				assert(table.concat(t, ",") == "1,2,3")
++				assert(table.maxn(t) == 3)
++				-- as a metatable and as an __index
++				local o = setmetatable({}, mt)
++				assert(o.a == "from __index a")
++				assert(getmetatable(o) == mt)
++				o.b = 1 -- o is not frozen
++				assert(rawget(o, "b") == 1)
++				local p = setmetatable({}, {__index = t})
++				assert(p.x == 1 and p[1] == 1)
++				p.x = 5
++				assert(p.x == 5 and t.x == 1)
++				-- frozen table with a metatable
++				assert(setmetatable({}, {__index = setmetatable({}, mt)}).q == "from __index q")
++			`); err != nil {
++				t.Fatal(err)
++			}
++			var keys []string
++			for k := range L.GetGlobal("t").(*LTable).All() {
++				keys = append(keys, k.String())
++			}
++			if strings.Join(keys, " ") != "1 2 3 x" {
++				t.Errorf("All: %v", keys)
++			}
++		})
++	}
++}
++
++func TestFrozenTableWeak(t *testing.T) {
++	for _, d := range tzDialects {
++		t.Run(d.name, func(t *testing.T) {
++			L := NewState(Options{Dialect: d.dialect})
++			defer L.Close()
++			L.SetGlobal("freeze", L.NewFunction(func(L *LState) int {
++				L.CheckTable(1).Freeze()
++				return 0
++			}))
++			if err := L.DoString(`
++				-- a frozen weak table loses its collected entries
++				local keep = {}
++				local w = setmetatable({keep, {}, a = {}, b = keep}, {__mode = "v"})
++				freeze(w)
++				collectgarbage()
++				collectgarbage()
++				assert(w[1] == keep and w[2] == nil and w.a == nil and w.b == keep)
++				assert(not pcall(function() w.c = 1 end))
++				-- a frozen weak-keyed table too
++				local k = {}
++				local wk = setmetatable({[k] = 1, [{}] = 2}, {__mode = "k"})
++				freeze(wk)
++				collectgarbage()
++				local n = 0
++				for key in pairs(wk) do n = n + 1; assert(key == k) end
++				assert(n == 1)
++				-- a frozen table is collected
++				local reg = setmetatable({}, {__mode = "k"})
++				do
++					local f = {1, 2, x = {}}
++					freeze(f)
++					reg[f] = true
++				end
++				collectgarbage()
++				collectgarbage()
++				assert(next(reg) == nil)
++			`); err != nil {
++				t.Fatal(err)
++			}
++		})
++	}
++}
++
++// SETLIST cannot reach a frozen table from Lua: only Go code that takes
++// the constructor's table from the stack can freeze it.
++func TestFrozenTableSetList(t *testing.T) {
++	L := NewState()
++	defer L.Close()
++	L.SetGlobal("freezestack", L.NewFunction(func(L *LState) int {
++		for _, v := range L.reg.array[:L.reg.top] {
++			if tb, ok := v.(*LTable); ok && tb.RawGetString("keep") == LNil {
++				tb.Freeze()
++			}
++		}
++		return 0
++	}))
++	if err := L.DoString(`
++		local ok, err = pcall(function()
++			local t = {1, 2, freezestack()}
++		end)
++		assert(not ok and err:find(":3: attempt to modify a read-only table", 1, true), err)
++	`); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func tzPanics(t *testing.T, name string, f func()) {
++	t.Helper()
++	defer func() {
++		t.Helper()
++		r := recover()
++		if err, ok := r.(error); !ok || !errors.Is(err, ErrFrozenTable) {
++			t.Errorf("%s: recovered %v, want ErrFrozenTable", name, r)
++		}
++	}()
++	f()
++}
++
++// The LTable methods panic; the LState functions raise the Lua error.
++func TestFrozenTableGo(t *testing.T) {
++	tb := newLTable(0, 0)
++	tb.RawSetInt(1, LNumber(1))
++	tb.RawSetString("x", LNumber(1))
++	if tb.Frozen() {
++		t.Fatal("frozen before Freeze")
++	}
++	tb.Freeze()
++	if !tb.Frozen() {
++		t.Fatal("not frozen after Freeze")
++	}
++	tzPanics(t, "RawSet", func() { tb.RawSet(LString("x"), LNumber(2)) })
++	tzPanics(t, "RawSet nil value", func() { tb.RawSet(LString("x"), LNil) })
++	tzPanics(t, "RawSetInt", func() { tb.RawSetInt(1, LNumber(2)) })
++	tzPanics(t, "RawSetInt new key", func() { tb.RawSetInt(5, LNumber(2)) })
++	tzPanics(t, "RawSetString", func() { tb.RawSetString("x", LNumber(2)) })
++	tzPanics(t, "RawSetH", func() { tb.RawSetH(LString("y"), LNumber(2)) })
++	tzPanics(t, "Append", func() { tb.Append(LNumber(2)) })
++	tzPanics(t, "Append nil", func() { tb.Append(LNil) })
++	tzPanics(t, "Insert", func() { tb.Insert(1, LNumber(2)) })
++	tzPanics(t, "Remove", func() { tb.Remove(1) })
++	if tb.RawGetInt(1) != LNumber(1) || tb.RawGetString("x") != LNumber(1) || tb.Len() != 1 {
++		t.Error("the table changed")
++	}
++
++	for _, d := range tzDialects {
++		L := NewState(Options{Dialect: d.dialect})
++		calls := map[string]func(L *LState){
++			"SetField":     func(L *LState) { L.SetField(tb, "x", LNumber(2)) },
++			"SetTable":     func(L *LState) { L.SetTable(tb, LNumber(1), LNumber(2)) },
++			"RawSet":       func(L *LState) { L.RawSet(tb, LString("y"), LNumber(2)) },
++			"RawSetInt":    func(L *LState) { L.RawSetInt(tb, 2, LNumber(2)) },
++			"SetMetatable": func(L *LState) { L.SetMetatable(tb, L.NewTable()) },
++			"SetGlobal": func(L *LState) {
++				L.G.Global.Freeze()
++				L.SetGlobal("y", LTrue)
++			},
++			"SetFuncs (panics)": func(L *LState) {
++				L.SetFuncs(tb, map[string]LGFunction{"f": func(*LState) int { return 0 }})
++			},
++		}
++		for name, call := range calls {
++			L.Push(L.NewFunction(func(L *LState) int { call(L); return 0 }))
++			err := L.PCall(0, 0, nil)
++			if err == nil || !strings.Contains(err.Error(), "attempt to modify a read-only table") {
++				t.Errorf("%s: %s: error %v", d.name, name, err)
++			}
++		}
++		L.Close()
++	}
++
++	// a Go function that panics: Lua's pcall gets the error
++	L := NewState()
++	defer L.Close()
++	L.SetGlobal("t", tb)
++	L.SetGlobal("gowrite", L.NewFunction(func(L *LState) int {
++		L.CheckTable(1).RawSetString("x", LNumber(3))
++		return 0
++	}))
++	if err := L.DoString(`
++		local ok, err = pcall(gowrite, t)
++		assert(not ok and err:find("attempt to modify a read-only table", 1, true), err)
++	`); err != nil {
++		t.Fatal(err)
++	}
++}
++
++func TestFrozenTableDeep(t *testing.T) {
++	L := NewState()
++	defer L.Close()
++	if err := L.DoString(`
++		local leaf = {}
++		key = {}
++		tree = {a = {b = {c = leaf}}, list = {leaf, {}}, [key] = 1, f = function() end}
++		tree.a.b.up = tree -- a cycle
++		mt = {__index = {}}
++		setmetatable(tree.list, mt)
++		other = {}
++	`); err != nil {
++		t.Fatal(err)
++	}
++	tree := L.GetGlobal("tree").(*LTable)
++	tree.FreezeDeep()
++	if err := L.DoString(`
++		for _, code in ipairs{"tree.x = 1", "tree.a.x = 1", "tree.a.b.x = 1", "tree.a.b.c.x = 1",
++				"tree.list[3] = 1", "tree.list[2].x = 1", "key.x = 1", "mt.x = 1", "mt.__index.x = 1"} do
++			local ok, err = pcall(loadstring(code))
++			assert(not ok and err:find("attempt to modify a read-only table", 1, true), code)
++		end
++		other.x = 1
++	`); err != nil {
++		t.Fatal(err)
++	}
++}
++
++// The assignment paths of the VM that test the flag.
++func BenchmarkFrozenTableAssign(b *testing.B) {
++	for _, c := range []struct{ name, code string }{
++		{"array", `local t = {} for i = 1, 100 do t[i] = 0 end for n = 1, 1000 do for i = 1, 100 do t[i] = n end end`},
++		{"field", `local t = {x = 0} for n = 1, 100000 do t.x = n end`},
++		{"hash", `local t = {} local k = "k" for n = 1, 100000 do t[k] = n end`},
++	} {
++		b.Run(c.name, func(b *testing.B) {
++			L := NewState()
++			defer L.Close()
++			fn, err := L.LoadString(c.code)
++			if err != nil {
++				b.Fatal(err)
++			}
++			for b.Loop() {
++				L.Push(fn)
++				if err := L.PCall(0, 0, nil); err != nil {
++					b.Fatal(err)
++				}
++			}
++		})
++	}
++}
 --- a/table_hash.go
 +++ b/table_hash.go
-@@ -0,0 +1,397 @@
+@@ -0,0 +1,399 @@
 +package lua
 +
 +// go-moonscript patch: the hash part of a table (the keys that are not in
@@ -26690,12 +27693,14 @@ regenerates the diff below; this header is edited by hand.
 +
 +// hashPart is the hash part of an LTable. Its zero value is an empty hash
 +// part of size 0 (Lua's dummynode).
++// (lastfree comes first, right after the table's array part, as the VM
++// tests it with the array part on assignments: see LTable.Frozen.)
 +type hashPart struct {
-+	nodes    []hnode // size nodes
-+	lastfree int32   // the free nodes are below it
++	lastfree int32   // the free nodes are below it; -1: the table is frozen
 +	ptrkeys  int32   // keys hashed by address (live or dead)
 +	first    int32   // 1 + the first node in insertion order, 0 if none
 +	last     int32   // 1 + the last one, 0 if none
++	nodes    []hnode // size nodes
 +}
 +
 +// hashString is Lua 5.1's luaS_hash.
@@ -27044,6 +28049,506 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +	}
 +}
+--- a/table_iter_fix_test.go
++++ b/table_iter_fix_test.go
+@@ -0,0 +1,497 @@
++package lua
++
++// go-moonscript patch: tests of LTable.All and LTable.Array (table.go).
++
++import (
++	"fmt"
++	"math/rand"
++	"testing"
++)
++
++type tiPair struct{ k, v LValue }
++
++// tiNext lists the pairs of tb with a loop of Next calls, calling body (if
++// not nil) after each pair.
++func tiNext(tb *LTable, body func(k LValue)) []tiPair {
++	var out []tiPair
++	for k, v := tb.Next(LNil); k != LNil; k, v = tb.Next(k) {
++		out = append(out, tiPair{k, v})
++		if body != nil {
++			body(k)
++		}
++	}
++	return out
++}
++
++// tiAll lists the pairs of tb with All, calling body (if not nil) after
++// each pair.
++func tiAll(tb *LTable, body func(k LValue)) []tiPair {
++	var out []tiPair
++	for k, v := range tb.All() {
++		out = append(out, tiPair{k, v})
++		if body != nil {
++			body(k)
++		}
++	}
++	return out
++}
++
++func tiSame(t *testing.T, name string, want, got []tiPair) {
++	t.Helper()
++	if len(want) != len(got) {
++		t.Errorf("%s: %d pairs with Next, %d with All", name, len(want), len(got))
++	}
++	for i := 0; i < len(want) && i < len(got); i++ {
++		if want[i] != got[i] {
++			t.Errorf("%s: pair %d: %v=%v with Next, %v=%v with All", name, i+1, want[i].k, want[i].v, got[i].k, got[i].v)
++			return
++		}
++	}
++}
++
++// tiTables returns tables of varied shapes, each built twice the same way
++// (the same keys in the same order, so the same layout: pointer keys are
++// the same objects in both).
++func tiTables(t *testing.T) []struct {
++	name string
++	a, b *LTable
++} {
++	t.Helper()
++	ptrs := make([]LValue, 64)
++	for i := range ptrs {
++		switch i % 3 {
++		case 0:
++			ptrs[i] = newLTable(0, 0)
++		case 1:
++			ptrs[i] = &LFunction{}
++		default:
++			ptrs[i] = &LUserData{}
++		}
++	}
++	type op struct {
++		k, v LValue
++	}
++	var cases []struct {
++		name string
++		ops  []op
++	}
++	add := func(name string, ops []op) {
++		cases = append(cases, struct {
++			name string
++			ops  []op
++		}{name, ops})
++	}
++	seq := func(from, to int, val func(i int) LValue) []op {
++		var ops []op
++		for i := from; i <= to; i++ {
++			ops = append(ops, op{LNumber(i), val(i)})
++		}
++		return ops
++	}
++	num := func(i int) LValue { return LNumber(i * 10) }
++	str := func(i int) LValue { return LString(fmt.Sprint("k", i)) }
++	add("empty", nil)
++	add("array", seq(1, 100, num))
++	var hash []op
++	for i := 0; i < 100; i++ {
++		hash = append(hash, op{str(i), LNumber(i)})
++	}
++	add("hash", hash)
++	mixed := append(seq(1, 50, num), hash[:50]...)
++	mixed = append(mixed, op{LTrue, LString("t")}, op{LFalse, LString("f")},
++		op{LNumber(0.5), LNumber(1)}, op{LNumber(-3), LNumber(2)}, op{LNumber(1e9), LNumber(3)})
++	add("mixed", mixed)
++	holes := seq(1, 40, num)
++	for i := 2; i <= 40; i += 3 {
++		holes = append(holes, op{LNumber(i), LNil})
++	}
++	holes = append(holes, op{LNumber(100), LNumber(1)}, op{LNumber(1000), LNumber(2)})
++	add("holes", holes)
++	deleted := append(append([]op{}, mixed...), hash[10:60]...)
++	for i := 0; i < len(mixed); i += 2 {
++		deleted = append(deleted, op{mixed[i].k, LNil})
++	}
++	add("after deletions", deleted)
++	// many keys added and removed: several rehashes, the last ones to a
++	// smaller hash part
++	var rehashed []op
++	for i := 0; i < 300; i++ {
++		rehashed = append(rehashed, op{str(i), LNumber(i)}, op{LNumber(i*7 + 1), LNumber(i)})
++	}
++	for i := 0; i < 290; i++ {
++		rehashed = append(rehashed, op{str(i), LNil})
++	}
++	for i := 300; i < 340; i++ {
++		rehashed = append(rehashed, op{str(i), LNumber(i)})
++	}
++	add("after rehash", rehashed)
++	var withPtrs []op
++	for i, p := range ptrs {
++		withPtrs = append(withPtrs, op{p, LNumber(i)}, op{str(i), LNumber(i)})
++	}
++	add("pointer keys (insertion order)", withPtrs)
++	ptrDeleted := append([]op{}, withPtrs...)
++	for i := 0; i < len(ptrs); i += 3 {
++		ptrDeleted = append(ptrDeleted, op{ptrs[i], LNil})
++	}
++	ptrDeleted = append(ptrDeleted, op{ptrs[0], LTrue}) // revived dead key
++	ptrDeleted = append(ptrDeleted, seq(1, 20, num)...)
++	add("pointer keys after deletions", ptrDeleted)
++	r := rand.New(rand.NewSource(1))
++	for n := 0; n < 20; n++ {
++		var ops []op
++		for i := 0; i < 400; i++ {
++			var k LValue
++			switch r.Intn(4) {
++			case 0:
++				k = LNumber(r.Intn(64) + 1)
++			case 1:
++				k = str(r.Intn(100))
++			case 2:
++				k = ptrs[r.Intn(len(ptrs))]
++				if n%2 == 0 {
++					k = LNumber(r.Intn(1000) - 100)
++				}
++			default:
++				k = LNumber(float64(r.Intn(100)) / 4)
++			}
++			var v LValue = LNumber(i)
++			if r.Intn(3) == 0 {
++				v = LNil
++			}
++			ops = append(ops, op{k, v})
++		}
++		add(fmt.Sprint("random ", n), ops)
++	}
++	out := make([]struct {
++		name string
++		a, b *LTable
++	}, 0, len(cases))
++	for _, c := range cases {
++		a, b := newLTable(0, 0), newLTable(0, 0)
++		for _, o := range c.ops {
++			a.RawSet(o.k, o.v)
++			b.RawSet(o.k, o.v)
++		}
++		out = append(out, struct {
++			name string
++			a, b *LTable
++		}{c.name, a, b})
++	}
++	// constructors size the parts
++	L := NewState()
++	defer L.Close()
++	for i, src := range []string{
++		`return {1, 2, 3, nil, 5, x = 1, y = 2, [10] = 10}`,
++		`local t = {} for i = 1, 100 do t[i] = i end for i = 1, 100, 2 do t[i] = nil end return t`,
++	} {
++		var tabs [2]*LTable
++		for j := range tabs {
++			if err := L.DoString(src); err != nil {
++				t.Fatal(err)
++			}
++			tabs[j] = L.Get(-1).(*LTable)
++			L.Pop(1)
++		}
++		out = append(out, struct {
++			name string
++			a, b *LTable
++		}{fmt.Sprint("constructor ", i), tabs[0], tabs[1]})
++	}
++	return out
++}
++
++func TestTableAllOrder(t *testing.T) {
++	for _, c := range tiTables(t) {
++		want := tiNext(c.a, nil)
++		tiSame(t, c.name, want, tiAll(c.a, nil))
++		// ForEach visits the same pairs in the same order too
++		var fe []tiPair
++		c.a.ForEach(func(k, v LValue) { fe = append(fe, tiPair{k, v}) })
++		tiSame(t, c.name+" (ForEach)", want, fe)
++	}
++}
++
++func TestTableAllBreak(t *testing.T) {
++	for _, c := range tiTables(t) {
++		want := tiNext(c.a, nil)
++		for stop := 0; stop <= len(want); stop++ {
++			var got []tiPair
++			for k, v := range c.a.All() {
++				if len(got) == stop {
++					break
++				}
++				got = append(got, tiPair{k, v})
++			}
++			tiSame(t, fmt.Sprint(c.name, " break after ", stop), want[:stop], got)
++		}
++	}
++}
++
++// Assigning to existing fields during the traversal, nil included, gives
++// the same traversal as next does under the same assignments.
++func TestTableAllAssignExisting(t *testing.T) {
++	policies := []struct {
++		name string
++		body func(tb *LTable, keys []LValue, i int, k LValue)
++	}{
++		{"clear the current key", func(tb *LTable, _ []LValue, _ int, k LValue) {
++			tb.RawSet(k, LNil)
++		}},
++		{"change the current value", func(tb *LTable, _ []LValue, i int, k LValue) {
++			tb.RawSet(k, LNumber(-i))
++		}},
++		{"clear the keys ahead", func(tb *LTable, keys []LValue, i int, _ LValue) {
++			for j := i + 1; j < len(keys); j += 2 {
++				tb.RawSet(keys[j], LNil)
++			}
++		}},
++		{"clear the keys behind and change the ones ahead", func(tb *LTable, keys []LValue, i int, _ LValue) {
++			if i > 0 {
++				tb.RawSet(keys[i-1], LNil)
++			}
++			if i+1 < len(keys) {
++				tb.RawSet(keys[i+1], LString("changed"))
++			}
++		}},
++		{"clear everything", func(tb *LTable, keys []LValue, _ int, _ LValue) {
++			for _, k := range keys {
++				tb.RawSet(k, LNil)
++			}
++		}},
++	}
++	for _, p := range policies {
++		for _, c := range tiTables(t) {
++			keys := make([]LValue, 0)
++			for _, pr := range tiNext(c.a, nil) {
++				keys = append(keys, pr.k)
++			}
++			n := 0
++			want := tiNext(c.a, func(k LValue) { p.body(c.a, keys, n, k); n++ })
++			n = 0
++			got := tiAll(c.b, func(k LValue) { p.body(c.b, keys, n, k); n++ })
++			tiSame(t, c.name+": "+p.name, want, got)
++		}
++	}
++}
++
++// Adding keys during the traversal is undefined, but All neither panics
++// nor runs forever, and yields only pairs with a value.
++func TestTableAllAddKeys(t *testing.T) {
++	policies := []struct {
++		name string
++		body func(tb *LTable, i int, k LValue)
++	}{
++		{"a number key per pair", func(tb *LTable, i int, _ LValue) {
++			tb.RawSetInt(100000+i, LTrue)
++		}},
++		{"a string key per pair", func(tb *LTable, i int, _ LValue) {
++			tb.RawSetString(fmt.Sprint("new", i), LTrue)
++		}},
++		{"a pointer key per pair", func(tb *LTable, _ int, _ LValue) {
++			tb.RawSet(newLTable(0, 0), LTrue)
++		}},
++		{"clear the current key, add a pointer key", func(tb *LTable, _ int, k LValue) {
++			tb.RawSet(k, LNil)
++			tb.RawSet(newLTable(0, 0), LTrue)
++		}},
++		{"clear the current key, add a string key", func(tb *LTable, i int, k LValue) {
++			tb.RawSet(k, LNil)
++			tb.RawSetString(fmt.Sprint("new", i), LTrue)
++		}},
++		{"add and remove a key", func(tb *LTable, i int, _ LValue) {
++			k := LString(fmt.Sprint("tmp", i))
++			tb.RawSet(k, LTrue)
++			tb.RawSet(k, LNil)
++		}},
++		{"grow the array part", func(tb *LTable, i int, _ LValue) {
++			tb.RawSetInt(tb.Len()+1, LNumber(i))
++		}},
++		{"1000 keys at the first pair", func(tb *LTable, i int, _ LValue) {
++			if i == 0 {
++				for j := 0; j < 1000; j++ {
++					tb.RawSetString(fmt.Sprint("bulk", j), LTrue)
++					tb.RawSet(newLTable(0, 0), LTrue)
++				}
++			}
++		}},
++		{"clear all, then add keys", func(tb *LTable, i int, _ LValue) {
++			if i == 0 {
++				var keys []LValue
++				for _, p := range tiNext(tb, nil) {
++					keys = append(keys, p.k)
++				}
++				for _, k := range keys {
++					tb.RawSet(k, LNil)
++				}
++			}
++			tb.RawSetString(fmt.Sprint("new", i), LTrue)
++			tb.RawSetInt(i+1, LTrue)
++		}},
++	}
++	const limit = 1000000
++	for _, p := range policies {
++		for _, c := range tiTables(t) {
++			size := len(tiNext(c.a, nil))
++			n := 0
++			for k, v := range c.a.All() {
++				if v == LNil || v == nil || k == nil || k == LNil {
++					t.Fatalf("%s: %s: pair %v=%v", c.name, p.name, k, v)
++				}
++				p.body(c.a, n, k)
++				n++
++				if n > limit {
++					t.Fatalf("%s: %s: more than %d pairs from a table of %d", c.name, p.name, limit, size)
++				}
++			}
++		}
++	}
++}
++
++// Weak entries collected during the traversal are not visited.
++func TestTableAllWeak(t *testing.T) {
++	L := NewState()
++	defer L.Close()
++	if err := L.DoString(`
++		weak = setmetatable({}, {__mode = "v"})
++		for i = 1, 10 do weak[i] = {} weak["k" .. i] = {} end
++		keep = {weak[1], weak.k1}
++	`); err != nil {
++		t.Fatal(err)
++	}
++	tb := L.GetGlobal("weak").(*LTable)
++	n := 0
++	for k, v := range tb.All() {
++		if n == 0 {
++			if err := L.DoString(`collectgarbage()`); err != nil {
++				t.Fatal(err)
++			}
++		}
++		n++
++		if v == LNil {
++			t.Fatalf("%v: nil value", k)
++		}
++	}
++	if n > 3 { // the first pair, and the two kept
++		t.Errorf("%d pairs after a collection", n)
++	}
++}
++
++func TestTableArray(t *testing.T) {
++	L := NewState()
++	defer L.Close()
++	for _, c := range []struct {
++		src  string
++		want string
++	}{
++		{`return {}`, ""},
++		{`return {1, 2, 3}`, "1=1 2=2 3=3 "},
++		{`return {1, 2, nil, 4}`, "1=1 2=2 "},
++		{`return {nil, 2}`, ""},
++		{`local t = {} t[3] = 3 t[2] = 2 t[1] = 1 t[5] = 5 return t`, "1=1 2=2 3=3 "},        // the hash part
++		{`local t = {1, 2} t[3] = 3 t[4] = 4 t.x = 1 t[0] = 0 return t`, "1=1 2=2 3=3 4=4 "}, // both parts
++		{`return setmetatable({1}, {__index = function(t, i) return i end})`, "1=1 "},        // raw
++	} {
++		if err := L.DoString(c.src); err != nil {
++			t.Fatal(err)
++		}
++		tb := L.Get(-1).(*LTable)
++		L.Pop(1)
++		got := ""
++		for i, v := range tb.Array() {
++			got += fmt.Sprintf("%d=%v ", i, v)
++		}
++		tfEqual(t, c.want, got)
++		// ipairs agrees
++		L.SetGlobal("t", tb)
++		if err := L.DoString(`local s = "" for i, v in ipairs(t) do s = s .. i .. "=" .. tostring(v) .. " " end return s`); err != nil {
++			t.Fatal(err)
++		}
++		tfEqual(t, c.want, L.Get(-1).String())
++		L.Pop(1)
++	}
++
++	// break, and changes as ipairs sees them
++	tb := newLTable(0, 0)
++	for i := 1; i <= 10; i++ {
++		tb.RawSetInt(i, LNumber(i))
++	}
++	n := 0
++	for i := range tb.Array() {
++		if i == 3 {
++			break
++		}
++		n++
++	}
++	tfEqual(t, 2, n)
++	n = 0
++	for i, v := range tb.Array() {
++		n++
++		if i == 2 {
++			tb.RawSetInt(3, LString("x")) // seen
++		}
++		if i == 3 {
++			tfEqual(t, LString("x"), v)
++		}
++		if i <= 5 {
++			tb.RawSetInt(10+i, LTrue) // appended: seen
++		}
++		if i == 12 {
++			tb.RawSetInt(14, LNil) // ends it
++		}
++	}
++	tfEqual(t, 13, n)
++}
++
++func benchTable() *LTable {
++	tb := newLTable(0, 0)
++	for i := 1; i <= 1000; i++ {
++		tb.RawSetInt(i, LNumber(i))
++		tb.RawSetString(fmt.Sprint("key", i), LNumber(i))
++	}
++	return tb
++}
++
++func BenchmarkTableAll(b *testing.B) {
++	tb := benchTable()
++	b.ResetTimer()
++	for b.Loop() {
++		n := 0
++		for _, v := range tb.All() {
++			n += int(v.(LNumber))
++		}
++	}
++}
++
++func BenchmarkTableForEach(b *testing.B) {
++	tb := benchTable()
++	b.ResetTimer()
++	for b.Loop() {
++		n := 0
++		tb.ForEach(func(_, v LValue) {
++			n += int(v.(LNumber))
++		})
++	}
++}
++
++func BenchmarkTableNext(b *testing.B) {
++	tb := benchTable()
++	b.ResetTimer()
++	for b.Loop() {
++		n := 0
++		for k, v := tb.Next(LNil); k != LNil; k, v = tb.Next(k) {
++			n += int(v.(LNumber))
++		}
++	}
++}
++
++func BenchmarkTableArray(b *testing.B) {
++	tb := benchTable()
++	b.ResetTimer()
++	for b.Loop() {
++		n := 0
++		for _, v := range tb.Array() {
++			n += int(v.(LNumber))
++		}
++	}
++}
 --- a/tablelib.go
 +++ b/tablelib.go
 @@ -1,11 +1,13 @@
@@ -27082,10 +28587,11 @@ regenerates the diff below; this header is edited by hand.
 +// order of equal elements and the "invalid order function for sorting"
 +// errors are Lua 5.1's.
  func tableSort(L *LState) int {
- 	tbl := L.CheckTable(1)
+-	tbl := L.CheckTable(1)
 -	sorter := lValueArraySorter{L, nil, tbl.array}
 -	if L.GetTop() != 1 {
 -		sorter.Fn = L.CheckFunction(2)
++	tbl := L.checkWritableTable(1) // go-moonscript patch: LTable.Freeze
 +	var fn *LFunction
 +	if L.Get(2) != LNil {
 +		fn = L.CheckFunction(2)
@@ -27198,11 +28704,12 @@ regenerates the diff below; this header is edited by hand.
 +// and no value when the position is not in 1..#t (it removed the last
 +// element of the array part for a position below 1).
  func tableRemove(L *LState) int {
- 	tbl := L.CheckTable(1)
+-	tbl := L.CheckTable(1)
 -	if L.GetTop() == 1 {
 -		L.Push(tbl.Remove(-1))
 -	} else {
 -		L.Push(tbl.Remove(L.CheckInt(2)))
++	tbl := L.checkWritableTable(1) // go-moonscript patch: LTable.Freeze
 +	e := tbl.Len()
 +	pos := L.OptInt(2, e)
 +	if pos < 1 || pos > e {
@@ -27283,7 +28790,7 @@ regenerates the diff below; this header is edited by hand.
 +// up even for pos < 1, a nil value is stored, and an error for other
 +// numbers of arguments.
  func tableInsert(L *LState) int {
- 	tbl := L.CheckTable(1)
+-	tbl := L.CheckTable(1)
 -	nargs := L.GetTop()
 -	if nargs == 1 {
 -		L.RaiseError("wrong number of arguments")
@@ -27292,6 +28799,7 @@ regenerates the diff below; this header is edited by hand.
 -	if L.GetTop() == 2 {
 -		tbl.Append(L.Get(2))
 -		return 0
++	tbl := L.checkWritableTable(1) // go-moonscript patch: LTable.Freeze
 +	e := tbl.Len() + 1
 +	var pos int
 +	switch L.GetTop() {
@@ -46093,7 +47601,7 @@ regenerates the diff below; this header is edited by hand.
  	if L.stack.IsEmpty() {
  		return
  	}
-@@ -24,14 +22,879 @@
+@@ -24,14 +22,880 @@
  		return
  	}
  
@@ -46355,7 +47863,8 @@ regenerates the diff below; this header is edited by hand.
 +			B := int(inst & 0x1ff)    //GETB
 +			if tb, ok := reg.Get(lbase + A).(*LTable); ok {
 +				if k, isnum := rk(reg, consts, lbase, B).(LNumber); isnum {
-+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
++					// go-moonscript patch: a frozen table takes the slow path, which raises the error
++					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && !tb.Frozen() && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
 +						C := int(inst>>9) & 0x1ff //GETC
 +						tb.array[i-1] = rk(reg, consts, lbase, C)
 +						continue
@@ -46976,7 +48485,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func mainLoopWithContext(L *LState, baseframe *callFrame) {
-@@ -50,11 +913,14 @@
+@@ -50,11 +914,14 @@
  
  	for {
  		cf = L.currentFrame
@@ -46992,7 +48501,7 @@ regenerates the diff below; this header is edited by hand.
  			return
  		default:
  			if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
-@@ -189,17 +1055,55 @@
+@@ -189,17 +1056,55 @@
  	}
  	L.XMoveTo(parent, nargs)
  	L.stack.Pop()
@@ -47048,7 +48557,7 @@ regenerates the diff below; this header is edited by hand.
  	if tailcall {
  		L.currentFrame = L.RemoveCallerFrame()
  	}
-@@ -214,7 +1118,10 @@
+@@ -214,7 +1119,10 @@
  		wantret = gfnret
  	}
  
@@ -47060,7 +48569,7 @@ regenerates the diff below; this header is edited by hand.
  		switchToParentThread(L, wantret, false, true)
  		return true
  	}
-@@ -259,6 +1166,12 @@
+@@ -259,6 +1167,12 @@
  			}
  		}
  	}
@@ -47073,7 +48582,7 @@ regenerates the diff below; this header is edited by hand.
  	L.stack.Pop()
  	L.currentFrame = L.stack.Last()
  	return false
-@@ -266,6 +1179,16 @@
+@@ -266,6 +1180,16 @@
  
  func threadRun(L *LState) {
  	if L.stack.IsEmpty() {
@@ -47090,7 +48599,7 @@ regenerates the diff below; this header is edited by hand.
  		return
  	}
  
-@@ -274,12 +1197,31 @@
+@@ -274,12 +1198,31 @@
  			var lv LValue
  			if v, ok := rcv.(*ApiError); ok {
  				lv = v.Object
@@ -47122,7 +48631,7 @@ regenerates the diff below; this header is edited by hand.
  					parent.Panic(L)
  				} else {
  					L.SetTop(0)
-@@ -291,6 +1233,10 @@
+@@ -291,6 +1234,10 @@
  			}
  		}
  	}()
@@ -47133,7 +48642,7 @@ regenerates the diff below; this header is edited by hand.
  	L.mainLoop(L, nil)
  }
  
-@@ -545,7 +1491,13 @@
+@@ -545,7 +1492,13 @@
  			RA := lbase + A
  			Bx := int(inst & 0x3ffff) //GETBX
  			//reg.Set(RA, L.getField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx]))
@@ -47148,7 +48657,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -576,7 +1528,46 @@
+@@ -576,7 +1529,46 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
@@ -47196,7 +48705,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -605,9 +1596,39 @@
+@@ -605,9 +1597,39 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -47239,7 +48748,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -638,7 +1659,8 @@
+@@ -638,7 +1660,8 @@
  			RA := lbase + A
  			Bx := int(inst & 0x3ffff) //GETBX
  			//L.setField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx], reg.Get(RA))
@@ -47249,16 +48758,17 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETUPVAL
-@@ -659,7 +1681,23 @@
+@@ -659,7 +1682,24 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
 -			L.setField(reg.Get(RA), L.rkValue(B), L.rkValue(C))
 +			obj := reg.Get(RA)
 +			key := L.rkValue(B)
-+			if tb, ok := obj.(*LTable); ok {
++			if tb, ok := obj.(*LTable); ok && !tb.Frozen() {
 +				// go-moonscript patch: an existing key of the array part, or
 +				// any key of a table without a metatable, without setField
++				// (a frozen table: setField raises the error)
 +				if k, isnum := key.(LNumber); isnum {
 +					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
 +						tb.array[i-1] = L.rkValue(C)
@@ -47274,7 +48784,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETTABLEKS
-@@ -668,9 +1706,18 @@
+@@ -668,9 +1708,19 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -47285,8 +48795,9 @@ regenerates the diff below; this header is edited by hand.
 +			C := int(inst>>9) & 0x1ff      //GETC
 +			lkey, key, h := L.rkStringK(B) // go-moonscript patch: with the key's hash
 +			obj := reg.Get(RA)
-+			if tb, ok := obj.(*LTable); ok {
++			if tb, ok := obj.(*LTable); ok && !tb.Frozen() {
 +				// go-moonscript patch: setFieldStringK only for __newindex
++				// (and for a frozen table, to raise the error)
 +				if j := tb.hash.findString(key, h); j >= 0 && tb.hash.nodes[j].val != LNil || tb.Metatable == LNil {
 +					tb.setStringAt(j, lkey, key, h, L.rkValue(C))
 +					return 0
@@ -47296,7 +48807,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_NEWTABLE
-@@ -679,9 +1726,9 @@
+@@ -679,9 +1729,9 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -47309,7 +48820,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -702,6 +1749,9 @@
+@@ -702,6 +1752,9 @@
  					rg.top = regi + 1
  				}
  			}
@@ -47319,7 +48830,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SELF
-@@ -713,7 +1763,16 @@
+@@ -713,7 +1766,16 @@
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
  			selfobj := reg.Get(lbase + B)
@@ -47337,7 +48848,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -756,12 +1815,12 @@
+@@ -756,12 +1818,12 @@
  			}
  			return 0
  		},
@@ -47356,7 +48867,7 @@ regenerates the diff below; this header is edited by hand.
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
  			reg := L.reg
  			cf := L.currentFrame
-@@ -840,10 +1899,10 @@
+@@ -840,10 +1902,10 @@
  							}
  						}
  					} else {
@@ -47369,7 +48880,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -929,6 +1988,29 @@
+@@ -929,6 +1991,29 @@
  						rg.top = regi + 1
  					}
  				}
@@ -47399,7 +48910,7 @@ regenerates the diff below; this header is edited by hand.
  			default:
  				op := L.metaOp1(lv, "__len")
  				if op.Type() == LTFunction {
-@@ -980,29 +2062,8 @@
+@@ -980,29 +2065,8 @@
  							}
  						}
  					}
@@ -47430,7 +48941,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -1038,6 +2099,9 @@
+@@ -1038,6 +2102,9 @@
  					rg.top = regi + 1
  				}
  			}
@@ -47440,7 +48951,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_JMP
-@@ -1081,35 +2145,7 @@
+@@ -1081,35 +2148,7 @@
  			A := int(inst>>18) & 0xff //GETA
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
@@ -47477,7 +48988,7 @@ regenerates the diff below; this header is edited by hand.
  			v := 1
  			if ret {
  				v = 0
-@@ -1198,13 +2234,19 @@
+@@ -1198,13 +2237,19 @@
  					ls.reg.Insert(fn, cf.LocalBase)
  				}
  				if cf.Fn == nil {
@@ -47502,7 +49013,7 @@ regenerates the diff below; this header is edited by hand.
  				// this section is inlined by go-inline
  				// source function is 'func (ls *LState) initCallFrame(cf *callFrame) ' in '_state.go'
  				{
-@@ -1286,7 +2328,7 @@
+@@ -1286,7 +2331,7 @@
  							if CompatVarArg {
  								ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
  								if (proto.IsVarArg & VarArgNeedsArg) != 0 {
@@ -47511,7 +49022,7 @@ regenerates the diff below; this header is edited by hand.
  									for i := 0; i < nvarargs; i++ {
  										argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
  									}
-@@ -1304,6 +2346,9 @@
+@@ -1304,6 +2349,9 @@
  					}
  				}
  				ls.currentFrame = newcf
@@ -47521,7 +49032,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			if callable.IsG && callGFunction(L, false) {
  				return 1
-@@ -1331,26 +2376,17 @@
+@@ -1331,26 +2379,17 @@
  				callable, meta = L.metaCall(lv)
  			}
  			if callable == nil {
@@ -47553,7 +49064,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			if callable.IsG {
-@@ -1468,7 +2504,7 @@
+@@ -1468,7 +2507,7 @@
  							if CompatVarArg {
  								ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
  								if (proto.IsVarArg & VarArgNeedsArg) != 0 {
@@ -47562,7 +49073,7 @@ regenerates the diff below; this header is edited by hand.
  									for i := 0; i < nvarargs; i++ {
  										argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
  									}
-@@ -1527,6 +2563,9 @@
+@@ -1527,6 +2566,9 @@
  				}
  				cf.Base = base
  				cf.LocalBase = base + (cf.LocalBase - lbase + 1)
@@ -47572,7 +49083,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return 0
  		},
-@@ -1542,21 +2581,15 @@
+@@ -1542,21 +2584,15 @@
  			{
  				ls := L
  				idx := lbase
@@ -47601,7 +49112,7 @@ regenerates the diff below; this header is edited by hand.
  			nret := B - 1
  			if B == 0 {
  				nret = reg.Top() - RA
-@@ -1676,7 +2709,16 @@
+@@ -1676,7 +2712,16 @@
  				switchToParentThread(L, n, false, true)
  				return 1
  			}
@@ -47619,7 +49130,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func copyReturnValues(L *LState, regv, start, n, b int) ' in '_vm.go'
  			{
-@@ -1783,7 +2825,11 @@
+@@ -1783,7 +2828,11 @@
  					}
  				}
  			}
@@ -47632,7 +49143,7 @@ regenerates the diff below; this header is edited by hand.
  			if islast || L.currentFrame == nil || L.currentFrame.Fn.IsG {
  				return 1
  			}
-@@ -1799,9 +2845,10 @@
+@@ -1799,9 +2848,10 @@
  				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
  					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
  						init += step
@@ -47645,7 +49156,7 @@ regenerates the diff below; this header is edited by hand.
  						{
  							rg := reg
  							regi := RA
-@@ -1815,7 +2862,7 @@
+@@ -1815,7 +2865,7 @@
  									rg.resize(requiredSize)
  								}
  							}
@@ -47654,7 +49165,7 @@ regenerates the diff below; this header is edited by hand.
  							if regi >= rg.top {
  								rg.top = regi + 1
  							}
-@@ -1824,7 +2871,7 @@
+@@ -1824,7 +2874,7 @@
  							Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
  							cf.Pc += Sbx
  							// this section is inlined by go-inline
@@ -47663,7 +49174,7 @@ regenerates the diff below; this header is edited by hand.
  							{
  								rg := reg
  								regi := RA + 3
-@@ -1838,7 +2885,7 @@
+@@ -1838,7 +2888,7 @@
  										rg.resize(requiredSize)
  									}
  								}
@@ -47672,7 +49183,7 @@ regenerates the diff below; this header is edited by hand.
  								if regi >= rg.top {
  									rg.top = regi + 1
  								}
-@@ -1876,13 +2923,13 @@
+@@ -1876,13 +2926,13 @@
  							}
  						}
  					} else {
@@ -47689,7 +49200,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return 0
  		},
-@@ -1893,33 +2940,32 @@
+@@ -1893,33 +2943,32 @@
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
  			Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
@@ -47747,7 +49258,16 @@ regenerates the diff below; this header is edited by hand.
  			}
  			cf.Pc += Sbx
  			return 0
-@@ -2068,9 +3114,9 @@
+@@ -2064,13 +3113,18 @@
+ 			}
+ 			offset := (C - 1) * FieldsPerFlush
+ 			table := reg.Get(RA).(*LTable)
++			if table.Frozen() {
++				// go-moonscript patch: a constructor's table cannot be
++				// frozen yet, unless Go code that got it from the stack froze it
++				L.frozenTableError()
++			}
+ 			nelem := B
  			if B == 0 {
  				nelem = reg.Top() - RA - 1
  			}
@@ -47760,7 +49280,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_CLOSE
-@@ -2083,19 +3129,10 @@
+@@ -2083,19 +3137,10 @@
  			{
  				ls := L
  				idx := RA
@@ -47784,7 +49304,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -2140,6 +3177,9 @@
+@@ -2140,6 +3185,9 @@
  					closure.Upvalues[i] = cf.Fn.Upvalues[B]
  				}
  			}
@@ -47794,7 +49314,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_VARARG
-@@ -2206,6 +3246,213 @@
+@@ -2206,6 +3254,213 @@
  	}
  }
  
@@ -48008,7 +49528,7 @@ regenerates the diff below; this header is edited by hand.
  func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_POW
  	reg := L.reg
  	cf := L.currentFrame
-@@ -2267,14 +3514,34 @@
+@@ -2267,14 +3522,34 @@
  	return 0
  }
  
@@ -48048,7 +49568,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
-@@ -2322,24 +3589,12 @@
+@@ -2322,24 +3597,12 @@
  		L.Call(2, 1)
  		return L.reg.Pop()
  	}
@@ -48077,7 +49597,7 @@ regenerates the diff below; this header is edited by hand.
  	return LNil
  }
  
-@@ -2359,21 +3614,26 @@
+@@ -2359,21 +3622,26 @@
  				total--
  				i--
  			} else {
@@ -48107,7 +49627,7 @@ regenerates the diff below; this header is edited by hand.
  			rhs = LString(strings.Join(buf, ""))
  		}
  	}
-@@ -2386,10 +3646,10 @@
+@@ -2386,10 +3654,10 @@
  		if v2, ok2 := rhs.(LNumber); ok2 {
  			return v1 < v2
  		}
@@ -48120,7 +49640,7 @@ regenerates the diff below; this header is edited by hand.
  		return false
  	}
  	ret := false
-@@ -2402,6 +3662,37 @@
+@@ -2402,6 +3670,37 @@
  	return ret
  }
  
@@ -48158,7 +49678,7 @@ regenerates the diff below; this header is edited by hand.
  func equals(L *LState, lhs, rhs LValue, raw bool) bool {
  	lt := lhs.Type()
  	if lt != rhs.Type() {
-@@ -2444,7 +3735,7 @@
+@@ -2444,7 +3743,7 @@
  	case 0:
  		return false
  	}
