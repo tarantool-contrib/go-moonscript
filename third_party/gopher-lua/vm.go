@@ -316,40 +316,97 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_EQ:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
-				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
-					if (v1 == v2) != (int(inst>>18)&0xff != 0) { //GETA
-						cf.Pc++
-					}
-					continue
+			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
+			var ret bool
+			if v1, ok1 := lhs.(LNumber); ok1 {
+				if v2, ok2 := rhs.(LNumber); ok2 {
+					ret = v1 == v2
 				}
+			} else {
+				ret = equals(L, lhs, rhs, false)
 			}
+			if ret != (int(inst>>18)&0xff != 0) { //GETA
+				cf.Pc++
+			} else {
+				jmpNext(L, cf, code)
+			}
+			continue
 		case OP_LT:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
-				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
-					if (v1 < v2) != (int(inst>>18)&0xff != 0) { //GETA
-						cf.Pc++
-					}
-					continue
+			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
+			var ret bool
+			if v1, ok1 := lhs.(LNumber); ok1 {
+				if v2, ok2 := rhs.(LNumber); ok2 {
+					ret = v1 < v2
+				} else {
+					ret = lessThan(L, lhs, rhs)
 				}
+			} else {
+				ret = lessThan(L, lhs, rhs)
 			}
+			if ret != (int(inst>>18)&0xff != 0) { //GETA
+				cf.Pc++
+			} else {
+				jmpNext(L, cf, code)
+			}
+			continue
 		case OP_LE:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
-				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
-					if (v1 <= v2) != (int(inst>>18)&0xff != 0) { //GETA
-						cf.Pc++
-					}
-					continue
+			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
+			var ret bool
+			if v1, ok1 := lhs.(LNumber); ok1 {
+				if v2, ok2 := rhs.(LNumber); ok2 {
+					ret = v1 <= v2
+				} else {
+					ret = lessEqual(L, lhs, rhs)
 				}
+			} else {
+				ret = lessEqual(L, lhs, rhs)
 			}
+			if ret != (int(inst>>18)&0xff != 0) { //GETA
+				cf.Pc++
+			} else {
+				jmpNext(L, cf, code)
+			}
+			continue
 		case OP_TEST:
 			A := int(inst>>18) & 0xff //GETA
 			C := int(inst>>9) & 0x1ff //GETC
 			if LVAsBool(reg.Get(lbase+A)) == (C == 0) {
+				cf.Pc++
+			} else {
+				jmpNext(L, cf, code)
+			}
+			continue
+		case OP_TESTSET:
+			A := int(inst>>18) & 0xff //GETA
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if value := reg.Get(lbase + B); LVAsBool(value) != (C == 0) {
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+				{
+					rg := reg
+					regi := lbase + A
+					vali := value
+					newSize := regi + 1
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+					{
+						requiredSize := newSize
+						if requiredSize > cap(rg.array) {
+							rg.resize(requiredSize)
+						}
+					}
+					rg.array[regi] = vali
+					if regi >= rg.top {
+						rg.top = regi + 1
+					}
+				}
+				jmpNext(L, cf, code)
+			} else {
 				cf.Pc++
 			}
 			continue
@@ -445,6 +502,17 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		cf = L.currentFrame
 		code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
 		lbase = cf.LocalBase
+	}
+}
+
+// jmpNext does the JMP that follows a test that doesn't skip it, unless
+// there is a line or count hook to call for it (go-moonscript patch: one
+// dispatch for the two).
+func jmpNext(L *LState, cf *callFrame, code []uint32) {
+	if L.hookMask&hookMaskTrace == 0 {
+		if j := code[cf.Pc]; int(j>>26) == OP_JMP { //GETOPCODE
+			cf.Pc += 1 + int(j&0x3ffff) - opMaxArgSbx //GETSBX
+		}
 	}
 }
 
@@ -1706,35 +1774,7 @@ func init() {
 			A := int(inst>>18) & 0xff //GETA
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			lhs := L.rkValue(B)
-			rhs := L.rkValue(C)
-			ret := false
-
-			if v1, ok1 := lhs.(LNumber); ok1 {
-				if v2, ok2 := rhs.(LNumber); ok2 {
-					ret = v1 <= v2
-				} else {
-					L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
-				}
-			} else {
-				if lhs.Type() != rhs.Type() {
-					L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
-				}
-				switch lhs.Type() {
-				case LTString:
-					ret = strCmp(string(lhs.(LString)), string(rhs.(LString))) <= 0
-				default:
-					switch objectRational(L, lhs, rhs, "__le") {
-					case 1:
-						ret = true
-					case 0:
-						ret = false
-					default:
-						ret = !objectRationalWithError(L, rhs, lhs, "__lt")
-					}
-				}
-			}
-
+			ret := lessEqual(L, L.rkValue(B), L.rkValue(C))
 			v := 1
 			if ret {
 				v = 0
@@ -3247,6 +3287,37 @@ func lessThan(L *LState, lhs, rhs LValue) bool {
 		ret = strCmp(string(lhs.(LString)), string(rhs.(LString))) < 0
 	default:
 		ret = objectRationalWithError(L, lhs, rhs, "__lt")
+	}
+	return ret
+}
+
+// lessEqual is lhs <= rhs, OP_LE's comparison (go-moonscript patch: a
+// function, also called by mainLoop).
+func lessEqual(L *LState, lhs, rhs LValue) bool {
+	ret := false
+	if v1, ok1 := lhs.(LNumber); ok1 {
+		if v2, ok2 := rhs.(LNumber); ok2 {
+			ret = v1 <= v2
+		} else {
+			L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
+		}
+	} else {
+		if lhs.Type() != rhs.Type() {
+			L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
+		}
+		switch lhs.Type() {
+		case LTString:
+			ret = strCmp(string(lhs.(LString)), string(rhs.(LString))) <= 0
+		default:
+			switch objectRational(L, lhs, rhs, "__le") {
+			case 1:
+				ret = true
+			case 0:
+				ret = false
+			default:
+				ret = !objectRationalWithError(L, rhs, lhs, "__lt")
+			}
+		}
 	}
 	return ret
 }
