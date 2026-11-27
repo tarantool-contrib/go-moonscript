@@ -249,8 +249,9 @@ that change.
       hex floats and high-byte identifiers under DialectLuaJIT only;
       LL/ULL/i suffixes rejected under both dialects (they need FFI cdata):
       go-moonscript
-    - dialect-dependent syntax: goto, labels and a lone ';' statement only
-      under DialectLuaJIT (under DialectLua51 goto is a name), selected in
+    - dialect-dependent syntax: goto and labels only under DialectLuaJIT
+      (under DialectLua51 goto is a name; a lone ';' is rejected under
+      both, as by lua5.1 and LuaJIT 2.1), selected in
       LState.Load from L.Dialect() via parse.ParseDialect
       (_state.go/state.go); a parse error with no token is reported as
       "<chunk>:<line>: <message>": go-moonscript
@@ -615,6 +616,43 @@ that change.
       compile_fix_test.go TestCompileLongJumps, compat
       compile_assign_extra.lua (lua5.1 ref); internal/luasuites/load_test.go
       (round trip of the archives, BenchmarkLoadArchives): go-moonscript
+
+  - Positions in the syntax tree (go-moonscript):
+    - ast/ast.go, ast/pos.go, ast/expr.go, ast/stmt.go, ast/misc.go,
+      ast/doc.go: every element of a tree (ast.Element: statements,
+      expressions, table fields, parameter lists, function names, the
+      chunk) has a Span, the byte offsets [Start, End) of its text from
+      its first token to its last; names held as strings and blocks have
+      their spans next to them (NameSpans, NameSpan, LabelSpan,
+      MethodSpan, VarargSpan, StmtsSpan, ThenSpan, ElseSpan); ast.Lines
+      gives an offset's line and byte column (go-luascope's), from the
+      starts of the lines found on first use, counted as the lexer counts
+      them. A node keeps two 32-bit offsets (SpanBase), not a Pos. Line,
+      LastLine and the other fields are unchanged; the compiler does not
+      read spans: every source compiles to the same dump.
+    - ast/expr.go: parentheses are Expr.Parens (count, span of the
+      outermost pair) and OuterSpan, not nodes; FuncCallExpr.AdjustRet
+      and Comma3Expr.AdjustRet still tell the compiler.
+    - ast/chunk.go, parse/parser.go, parse/lexer.go: parse.ParseChunk(src,
+      name, parse.Options) returns an ast.Chunk: the statements
+      ParseBytes returns, the block's span, Lines, the comments with
+      Options.Comments (ast.Comment: span, text as go-luascope's, long or
+      not), the header the lexer skipped (LuaJIT's BOM and "#" line; under
+      Lua51 the "#" line with Options.Shebang, as luaL_loadfile). Parse,
+      ParseDialect and ParseBytes unchanged.
+    - ast/walk.go: ast.Walk (go/ast's Visitor) and ast.Inspect
+      (go-luascope's: no call with nil).
+    - parse/lexer.go: tokens carry their offsets; white space is skipped
+      a run at a time. parse/parser.go: the lists of the tree (statements,
+      expressions, table fields) are built on pooled stacks and copied at
+      their size; a function expression keeps its body's node; Dump
+      leaves out spans and unexported fields.
+    - compileast.go: the line filler copies a field's span.
+    - Tests: parse/span_test.go, parse/span_check_test.go (the spans of
+      every element of the compat scripts and of the luasuites archives
+      against the lexer's tokens, each element reparsed alone, comments,
+      lines; FuzzSpans); internal/luasuites/load_test.go
+      BenchmarkParseArchives: go-moonscript
 
   Performance, numbers (go-moonscript):
     - LNumber2I builds the interface value in a local, without a scratch
@@ -3091,9 +3129,304 @@ regenerates the diff below; this header is edited by hand.
 +func numberIface(fptr *float64) LValue {
 +	return *(*LValue)(unsafe.Pointer(&iface{numberItab, unsafe.Pointer(fptr)}))
  }
+--- a/ast/ast.go
++++ b/ast/ast.go
+@@ -1,5 +1,9 @@
+ package ast
+ 
++import "math"
++
++// PositionHolder is what every statement and expression has: the lines
++// the compiler gives its instructions (see doc.go).
+ type PositionHolder interface {
+ 	Line() int
+ 	SetLine(int)
+@@ -7,9 +11,48 @@
+ 	SetLastLine(int)
+ }
+ 
++// Element is a node of a syntax tree that has a place in the source: a
++// statement, an expression, a table field, a parameter list, a function
++// name or the chunk. go-moonscript patch.
++type Element interface {
++	// Span is where the node lies in the source: from the start of its
++	// first token to the end of its last one. It is the zero Span when
++	// the node has no position (a node built by other code).
++	Span() Span
++	SetSpan(Span)
++}
++
++// SpanBase holds the span of an element; every element embeds it. The
++// span is kept in two 32-bit offsets, so an element of a source of 4 GiB
++// or more has the zero Span. go-moonscript patch.
++type SpanBase struct {
++	start uint32
++	end   uint32
++}
++
++// Span returns where the element lies in the source, the zero Span if
++// unknown.
++func (b *SpanBase) Span() Span {
++	return Span{Start: int(b.start), End: int(b.end)}
++}
++
++// SetSpan sets where the element lies in the source. A span that is not
++// one (a negative start, an end before the start) or that ends past 4 GiB
++// is kept as the zero Span.
++func (b *SpanBase) SetSpan(s Span) {
++	if s.Start < 0 || s.End < s.Start || uint64(s.End) > math.MaxUint32 {
++		b.start, b.end = 0, 0
++		return
++	}
++	b.start, b.end = uint32(s.Start), uint32(s.End)
++}
++
++// Node holds the lines and the span of a statement or an expression
++// (go-moonscript patch: the span).
+ type Node struct {
+ 	line     int
+ 	lastline int
++	SpanBase
+ }
+ 
+ func (self *Node) Line() int {
+--- a/ast/chunk.go
++++ b/ast/chunk.go
+@@ -0,0 +1,53 @@
++package ast
++
++// go-moonscript patch: the chunk and its comments (see doc.go).
++
++// Chunk is a parsed chunk, as parse.ParseChunk returns it. Its span is the
++// whole source, [0, len(src)).
++type Chunk struct {
++	SpanBase
++
++	// Name is the chunk name the parser was given.
++	Name string
++	// Stmts are the statements of the chunk, what parse.ParseBytes
++	// returns; StmtsSpan is their block's span: from its first token to
++	// its last (with the separators), or empty at the end of the source if
++	// it has none.
++	Stmts     []Stmt
++	StmtsSpan Span
++	// Header is what the lexer skipped before the first token as no Lua
++	// text: LuaJIT's UTF-8 byte order mark and first line starting with
++	// "#", or that line under Lua 5.1 with parse.Options.Shebang, without
++	// its line break; the zero Span if none.
++	Header Span
++	// Comments are the comments of the source in order, if the parser was
++	// asked for them (parse.Options.Comments).
++	Comments []Comment
++	// Lines gives the lines and columns of the offsets of the source.
++	Lines *Lines
++}
++
++// Pos returns the position of the byte at offset (Lines.Pos).
++func (c *Chunk) Pos(offset int) Pos {
++	return c.Lines.Pos(offset)
++}
++
++// Positions returns the positions of the start and the end of the span
++// of an element of the chunk (Lines.Positions).
++func (c *Chunk) Positions(n Element) (start, end Pos) {
++	return c.Lines.Positions(n.Span())
++}
++
++// Comment is a comment of the source.
++type Comment struct {
++	// Span is the comment from its "--" to its last byte: the end of the
++	// line, before the line break, for a short comment; the closing
++	// bracket for a long one.
++	Span Span
++	// Text is the comment without the "--" and, for a long comment, its
++	// brackets, read as a long string is: without a line break right after
++	// the opening bracket, each line break as "\n".
++	Text string
++	// Long is set for a long comment, "--[[ ... ]]" or "--[==[ ... ]==]".
++	Long bool
++}
+--- a/ast/doc.go
++++ b/ast/doc.go
+@@ -0,0 +1,104 @@
++// Package ast declares the syntax tree of Lua chunks that package parse
++// builds and that the compiler (lua.CompileAST) compiles.
++//
++// # Lines
++//
++// Every statement and expression has the lines the compiler gives its
++// instructions (PositionHolder): Line, and for some nodes LastLine, as
++// luac and LuaJIT number them. They are not always where the node's text
++// starts: a parenthesized expression is on the line of its "(", a unary
++// operation on that of its operand, the body of a function statement on
++// that of its "(". Compiling a tree reads only these lines, and they are
++// what they were before positions were added.
++//
++// # Spans and positions (go-moonscript patch)
++//
++// Every element of a tree (Element: the statements, the expressions, the
++// table fields, parameter lists, function names and the chunk) has a
++// Span: the byte offsets [Start, End) of its text in the source, from the
++// start of its first token to the end of its last one, so that
++// src[n.Span().Start:n.Span().End] is the node's text. A token that spans
++// lines (a long string, a string with escaped line breaks or "\z") is
++// whole in it. What is in a node's span:
++//
++//   - a statement: from its first keyword or expression to its last token,
++//     without the ";" after it (that is in its block's span);
++//   - an expression: its own tokens, without the parentheses around it,
++//     which are in Parens (below); an expression holding a parenthesized
++//     one spans its parentheses: the span of "(a).b" starts at the "(";
++//   - a name used as a string (the key of a.b, of {b = 1}, a name in
++//     function a.b()): a StringExpr spanning the name; a string literal's
++//     span starts with its quote or long bracket, a name's does not;
++//   - an "elseif": the IfStmt in the Else of the one before, from the
++//     "elseif" to the last token before the "end", which belongs to the
++//     first IfStmt;
++//   - a function: from "function" for an expression, from the "(" of the
++//     parameters for the body of a function statement (FuncDefStmt and
++//     "local function", whose statement spans from "function" or
++//     "local"), to the "end"; its ParList from "(" to ")";
++//   - a table field: the item without the separator after it.
++//
++// Blocks are lists of statements ([]Stmt), not elements: the nodes holding
++// them have their spans next to them (StmtsSpan, ThenSpan, ElseSpan,
++// Chunk.StmtsSpan), from the block's first token to its last, with the
++// separators; an empty block is empty at the token after it. Names held
++// as strings have their spans next to them too: NameSpans for the names
++// of a local statement, of a generic for and the parameters,
++// NameSpan for a numeric for's variable and a label, LabelSpan for a goto,
++// MethodSpan for a method call's and a method's name, VarargSpan for a
++// "..." parameter. A slice of spans is nil in a tree built by other code.
++//
++// A Pos is a position: the byte offset, the 1-based line and the 1-based
++// column. Columns count bytes, as go-luascope's do: a tab or a byte of a
++// UTF-8 character (a LuaJIT identifier may hold bytes 128-255) is one
++// column. Lines are counted as the lexer counts them: "\n", "\r", "\r\n"
++// and "\n\r" each end one line. Nodes keep offsets only; Lines turns an
++// offset into a Pos, from a table of the starts of the lines that it
++// builds on first use (Chunk.Lines, or NewLines for a tree from
++// parse.ParseBytes). This keeps a node 8 bytes bigger rather than 48 for
++// a start and an end Pos: the lexer counts every line break the same way,
++// wherever it is (between tokens, in a comment, in a long string, after a
++// "\" or a "\z" in a string), so the line of an offset depends on the
++// source only and is the line the lexer gives the token there. Offsets
++// are 32-bit: the elements of a source of 4 GiB or more have the zero
++// Span.
++//
++// A node without a position, built by other code, has the zero Span, and
++// the compiler doesn't read spans: a tree with or without them compiles to
++// the same function (see lua.CompileAST for the lines it needs).
++//
++// # Parentheses
++//
++// Parentheses are not nodes: (f()) is the FuncCallExpr f(), its Parens
++// telling that it is parenthesized: how many pairs (((x)) has 2) and the
++// span of the outermost pair, also its OuterSpan. They truncate a call or
++// "..." to one value, which the compiler takes from FuncCallExpr.AdjustRet
++// and Comma3Expr.AdjustRet, as before; Parens are for tools.
++//
++// # Comments
++//
++// parse.ParseChunk with parse.Options.Comments keeps the comments in
++// Chunk.Comments, in source order, as go-luascope does: a list on the
++// chunk, not attached to nodes. Collecting them costs a string each, and
++// nothing when they are not asked for. The first line that LuaJIT's lexer
++// skips (a "#" line, after an optional UTF-8 byte order mark), or that
++// lua5.1 skips running a file (parse.Options.Shebang), is no comment: it
++// is Chunk.Header.
++//
++// # Walking a tree
++//
++// Walk and Inspect traverse a tree in source order, as go/ast's do;
++// Inspect, like go-luascope's, doesn't call its function with nil after
++// the children.
++//
++// # Mapping to go-luascope and go-luamerge
++//
++// go-luascope's ast.Pos{Line, Col} is Pos's Line and Column, counted the
++// same way; its node's Pos() is Lines.Pos(n.Span().Start) here. Its
++// Comment{Pos, Text, Long} is Comment's Span.Start, Text (the same text:
++// without "--" and brackets, a long comment's line breaks as "\n") and
++// Long. Its Paren node is Expr.Parens here, its Block a []Stmt with its
++// span, its Local the names with their spans. go-luamerge's parse.Span
++// {Start, End} is Span: the literal of require("x") is the Span of the
++// StringExpr argument, also inside parentheses, require(("x")).
++package ast
 --- a/ast/expr.go
 +++ b/ast/expr.go
-@@ -50,6 +50,16 @@
+@@ -1,16 +1,70 @@
+ package ast
+ 
++import "math"
++
+ type Expr interface {
+ 	PositionHolder
++	Element
++	// Parens are the parentheses around the expression (go-moonscript
++	// patch).
++	Parens() Parens
++	SetParens(Parens)
++	// OuterSpan is the span of the expression with its parentheses: that
++	// of the outermost pair if it has any, else its Span (go-moonscript
++	// patch).
++	OuterSpan() Span
+ 	exprMarker()
+ }
+ 
++// ExprBase is what every expression embeds: the node, and the parentheses
++// around it (go-moonscript patch), kept out of line as few expressions
++// have any.
+ type ExprBase struct {
+ 	Node
++	parens *Parens
+ }
+ 
+ func (expr *ExprBase) exprMarker() {}
+ 
++// Parens returns the parentheses around the expression, the zero Parens if
++// it has none. go-moonscript patch.
++func (expr *ExprBase) Parens() Parens {
++	if expr.parens == nil {
++		return Parens{}
++	}
++	return *expr.parens
++}
++
++// SetParens sets the parentheses around the expression; a Count of 0 or
++// less removes them. go-moonscript patch.
++func (expr *ExprBase) SetParens(p Parens) {
++	if p.Count <= 0 {
++		expr.parens = nil
++		return
++	}
++	expr.parens = &p
++}
++
++// OuterSpan returns the span of the expression with its parentheses.
++// go-moonscript patch.
++func (expr *ExprBase) OuterSpan() Span {
++	if expr.parens != nil {
++		return expr.parens.Span
++	}
++	return expr.Span()
++}
++
++// Parens are the parentheses around an expression: Count pairs, the
++// outermost from the "(" at Span.Start to the ")" ending at Span.End.
++// They truncate a call or "..." to one value, which the compiler reads
++// from FuncCallExpr.AdjustRet and Comma3Expr.AdjustRet (it ignores
++// Parens), and make an expression no assignment target. go-moonscript
++// patch.
++type Parens struct {
++	Count int
++	Span  Span
++}
++
+ /* ConstExprs {{{ */
+ 
+ type ConstExpr interface {
+@@ -50,6 +104,16 @@
  
  /* ConstExprs }}} */
  
@@ -3110,7 +3443,7 @@ regenerates the diff below; this header is edited by hand.
  type Comma3Expr struct {
  	ExprBase
  	AdjustRet bool
-@@ -72,6 +82,9 @@
+@@ -72,6 +136,9 @@
  	ExprBase
  
  	Fields []*Field
@@ -3120,42 +3453,508 @@ regenerates the diff below; this header is edited by hand.
  }
  
  type FuncCallExpr struct {
-@@ -82,6 +95,9 @@
+@@ -82,6 +149,30 @@
  	Method    string
  	Args      []Expr
  	AdjustRet bool
-+	ArgsLine  int // go-moonscript patch: the line where the arguments start (0: unknown)
++	// go-moonscript patch: the start of the name Method, 0 if unknown (a
++	// method name never starts a source), in the padding after AdjustRet
++	methodStart uint32
++	ArgsLine    int // go-moonscript patch: the line where the arguments start (0: unknown)
 +	// go-moonscript patch: the line where the arguments end (0: unknown)
 +	ArgsEndLine int
++}
++
++// MethodSpan returns the span of the name Method, the zero Span if
++// unknown. go-moonscript patch.
++func (expr *FuncCallExpr) MethodSpan() Span {
++	if expr.methodStart == 0 {
++		return Span{}
++	}
++	return Span{Start: int(expr.methodStart), End: int(expr.methodStart) + len(expr.Method)}
++}
++
++// SetMethodSpan sets the span of the name Method: its start, the end being
++// that of Method. go-moonscript patch.
++func (expr *FuncCallExpr) SetMethodSpan(s Span) {
++	expr.methodStart = 0
++	if s.Start > 0 && uint64(s.Start) <= math.MaxUint32 {
++		expr.methodStart = uint32(s.Start)
++	}
  }
  
  type LogicalOpExpr struct {
+@@ -130,9 +221,15 @@
+ 	Expr Expr
+ }
+ 
++// FunctionExpr is a function: "function (...) ... end" spans from the
++// "function", the body of a function statement (FuncDefStmt, "local
++// function") from the "(" of its parameters, to the "end"
++// (go-moonscript patch: the spans).
+ type FunctionExpr struct {
+ 	ExprBase
+ 
+ 	ParList *ParList
+ 	Stmts   []Stmt
++	// StmtsSpan is the span of the body, Stmts (go-moonscript patch).
++	StmtsSpan Span
+ }
 --- a/ast/misc.go
 +++ b/ast/misc.go
-@@ -7,7 +7,10 @@
+@@ -1,17 +1,40 @@
+ package ast
  
++// Field is an item of a table constructor: Key is nil for a positional
++// item, a StringExpr spanning the name for "name = value". Its span is the
++// item's, without the separator after it (go-moonscript patch: the node).
+ type Field struct {
++	SpanBase
++
+ 	Key   Expr
+ 	Value Expr
+ }
+ 
++// ParList is the parameter list of a function; its span is from the "("
++// to the ")" (go-moonscript patch: the node and the spans).
  type ParList struct {
++	SpanBase
++
  	HasVargs bool
 -	Names    []string
 +	// NoArg: a vararg function without Lua 5.1's implicit local "arg"
 +	// (LUA_COMPAT_VARARG), as in LuaJIT (go-moonscript patch)
 +	NoArg bool
 +	Names []string
++	// NameSpans are the spans of Names, if known (go-moonscript patch)
++	NameSpans []Span
++	// VarargSpan is the span of the "..." (go-moonscript patch)
++	VarargSpan Span
  }
  
++// FuncName is the name of a function statement: Func for "function a.b",
++// Receiver and Method for "function a.b:m". Its span is from the first
++// name to the last (go-moonscript patch: the node and the span).
  type FuncName struct {
++	SpanBase
++
+ 	Func     Expr
+ 	Receiver Expr
+ 	Method   string
++	// MethodSpan is the span of the name Method (go-moonscript patch)
++	MethodSpan Span
+ }
+--- a/ast/pos.go
++++ b/ast/pos.go
+@@ -0,0 +1,123 @@
++package ast
++
++// go-moonscript patch: positions in the source (see doc.go).
++
++import (
++	"bytes"
++	"fmt"
++	"sort"
++	"sync"
++)
++
++// Span is where something lies in the source: the bytes src[Start:End],
++// byte offsets from the start of the source. A node without a position
++// has the zero Span.
++type Span struct {
++	Start int
++	End   int
++}
++
++// String returns "start-end".
++func (s Span) String() string {
++	return fmt.Sprintf("%d-%d", s.Start, s.End)
++}
++
++// Pos is a position in the source: a byte offset (0-based), a line
++// (1-based, lines counted as the lexer counts them: "\n", "\r", "\r\n" and
++// "\n\r" end a line) and a column (1-based, counted in bytes: a tab or a
++// byte of a multi-byte UTF-8 character is one column). The zero Pos is no
++// position.
++type Pos struct {
++	Offset int
++	Line   int
++	Column int
++}
++
++// IsValid reports whether p is a position (its line is not 0).
++func (p Pos) IsValid() bool { return p.Line > 0 }
++
++// String returns "line:column", or "-" for no position.
++func (p Pos) String() string {
++	if !p.IsValid() {
++		return "-"
++	}
++	return fmt.Sprintf("%d:%d", p.Line, p.Column)
++}
++
++// Lines gives the line and column of the byte offsets of a source. It
++// finds the starts of the lines on the first call that needs them, once,
++// and is then safe for concurrent use; the source must not change.
++type Lines struct {
++	once   sync.Once
++	src    []byte
++	starts []int // the offsets of the lines' first bytes
++}
++
++// NewLines returns the Lines of src, which it keeps (not a copy).
++func NewLines(src []byte) *Lines {
++	return &Lines{src: src}
++}
++
++func (l *Lines) init() {
++	l.once.Do(func() {
++		src := l.src
++		starts := make([]int, 1, 1+len(src)/32)
++		for i := 0; ; {
++			j := bytes.IndexAny(src[i:], "\n\r")
++			if j < 0 {
++				break
++			}
++			i += j
++			c := src[i]
++			i++
++			// "\r\n" and "\n\r" are one line break (inclinenumber)
++			if i < len(src) && (src[i] == '\n' || src[i] == '\r') && src[i] != c {
++				i++
++			}
++			starts = append(starts, i)
++		}
++		l.starts = starts
++	})
++}
++
++// Source returns the source of the offsets, as NewLines was given it.
++func (l *Lines) Source() []byte {
++	return l.src
++}
++
++// Count returns the number of lines of the source: 1 and one per line
++// break.
++func (l *Lines) Count() int {
++	l.init()
++	return len(l.starts)
++}
++
++// Start returns the offset of the first byte of the line, or -1 if the
++// source has no such line.
++func (l *Lines) Start(line int) int {
++	l.init()
++	if line < 1 || line > len(l.starts) {
++		return -1
++	}
++	return l.starts[line-1]
++}
++
++// Pos returns the position of the byte at offset, which is clamped to the
++// source (len(src) is the position after its last byte). A line break of
++// two bytes is on the line it ends.
++func (l *Lines) Pos(offset int) Pos {
++	l.init()
++	offset = max(0, min(offset, len(l.src)))
++	i := sort.Search(len(l.starts), func(i int) bool { return l.starts[i] > offset }) - 1
++	return Pos{Offset: offset, Line: i + 1, Column: offset - l.starts[i] + 1}
++}
++
++// Positions returns the positions of the start and the end of the span
++// (the end is the position after its last byte), or two zero Pos for the
++// zero Span, that of a node without a position.
++func (l *Lines) Positions(s Span) (start, end Pos) {
++	if s == (Span{}) {
++		return Pos{}, Pos{}
++	}
++	return l.Pos(s.Start), l.Pos(s.End)
++}
 --- a/ast/stmt.go
 +++ b/ast/stmt.go
-@@ -23,6 +23,9 @@
+@@ -2,6 +2,7 @@
+ 
+ type Stmt interface {
+ 	PositionHolder
++	Element
+ 	stmtMarker()
+ }
+ 
+@@ -23,6 +24,11 @@
  
  	Names []string
  	Exprs []Expr
++	// NameSpans are the spans of Names, if known (go-moonscript patch).
++	NameSpans []Span
 +	// IsFunction is set for "local function f", whose body sees f (unlike
 +	// that of "local f = function"). go-moonscript patch.
 +	IsFunction bool
  }
  
  type FuncCallStmt struct {
+@@ -34,7 +40,8 @@
+ type DoBlockStmt struct {
+ 	StmtBase
+ 
+-	Stmts []Stmt
++	Stmts     []Stmt
++	StmtsSpan Span // go-moonscript patch: the span of the block
+ }
+ 
+ type WhileStmt struct {
+@@ -42,6 +49,7 @@
+ 
+ 	Condition Expr
+ 	Stmts     []Stmt
++	StmtsSpan Span // go-moonscript patch: the span of the block
+ }
+ 
+ type RepeatStmt struct {
+@@ -49,14 +57,23 @@
+ 
+ 	Condition Expr
+ 	Stmts     []Stmt
++	StmtsSpan Span // go-moonscript patch: the span of the block
+ }
+ 
++// IfStmt is an if statement. An "elseif" is an IfStmt alone in the Else
++// of the one before, spanning from the "elseif" to the last token before
++// the "end" (go-moonscript patch: the spans).
+ type IfStmt struct {
+ 	StmtBase
+ 
+ 	Condition Expr
+ 	Then      []Stmt
+ 	Else      []Stmt
++	// ThenSpan is the span of the block Then; ElseSpan that of the block
++	// after the "else" (the zero Span without one), or for an "elseif" that of
++	// its IfStmt (go-moonscript patch).
++	ThenSpan Span
++	ElseSpan Span
+ }
+ 
+ type NumberForStmt struct {
+@@ -67,6 +84,9 @@
+ 	Limit Expr
+ 	Step  Expr
+ 	Stmts []Stmt
++	// go-moonscript patch: the spans of Name and of the block
++	NameSpan  Span
++	StmtsSpan Span
+ }
+ 
+ type GenericForStmt struct {
+@@ -75,6 +95,9 @@
+ 	Names []string
+ 	Exprs []Expr
+ 	Stmts []Stmt
++	// go-moonscript patch: the spans of Names and of the block
++	NameSpans []Span
++	StmtsSpan Span
+ }
+ 
+ type FuncDefStmt struct {
+@@ -97,11 +120,13 @@
+ type LabelStmt struct {
+ 	StmtBase
+ 
+-	Name string
++	Name     string
++	NameSpan Span // go-moonscript patch
+ }
+ 
+ type GotoStmt struct {
+ 	StmtBase
+ 
+-	Label string
++	Label     string
++	LabelSpan Span // go-moonscript patch
+ }
+--- a/ast/walk.go
++++ b/ast/walk.go
+@@ -0,0 +1,182 @@
++package ast
++
++// go-moonscript patch: walking a syntax tree (see doc.go).
++
++import "reflect"
++
++// Visitor's Visit is called by Walk for each element of a tree. If it
++// returns a visitor w, Walk visits the children of the element with w,
++// then calls w.Visit(nil).
++type Visitor interface {
++	Visit(n Element) (w Visitor)
++}
++
++// Walk traverses a tree in source order, as go/ast.Walk does: it calls
++// v.Visit(n); if that returns a visitor w other than nil, it walks each
++// child of n with w, then calls w.Visit(nil). The children of an element
++// are the elements it holds, in the order of the source:
++//
++//   - Chunk: Stmts;
++//   - statements: AssignStmt: Lhs, Rhs; LocalAssignStmt: Exprs;
++//     FuncCallStmt: Expr; DoBlockStmt: Stmts; WhileStmt: Condition, Stmts;
++//     RepeatStmt: Stmts, Condition; IfStmt: Condition, Then, Else (an
++//     "elseif" is the IfStmt in Else); NumberForStmt: Init, Limit, Step,
++//     Stmts; GenericForStmt: Exprs, Stmts; FuncDefStmt: Name, Func;
++//     ReturnStmt: Exprs; BreakStmt, LabelStmt, GotoStmt: none;
++//   - expressions: AttrGetExpr: Object, Key; TableExpr: Fields;
++//     FuncCallExpr: Func or Receiver, Args; the binary operators: Lhs,
++//     Rhs; the unary ones: Expr; FunctionExpr: ParList, Stmts; the
++//     constants, IdentExpr, Comma3Expr, CdataNumberExpr: none;
++//   - Field: Key (nil for a positional item), Value; FuncName: Func or
++//     Receiver; ParList: none.
++//
++// Names held as strings (local names, parameters, a method name, labels)
++// are no elements: their spans are in the fields next to them. A block is
++// no element either: its statements are children of the element holding
++// it. Nil children, nil pointers among them, are skipped; an element of a
++// type Walk doesn't know (an expression type of other code) has no
++// children.
++func Walk(v Visitor, n Element) {
++	if isNilElement(n) {
++		return
++	}
++	if v = v.Visit(n); v == nil {
++		return
++	}
++	walkChildren(v, n)
++	v.Visit(nil)
++}
++
++// Inspect traverses a tree in source order: it calls f(n), and if that
++// returns true, inspects each child of n (see Walk). Like go-luascope's
++// ast.Inspect, and unlike go/ast.Inspect, it does not call f(nil) after
++// the children: a walk that needs to know where an element's children end
++// uses Walk.
++func Inspect(n Element, f func(Element) bool) {
++	Walk(inspector(f), n)
++}
++
++type inspector func(Element) bool
++
++func (f inspector) Visit(n Element) Visitor {
++	if n != nil && f(n) {
++		return f
++	}
++	return nil
++}
++
++// isNilElement reports whether n is nil or a nil pointer.
++func isNilElement(n Element) bool {
++	if n == nil {
++		return true
++	}
++	v := reflect.ValueOf(n)
++	return v.Kind() == reflect.Pointer && v.IsNil()
++}
++
++func walkStmts(v Visitor, stmts []Stmt) {
++	for _, s := range stmts {
++		Walk(v, s)
++	}
++}
++
++func walkExprs(v Visitor, exprs []Expr) {
++	for _, e := range exprs {
++		Walk(v, e)
++	}
++}
++
++// walkExpr walks e if it is not nil (an Expr interface holding nil is not
++// an Element holding nil).
++func walkExpr(v Visitor, e Expr) {
++	if e != nil {
++		Walk(v, e)
++	}
++}
++
++func walkChildren(v Visitor, n Element) {
++	switch n := n.(type) {
++	case *Chunk:
++		walkStmts(v, n.Stmts)
++
++	case *AssignStmt:
++		walkExprs(v, n.Lhs)
++		walkExprs(v, n.Rhs)
++	case *LocalAssignStmt:
++		walkExprs(v, n.Exprs)
++	case *FuncCallStmt:
++		walkExpr(v, n.Expr)
++	case *DoBlockStmt:
++		walkStmts(v, n.Stmts)
++	case *WhileStmt:
++		walkExpr(v, n.Condition)
++		walkStmts(v, n.Stmts)
++	case *RepeatStmt:
++		walkStmts(v, n.Stmts)
++		walkExpr(v, n.Condition)
++	case *IfStmt:
++		walkExpr(v, n.Condition)
++		walkStmts(v, n.Then)
++		walkStmts(v, n.Else)
++	case *NumberForStmt:
++		walkExpr(v, n.Init)
++		walkExpr(v, n.Limit)
++		walkExpr(v, n.Step)
++		walkStmts(v, n.Stmts)
++	case *GenericForStmt:
++		walkExprs(v, n.Exprs)
++		walkStmts(v, n.Stmts)
++	case *FuncDefStmt:
++		if n.Name != nil {
++			Walk(v, n.Name)
++		}
++		if n.Func != nil {
++			Walk(v, n.Func)
++		}
++	case *ReturnStmt:
++		walkExprs(v, n.Exprs)
++
++	case *AttrGetExpr:
++		walkExpr(v, n.Object)
++		walkExpr(v, n.Key)
++	case *TableExpr:
++		for _, f := range n.Fields {
++			if f != nil {
++				Walk(v, f)
++			}
++		}
++	case *Field:
++		walkExpr(v, n.Key)
++		walkExpr(v, n.Value)
++	case *FuncCallExpr:
++		walkExpr(v, n.Func)
++		walkExpr(v, n.Receiver)
++		walkExprs(v, n.Args)
++	case *LogicalOpExpr:
++		walkExpr(v, n.Lhs)
++		walkExpr(v, n.Rhs)
++	case *RelationalOpExpr:
++		walkExpr(v, n.Lhs)
++		walkExpr(v, n.Rhs)
++	case *StringConcatOpExpr:
++		walkExpr(v, n.Lhs)
++		walkExpr(v, n.Rhs)
++	case *ArithmeticOpExpr:
++		walkExpr(v, n.Lhs)
++		walkExpr(v, n.Rhs)
++	case *UnaryMinusOpExpr:
++		walkExpr(v, n.Expr)
++	case *UnaryNotOpExpr:
++		walkExpr(v, n.Expr)
++	case *UnaryLenOpExpr:
++		walkExpr(v, n.Expr)
++	case *FunctionExpr:
++		if n.ParList != nil {
++			Walk(v, n.ParList)
++		}
++		walkStmts(v, n.Stmts)
++	case *FuncName:
++		walkExpr(v, n.Func)
++		walkExpr(v, n.Receiver)
++	}
++}
 --- a/auxlib.go
 +++ b/auxlib.go
 @@ -1,10 +1,9 @@
@@ -6794,7 +7593,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/compileast.go
 +++ b/compileast.go
-@@ -0,0 +1,931 @@
+@@ -0,0 +1,934 @@
 +package lua
 +
 +// go-moonscript patch: compiling a syntax tree that other code built or
@@ -6862,6 +7661,9 @@ regenerates the diff below; this header is edited by hand.
 +// show lines of the tree. The tree is left as it is: the compiler works on
 +// a copy with the lines set. FuncCallExpr.ArgsLine and ArgsEndLine and
 +// TableExpr.PrevLine are 0 when unknown, as the compiler takes them.
++// The spans of the nodes (ast.Span, ast.Expr.Parens) are not read: a tree
++// compiles the same with them, without them (the zero Span) or with wrong
++// ones, and the checker doesn't ask for them.
 +//
 +// Compiling never modifies the tree (go-moonscript patch: Compile stored a
 +// numeric for's default step and the folded operand of a unary minus in
@@ -7653,12 +8455,12 @@ regenerates the diff below; this header is edited by hand.
 +		u := f.pos(&n)
 +		n.Fields = make([]*ast.Field, len(ex.Fields))
 +		for i, fd := range ex.Fields {
-+			field := &ast.Field{}
++			field := *fd // its span too
 +			if fd.Key != nil {
 +				field.Key = f.expr(fd.Key)
 +			}
 +			field.Value = f.expr(fd.Value)
-+			n.Fields[i] = field
++			n.Fields[i] = &field
 +		}
 +		f.done(&n, u)
 +		return &n
@@ -19103,7 +19905,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/parse/lexer.go
 +++ b/parse/lexer.go
-@@ -1,549 +1,772 @@
+@@ -1,549 +1,859 @@
  package parse
  
 +// go-moonscript patch: the lexer is Lua 5.1's llex.c (Lua51) or LuaJIT
@@ -19114,7 +19916,7 @@ regenerates the diff below; this header is edited by hand.
 +
  import (
 -	"bufio"
--	"bytes"
+ 	"bytes"
  	"fmt"
 -	"io"
 -	"reflect"
@@ -19235,11 +20037,13 @@ regenerates the diff below; this header is edited by hand.
 +}()
 +
 +// token is a token, its semantic value (a name, the value of a string, the
-+// text of a number) and the line it starts on.
++// text of a number), the line it starts on and its span, src[start:end].
 +type token struct {
 +	typ   int
 +	sem   string
 +	line  int
++	start int
++	end   int
 +	cdata bool    // a LuaJIT FFI numeral (1LL, 1ULL, 1i), sem its text
 +	num   float64 // a LuaJIT numeral's value
 +}
@@ -19256,9 +20060,16 @@ regenerates the diff below; this header is edited by hand.
 +	t          token // the current token
 +	ahead      token // the look-ahead token, typ tkEOS if none
 +	prevLine   int   // the line of the token before t
++	// go-moonscript patch: the end of the token before t, the comments
++	// read if keepComments, the bytes skipped before the first token
++	prevEnd      int
++	keepComments bool
++	comments     []ast.Comment
++	header       ast.Span
 +}
 +
-+func newLexer(src []byte, source string, dialect Dialect) *lexer {
++// newLexer returns a lexer of src; shebang is Options.Shebang.
++func newLexer(src []byte, source string, dialect Dialect, shebang bool) *lexer {
 +	ls := &lexer{src: src, linenumber: 1, lastline: 1, source: source, dialect: dialect}
 +	ls.ahead.typ = tkEOS
 +	ls.next()
@@ -19268,37 +20079,58 @@ regenerates the diff below; this header is edited by hand.
 +			ls.pos += 2
 +			ls.next()
 +			header = true
++			ls.header.End = ls.offset()
 +		}
 +		if ls.current == '#' {
-+			for {
-+				ls.next()
-+				if ls.current == EOF {
-+					return ls
-+				}
-+				if ls.currIsNewline() {
-+					break
-+				}
++			if !ls.skipLine() {
++				return ls
 +			}
-+			ls.inclinenumber()
 +			header = true
 +		}
 +		// bytecode after a header is refused, the chunk name not echoed
 +		if header && ls.current == 0x1b {
 +			ls.runError("cannot load malformed bytecode")
 +		}
++	} else if shebang && ls.current == '#' { // luaL_loadfile's skipcomment
++		ls.skipLine()
 +	}
 +	return ls
++}
++
++// skipLine skips the line of a header, without its line break; it reports
++// whether one ends it.
++func (ls *lexer) skipLine() bool {
++	for {
++		ls.next()
++		if ls.current == EOF {
++			ls.header.End = len(ls.src)
++			return false
++		}
++		if ls.currIsNewline() {
++			break
++		}
++	}
++	ls.header.End = ls.offset()
++	ls.inclinenumber()
++	return true
  }
  
 -func isDigit(ch int) bool {
 -	return '0' <= ch && ch <= '9' || 'a' <= ch && ch <= 'f' || 'A' <= ch && ch <= 'F'
--}
-+/* character classes: the C locale's (Lua 5.1), lj_char's (LuaJIT) */
++// offset is the offset of the current character, len(src) at the end.
++func (ls *lexer) offset() int {
++	if ls.current == EOF {
++		return len(ls.src)
++	}
++	return ls.pos - 1
+ }
  
 -type Scanner struct {
 -	Pos    ast.Position
 -	reader *bufio.Reader
 -}
++/* character classes: the C locale's (Lua 5.1), lj_char's (LuaJIT) */
++
 +func isDigit(c int) bool  { return '0' <= c && c <= '9' }
 +func isXDigit(c int) bool { return isDigit(c) || 'a' <= c|0x20 && c|0x20 <= 'f' }
 +func isAlpha(c int) bool  { return 'a' <= c|0x20 && c|0x20 <= 'z' }
@@ -19490,11 +20322,11 @@ regenerates the diff below; this header is edited by hand.
 +	s := string(ls.buff)
 +	if i := strings.IndexByte(s, 0); i >= 0 {
 +		s = s[:i] // luaO_str2d converts a C string
- 	}
--	return nil
++	}
 +	if !isNumeral(s) {
 +		ls.lexError("malformed number", tkNumber)
-+	}
+ 	}
+-	return nil
 +	return s
  }
  
@@ -19978,6 +20810,7 @@ regenerates the diff below; this header is edited by hand.
 +	jit := ls.dialect == LuaJIT
 +	for {
 +		tok.line = ls.linenumber
++		tok.start = ls.offset()
 +		switch c := ls.current; c {
 +		case '\n', '\r':
 +			ls.inclinenumber()
@@ -19999,6 +20832,9 @@ regenerates the diff below; this header is edited by hand.
 +				if sep >= 0 {
 +					ls.readLongString(false, sep)
 +					ls.buff = ls.buff[:0]
++					if ls.keepComments {
++						ls.addComment(tok.start, sep)
++					}
 +					continue
  				}
 -				goto redo
@@ -20012,6 +20848,9 @@ regenerates the diff below; this header is edited by hand.
 -			tok.Str = buf.String()
 +			for !ls.currIsNewline() && ls.current != EOF {
 +				ls.next()
++			}
++			if ls.keepComments {
++				ls.addComment(tok.start, -1)
 +			}
 +			continue
  		case '[':
@@ -20149,14 +20988,47 @@ regenerates the diff below; this header is edited by hand.
 -			writeChar(buf, ch)
 -			err = sc.Error(buf.String(), "Invalid token")
 -			goto finally
--		}
--	}
++			return tkNumber
++		case EOF:
++			return tkEOS
+ 		}
++		c := ls.current
++		switch {
++		case isSpace(c):
++			ls.next()
++			for isSpace(ls.current) && !ls.currIsNewline() { // go-moonscript patch: a run at once
++				ls.next()
++			}
++			continue
++		case isDigit(c):
++			if jit {
++				tok.sem, tok.num, tok.cdata = ls.lexNumber()
++			} else {
++				tok.sem = ls.readNumeral()
++			}
++			return tkNumber
++		case isAlpha(c) || c == '_' || jit && c >= 128:
++			for {
++				ls.saveNext()
++				if !(isAlnum(ls.current) || ls.current == '_' || jit && ls.current >= 128) {
++					break
++				}
++			}
++			tok.sem = string(ls.buff)
++			if r, ok := reserved[tok.sem]; ok && (r != tkGoto || jit) {
++				return r
++			}
++			return tkName
++		}
++		ls.next()
++		return c // a single-character token
+ 	}
 -
 -finally:
 -	tok.Name = TokenName(int(tok.Type))
 -	return tok, err
--}
--
+ }
+ 
 -// yacc interface {{{
 -
 -type Lexer struct {
@@ -20175,27 +21047,67 @@ regenerates the diff below; this header is edited by hand.
 -	}
 -	if tok.Type < 0 {
 -		return 0
--	}
++// nextToken is luaX_next.
++func (ls *lexer) nextToken() {
++	ls.lastline = ls.linenumber
++	ls.prevLine = ls.t.line
++	ls.prevEnd = ls.t.end
++	if ls.ahead.typ != tkEOS {
++		ls.t = ls.ahead
++		ls.ahead.typ = tkEOS
++	} else {
++		ls.t.sem = ""
++		ls.t.typ = ls.llex(&ls.t)
++		ls.t.end = ls.offset()
+ 	}
 -	lval.token = tok
 -	lx.Token = tok
 -	return int(tok.Type)
--}
--
+ }
+ 
 -func (lx *Lexer) Error(message string) {
 -	panic(lx.scanner.Error(lx.Token.Str, message))
 -}
 -
 -func (lx *Lexer) TokenError(tok ast.Token, message string) {
 -	panic(lx.scanner.TokenError(tok, message))
--}
--
++// lookahead is luaX_lookahead: it reads the token after the current one.
++func (ls *lexer) lookahead() int {
++	ls.ahead.sem = ""
++	ls.ahead.typ = ls.llex(&ls.ahead)
++	ls.ahead.end = ls.offset()
++	return ls.ahead.typ
++}
++
++// addComment adds the comment from start to the current character: a
++// long one of level sep, or a short one if sep < 0. go-moonscript patch.
++func (ls *lexer) addComment(start, sep int) {
++	end := ls.offset()
++	c := ast.Comment{Span: ast.Span{Start: start, End: end}, Long: sep >= 0}
++	if sep < 0 {
++		c.Text = string(ls.src[start+2 : end])
++	} else {
++		c.Text = longText(ls.src[start+2+sep+2 : end-sep-2])
++	}
++	ls.comments = append(ls.comments, c)
+ }
+ 
 -func Parse(reader io.Reader, name string) (chunk []ast.Stmt, err error) {
 -	lexer := &Lexer{NewScanner(reader, name), nil, false, ast.Token{Str: ""}, TNil}
 -	chunk = nil
 -	defer func() {
 -		if e := recover(); e != nil {
 -			err, _ = e.(error)
--		}
++// longText is the text between the brackets of a long string or comment as
++// read_long_string reads it: without a first line break, and with each
++// line break ("\n", "\r", "\r\n", "\n\r") as "\n".
++func longText(b []byte) string {
++	if len(b) > 0 && (b[0] == '\n' || b[0] == '\r') {
++		if len(b) > 1 && (b[1] == '\n' || b[1] == '\r') && b[1] != b[0] {
++			b = b[2:]
++		} else {
++			b = b[1:]
+ 		}
 -	}()
 -	yyParse(lexer)
 -	chunk = lexer.Stmts
@@ -20212,14 +21124,16 @@ regenerates the diff below; this header is edited by hand.
 -		return false
 -	default:
 -		return true
--	}
+ 	}
 -}
 -
 -func dump(node interface{}, level int, s string) string {
 -	rt := reflect.TypeOf(node)
 -	if fmt.Sprint(rt) == "<nil>" {
 -		return strings.Repeat(s, level) + "<nil>"
--	}
++	if bytes.IndexByte(b, '\r') < 0 {
++		return string(b)
+ 	}
 -
 -	rv := reflect.ValueOf(node)
 -	buf := []string{}
@@ -20240,26 +21154,20 @@ regenerates the diff below; this header is edited by hand.
 -				continue
 -			}
 -			indicies = append(indicies, i)
-+			return tkNumber
-+		case EOF:
-+			return tkEOS
++	out := make([]byte, 0, len(b))
++	for i := 0; i < len(b); i++ {
++		c := b[i]
++		if c != '\n' && c != '\r' {
++			out = append(out, c)
++			continue
  		}
-+		c := ls.current
- 		switch {
+-		switch {
 -		case len(indicies) == 0:
 -			return strings.Repeat(s, level) + "<empty>"
 -		case len(indicies) == 1 && isInlineDumpNode(vt.Field(indicies[0])):
 -			for _, i := range indicies {
 -				buf = append(buf, strings.Repeat(s, level)+"- Node$"+tt.Name()+": "+dump(vt.Field(i).Interface(), 0, s))
-+		case isSpace(c):
-+			ls.next()
-+			continue
-+		case isDigit(c):
-+			if jit {
-+				tok.sem, tok.num, tok.cdata = ls.lexNumber()
-+			} else {
-+				tok.sem = ls.readNumeral()
- 			}
+-			}
 -		default:
 -			buf = append(buf, strings.Repeat(s, level)+"- Node$"+tt.Name())
 -			for _, i := range indicies {
@@ -20269,50 +21177,24 @@ regenerates the diff below; this header is edited by hand.
 -				} else {
 -					buf = append(buf, strings.Repeat(s, level+1)+tt.Field(i).Name+": ")
 -					buf = append(buf, dump(vt.Field(i).Interface(), level+2, s))
-+			return tkNumber
-+		case isAlpha(c) || c == '_' || jit && c >= 128:
-+			for {
-+				ls.saveNext()
-+				if !(isAlnum(ls.current) || ls.current == '_' || jit && ls.current >= 128) {
-+					break
- 				}
- 			}
-+			tok.sem = string(ls.buff)
-+			if r, ok := reserved[tok.sem]; ok && (r != tkGoto || jit) {
-+				return r
-+			}
-+			return tkName
+-				}
+-			}
++		out = append(out, '\n')
++		if i+1 < len(b) && (b[i+1] == '\n' || b[i+1] == '\r') && b[i+1] != c {
++			i++
  		}
 -	default:
 -		buf = append(buf, strings.Repeat(s, level)+fmt.Sprint(node))
-+		ls.next()
-+		return c // a single-character token
  	}
 -	return strings.Join(buf, "\n")
++	return string(out)
  }
- 
+-
 -func Dump(chunk []ast.Stmt) string {
 -	return dump(chunk, 0, "   ")
-+// nextToken is luaX_next.
-+func (ls *lexer) nextToken() {
-+	ls.lastline = ls.linenumber
-+	ls.prevLine = ls.t.line
-+	if ls.ahead.typ != tkEOS {
-+		ls.t = ls.ahead
-+		ls.ahead.typ = tkEOS
-+	} else {
-+		ls.t.sem = ""
-+		ls.t.typ = ls.llex(&ls.t)
-+	}
- }
- 
+-}
+-
 -// }}
-+// lookahead is luaX_lookahead: it reads the token after the current one.
-+func (ls *lexer) lookahead() int {
-+	ls.ahead.sem = ""
-+	ls.ahead.typ = ls.llex(&ls.ahead)
-+	return ls.ahead.typ
-+}
 --- a/parse/lua51regs.go
 +++ b/parse/lua51regs.go
 @@ -0,0 +1,627 @@
@@ -20404,7 +21286,7 @@ regenerates the diff below; this header is edited by hand.
 +			}
 +		}
 +	}()
-+	p.ls = newLexer(src, name, Lua51)
++	p.ls = newLexer(src, name, Lua51, false)
 +	p.openFunc(0, true)
 +	p.ls.nextToken()
 +	p.chunk()
@@ -20945,7 +21827,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/parse/parser.go
 +++ b/parse/parser.go
-@@ -1,1385 +1,1944 @@
+@@ -1,1385 +1,2089 @@
 -// Code generated by goyacc -o parser.go parser.go.y. DO NOT EDIT.
 -
 -//line parser.go.y:2
@@ -21366,9 +22248,50 @@ regenerates the diff below; this header is edited by hand.
 +// ParseBytes parses a chunk of the dialect held in memory. A syntax error
 +// is an *Error.
 +func ParseBytes(src []byte, name string, dialect Dialect) (chunk []ast.Stmt, err error) {
++	chunk, _, _, err = parseSource(src, name, Options{Dialect: dialect})
++	return chunk, err
++}
++
++// Options are the options of ParseChunk. go-moonscript patch.
++type Options struct {
++	// Dialect is the language of the chunk.
++	Dialect Dialect
++	// Comments makes the parser keep the comments of the source in
++	// Chunk.Comments.
++	Comments bool
++	// Shebang skips a first line starting with "#" under Lua51 as
++	// luaL_loadfile does (lua5.1 running a file), keeping its line break:
++	// in Chunk.Header. LuaJIT's lexer always skips it, and a UTF-8 BOM
++	// before it, as lj_lex_setup does; under Lua51 without Shebang it is
++	// a syntax error, as for loadstring.
++	Shebang bool
++}
++
++// ParseChunk parses a chunk held in memory into its tree, with the
++// chunk's span, comments and lines (see package ast). The tree is the one
++// ParseBytes returns, in Chunk.Stmts. The chunk keeps src, without a copy,
++// to give the lines and columns of offsets (Chunk.Lines): src must not be
++// modified while the chunk is in use. A syntax error is an *Error.
++// go-moonscript patch.
++func ParseChunk(src []byte, name string, opts Options) (*ast.Chunk, error) {
++	stmts, block, ls, err := parseSource(src, name, opts)
++	if err != nil {
++		return nil, err
++	}
++	c := &ast.Chunk{Name: name, Stmts: stmts, StmtsSpan: block, Header: ls.header, Comments: ls.comments,
++		Lines: ast.NewLines(src)}
++	c.SetSpan(ast.Span{Start: 0, End: len(src)})
++	return c, nil
++}
++
++// parseSource parses a chunk: its statements, the span of its block and
++// the lexer that read it.
++func parseSource(src []byte, name string, opts Options) (chunk []ast.Stmt, block ast.Span, ls *lexer, err error) {
++	dialect := opts.Dialect
 +	p := &parser{jit: dialect == LuaJIT}
 +	sc := scratchPool.Get().(*scratch)
 +	p.fsCache, p.bcstack, p.lnstack = sc.fsCache, sc.bcstack, sc.lnstack
++	p.stmtStack, p.exprStack, p.fieldStack = sc.stmtStack, sc.exprStack, sc.fieldStack
 +	defer func() {
 +		p.release(sc)
 +		if e := recover(); e != nil {
@@ -21376,10 +22299,11 @@ regenerates the diff below; this header is edited by hand.
 +			if !ok {
 +				panic(e)
 +			}
-+			chunk, err = nil, pe
++			chunk, block, ls, err = nil, ast.Span{}, nil, pe
 +		}
 +	}()
-+	p.ls = newLexer(src, name, dialect) // it may raise an error
++	p.ls = newLexer(src, name, dialect, opts.Shebang) // it may raise an error
++	p.ls.keepComments = opts.Comments
 +	if !p.jit {
 +		p.level = lua51BaseLevel
 +	}
@@ -21388,18 +22312,22 @@ regenerates the diff below; this header is edited by hand.
 +		p.fs.emit(p, insAD(bcFUNCV, 0, 0)) // the header's place
 +	}
 +	p.ls.nextToken()
-+	chunk = p.chunk()
++	chunk, block = p.chunk()
 +	p.check(tkEOS)
 +	p.closeFunc()
-+	return chunk, nil
++	return chunk, block, p.ls, nil
 +}
 +
 +// scratch is the memory a parser passes on to the next chunks: the states
-+// of the functions by depth, LuaJIT's bytecode stack.
++// of the functions by depth, LuaJIT's bytecode stack, the stacks of the
++// lists of the tree being parsed.
 +type scratch struct {
-+	fsCache []*funcState
-+	bcstack []bcIns
-+	lnstack []int32
++	fsCache    []*funcState
++	bcstack    []bcIns
++	lnstack    []int32
++	stmtStack  []ast.Stmt
++	exprStack  []ast.Expr
++	fieldStack []*ast.Field
 +}
 +
 +var scratchPool = sync.Pool{New: func() any { return &scratch{} }}
@@ -21418,6 +22346,11 @@ regenerates the diff below; this header is edited by hand.
 +	if len(p.bcstack) <= maxPooledBytecode {
 +		sc.bcstack, sc.lnstack = p.bcstack, p.lnstack
 +	}
++	// what a syntax error left on the stacks (the rest is cleared)
++	clear(p.stmtStack)
++	clear(p.exprStack)
++	clear(p.fieldStack)
++	sc.stmtStack, sc.exprStack, sc.fieldStack = p.stmtStack[:0], p.exprStack[:0], p.fieldStack[:0]
 +	scratchPool.Put(sc)
 +}
 +
@@ -21522,6 +22455,11 @@ regenerates the diff below; this header is edited by hand.
 +	// functions being parsed
 +	fsCache []*funcState
 +	depth   int
++	// go-moonscript patch: the lists of the tree being parsed, built on
++	// stacks and copied into slices of their size when they end
++	stmtStack  []ast.Stmt
++	exprStack  []ast.Expr
++	fieldStack []*ast.Field
 +}
 +
 +// expression kinds, for the statements
@@ -21592,23 +22530,34 @@ regenerates the diff below; this header is edited by hand.
 -		if yyStatenames[s] != "" {
 -			return yyStatenames[s]
 -		}
--	}
--	return __yyfmt__.Sprintf("state-%v", s)
 +// isName: LuaJIT's goto is a name where a name is expected.
 +func (p *parser) isName() bool {
 +	return p.ls.t.typ == tkName || p.ls.t.typ == tkGoto
++}
++
++// strCheckName is str_checkname / lex_str: the name, its line and its
++// span.
++func (p *parser) strCheckName() (string, int, ast.Span) {
++	if !p.isName() {
++		p.errorExpected(tkName)
+ 	}
+-	return __yyfmt__.Sprintf("state-%v", s)
++	t := &p.ls.t
++	name, line, span := t.sem, t.line, ast.Span{Start: t.start, End: t.end}
++	p.next()
++	return name, line, span
  }
  
 -func yyErrorMessage(state, lookAhead int) string {
 -	const TOKSTART = 4
-+// strCheckName is str_checkname / lex_str: the name and its line.
-+func (p *parser) strCheckName() (string, int) {
-+	if !p.isName() {
-+		p.errorExpected(tkName)
-+	}
-+	name, line := p.ls.t.sem, p.ls.t.line
-+	p.next()
-+	return name, line
++// spanFrom is the span from start to the end of the last token read.
++func (p *parser) spanFrom(start int) ast.Span {
++	return ast.Span{Start: start, End: p.ls.prevEnd}
++}
++
++// tokenSpan is the span of the current token.
++func (p *parser) tokenSpan() ast.Span {
++	return ast.Span{Start: p.ls.t.start, End: p.ls.t.end}
 +}
  
 -	if !yyErrorVerbose {
@@ -22006,25 +22955,31 @@ regenerates the diff below; this header is edited by hand.
 +	return false
 +}
 +
-+func (p *parser) chunk() []ast.Stmt {
-+	stmts := []ast.Stmt{}
++// chunk parses a block: its statements and its span, from its first token
++// to its last, or empty at the token after it.
++func (p *parser) chunk() ([]ast.Stmt, ast.Span) {
++	base := len(p.stmtStack)
++	start := p.ls.t.start
 +	p.enterLevel()
 +	for islast := false; !islast && !blockFollow(p.ls.t.typ); {
-+		islast = p.statement(&stmts)
++		islast = p.statement()
 +		p.testNext(';')
 +		if p.jit || p.r51 {
 +			p.fs.freereg = p.fs.nactvar() // the registers are free after each statement
 +		}
 +	}
 +	p.leaveLevel()
-+	return stmts
++	stmts := append([]ast.Stmt{}, p.stmtStack[base:]...)
++	clear(p.stmtStack[base:])
++	p.stmtStack = p.stmtStack[:base]
++	return stmts, ast.Span{Start: start, End: max(start, p.ls.prevEnd)}
 +}
 +
-+func (p *parser) block() []ast.Stmt {
++func (p *parser) block() ([]ast.Stmt, ast.Span) {
 +	p.enterBlock(false)
-+	stmts := p.chunk()
++	stmts, span := p.chunk()
 +	p.leaveBlock()
-+	return stmts
++	return stmts, span
 +}
 +
 +// cond is expr_cond under LuaJIT: the expression, and the jumps taken
@@ -22048,21 +23003,25 @@ regenerates the diff below; this header is edited by hand.
 +	return e, v.f
 +}
 +
-+// statement parses a statement into stmts; it reports whether the
-+// statement must be the last one of its block.
-+func (p *parser) statement(stmts *[]ast.Stmt) bool {
++// statement parses a statement onto the statement stack; it reports
++// whether the statement must be the last one of its block.
++func (p *parser) statement() bool {
 +	ls := p.ls
 +	fs := p.fs
 +	line := ls.linenumber
 +	tokLine := ls.t.line
-+	add := func(s ast.Stmt) { *stmts = append(*stmts, s) }
++	start := ls.t.start
++	add := func(s ast.Stmt) {
++		s.SetSpan(p.spanFrom(start))
++		p.stmtStack = append(p.stmtStack, s)
++	}
 +	switch ls.t.typ {
 +	case tkIf:
 +		add(p.ifStat(line))
 +	case tkWhile:
 +		p.next()
-+		start := fs.pc
-+		fs.lasttarget = start
++		loopStart := fs.pc
++		fs.lasttarget = loopStart
 +		cond, condexit := p.cond()
 +		p.enterBlock(true)
 +		p.checkNext(tkDo)
@@ -22070,9 +23029,9 @@ regenerates the diff below; this header is edited by hand.
 +		if p.jit {
 +			loop = fs.emit(p, insAD(bcLOOP, fs.nactvar(), 0))
 +		}
-+		body := p.block()
++		body, bodySpan := p.block()
 +		if p.jit {
-+			fs.jmpPatch(p, fs.jmp(p), start)
++			fs.jmpPatch(p, fs.jmp(p), loopStart)
 +		}
 +		endLine := ls.t.line
 +		p.checkMatch(tkEnd, tkWhile, line)
@@ -22081,16 +23040,16 @@ regenerates the diff below; this header is edited by hand.
 +			fs.jmpToHere(p, condexit)
 +			fs.jmpPatchIns(p, loop, fs.pc)
 +		}
-+		st := &ast.WhileStmt{Condition: cond, Stmts: body}
++		st := &ast.WhileStmt{Condition: cond, Stmts: body, StmtsSpan: bodySpan}
 +		st.SetLine(tokLine)
 +		st.SetLastLine(endLine)
 +		add(st)
 +	case tkDo:
 +		p.next()
-+		body := p.block()
++		body, bodySpan := p.block()
 +		endLine := ls.t.line
 +		p.checkMatch(tkEnd, tkDo, line)
-+		st := &ast.DoBlockStmt{Stmts: body}
++		st := &ast.DoBlockStmt{Stmts: body, StmtsSpan: bodySpan}
 +		st.SetLine(tokLine)
 +		st.SetLastLine(endLine)
 +		add(st)
@@ -22106,7 +23065,7 @@ regenerates the diff below; this header is edited by hand.
 +		if p.jit {
 +			fs.emit(p, insAD(bcLOOP, fs.nactvar(), 0))
 +		}
-+		body := p.chunk()
++		body, bodySpan := p.chunk()
 +		p.checkMatch(tkUntil, tkRepeat, line)
 +		cond, condexit := p.cond() // in the scope
 +		if !p.jit || !inner.upval {
@@ -22122,7 +23081,7 @@ regenerates the diff below; this header is edited by hand.
 +			fs.jmpPatchIns(p, loop, fs.pc)
 +		}
 +		p.leaveBlock()
-+		st := &ast.RepeatStmt{Condition: cond, Stmts: body}
++		st := &ast.RepeatStmt{Condition: cond, Stmts: body, StmtsSpan: bodySpan}
 +		st.SetLine(tokLine)
 +		st.SetLastLine(cond.Line())
 +		add(st)
@@ -22131,7 +23090,7 @@ regenerates the diff below; this header is edited by hand.
 +	case tkLocal:
 +		p.next()
 +		if p.testNext(tkFunction) {
-+			name, _ := p.strCheckName()
++			name, _, nameSpan := p.strCheckName()
 +			p.newLocalVar(name, 0)
 +			var lv, b expDesc
 +			if p.jit {
@@ -22149,7 +23108,8 @@ regenerates the diff below; this header is edited by hand.
 +			} else if p.r51 {
 +				fs.rStoreVar(p, &lv, &b)
 +			}
-+			st := &ast.LocalAssignStmt{Names: []string{name}, Exprs: []ast.Expr{fn}, IsFunction: true}
++			st := &ast.LocalAssignStmt{Names: []string{name}, Exprs: []ast.Expr{fn}, IsFunction: true,
++				NameSpans: []ast.Span{nameSpan}}
 +			st.SetLine(tokLine)
 +			st.SetLastLine(fn.LastLine())
 +			add(st)
@@ -22177,18 +23137,18 @@ regenerates the diff below; this header is edited by hand.
 +		add(st)
 +		return true
 +	case tkLabel:
-+		p.labelStat(stmts)
++		p.labelStat()
 +	case tkGoto:
 +		if ls.lookahead() == tkName {
 +			p.next()
-+			name, _ := p.strCheckName()
++			name, _, nameSpan := p.strCheckName()
 +			if l := p.golaFindLabel(name); l >= 0 { // a backward goto in the scope is a loop
 +				fs.emit(p, insAJ(bcLOOP, uint32(fs.vstack[l].slot), -1))
 +			}
 +			p.fs.bl.hasGola = true
 +			pc := fs.jmp(p)
 +			p.golaNew(name, false, int(fs.lines[pc]), pc)
-+			st := &ast.GotoStmt{Label: name}
++			st := &ast.GotoStmt{Label: name, LabelSpan: nameSpan}
 +			st.SetLine(tokLine)
 +			add(st)
 +			break
@@ -22267,7 +23227,8 @@ regenerates the diff below; this header is edited by hand.
 +	p.next()
 +	cond, flist := p.cond()
 +	p.checkNext(tkThen)
-+	top := &ast.IfStmt{Condition: cond, Then: p.block()}
++	top := &ast.IfStmt{Condition: cond}
++	top.Then, top.ThenSpan = p.block()
 +	top.SetLine(ifLine)
 +	cur := top
 +	for ls.t.typ == tkElseif {
@@ -22275,13 +23236,15 @@ regenerates the diff below; this header is edited by hand.
 +			fs.jmpAppend(p, &escape, fs.jmp(p))
 +			fs.jmpToHere(p, flist)
 +		}
-+		elseifLine := ls.t.line
++		elseifLine, elseifStart := ls.t.line, ls.t.start
 +		p.next()
 +		var cond ast.Expr
 +		cond, flist = p.cond()
 +		p.checkNext(tkThen)
-+		st := &ast.IfStmt{Condition: cond, Then: p.block()}
++		st := &ast.IfStmt{Condition: cond}
++		st.Then, st.ThenSpan = p.block()
 +		st.SetLine(elseifLine)
++		st.SetSpan(ast.Span{Start: elseifStart, End: elseifStart}) // ends below
 +		cur.Else = []ast.Stmt{st}
 +		cur = st
 +	}
@@ -22291,12 +23254,19 @@ regenerates the diff below; this header is edited by hand.
 +			fs.jmpToHere(p, flist)
 +		}
 +		p.next()
-+		cur.Else = p.block()
++		cur.Else, cur.ElseSpan = p.block()
 +	} else if p.jit {
 +		fs.jmpAppend(p, &escape, flist)
 +	}
 +	if p.jit {
 +		fs.jmpToHere(p, escape)
++	}
++	// the elseifs end with the last token before the "end"
++	for s := top; s != cur; {
++		next := s.Else[0].(*ast.IfStmt)
++		next.SetSpan(p.spanFrom(next.Span().Start))
++		s.ElseSpan = next.Span()
++		s = next
 +	}
 +	top.SetLastLine(ls.t.line)
 +	p.checkMatch(tkEnd, tkIf, line)
@@ -22308,13 +23278,13 @@ regenerates the diff below; this header is edited by hand.
 +	forLine := ls.t.line
 +	p.enterBlock(true)
 +	p.next()
-+	name, _ := p.strCheckName()
++	name, _, nameSpan := p.strCheckName()
 +	var st ast.Stmt
 +	switch ls.t.typ {
 +	case '=':
-+		st = p.forNum(name, line)
++		st = p.forNum(name, nameSpan)
 +	case ',', tkIn:
-+		st = p.forIter(name)
++		st = p.forIter(name, nameSpan)
 +	default:
 +		ls.syntaxError("'=' or 'in' expected")
 +	}
@@ -22339,7 +23309,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 +
 +// forNum is fornum / parse_for_num: the loop instructions after the body.
-+func (p *parser) forNum(name string, line int) ast.Stmt {
++func (p *parser) forNum(name string, nameSpan ast.Span) ast.Stmt {
 +	fs := p.fs
 +	base := fs.freereg
 +	p.newLocalVar("(for index)", 0)
@@ -22366,17 +23336,18 @@ regenerates the diff below; this header is edited by hand.
 +	if p.jit {
 +		loop = fs.emit(p, insAJ(bcFORI, base, -1))
 +	}
-+	stmts := p.forBody(1)
++	stmts, stmtsSpan := p.forBody(1)
 +	if p.jit {
 +		loopend := fs.emit(p, insAJ(bcFORL, base, -1))
 +		fs.jmpPatchIns(p, loopend, loop+1)
 +		fs.jmpPatchIns(p, loop, fs.pc)
 +	}
-+	return &ast.NumberForStmt{Name: name, Init: init, Limit: limit, Step: step, Stmts: stmts}
++	return &ast.NumberForStmt{Name: name, Init: init, Limit: limit, Step: step, Stmts: stmts,
++		NameSpan: nameSpan, StmtsSpan: stmtsSpan}
 +}
 +
 +// forIter is forlist / parse_for_iter.
-+func (p *parser) forIter(name string) ast.Stmt {
++func (p *parser) forIter(name string, nameSpan ast.Span) ast.Stmt {
 +	fs := p.fs
 +	base := fs.freereg + 3
 +	exprpc := fs.pc
@@ -22385,10 +23356,12 @@ regenerates the diff below; this header is edited by hand.
 +	p.newLocalVar("(for control)", 2)
 +	p.newLocalVar(name, 3)
 +	names := []string{name}
++	spans := []ast.Span{nameSpan}
 +	for p.testNext(',') {
-+		name, _ := p.strCheckName()
++		name, _, span := p.strCheckName()
 +		p.newLocalVar(name, len(names)+3)
 +		names = append(names, name)
++		spans = append(spans, span)
 +	}
 +	p.checkNext(tkIn)
 +	var e expDesc
@@ -22412,7 +23385,7 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		loop = fs.emit(p, insAJ(op, base, -1))
 +	}
-+	stmts := p.forBody(len(names))
++	stmts, stmtsSpan := p.forBody(len(names))
 +	if p.jit {
 +		fs.jmpPatchIns(p, loop, fs.pc)
 +		op := bcITERC
@@ -22423,7 +23396,7 @@ regenerates the diff below; this header is edited by hand.
 +		loopend := fs.emit(p, insAJ(bcITERL, base, -1))
 +		fs.jmpPatchIns(p, loopend, loop+1)
 +	}
-+	return &ast.GenericForStmt{Names: names, Exprs: exprs, Stmts: stmts}
++	return &ast.GenericForStmt{Names: names, Exprs: exprs, Stmts: stmts, NameSpans: spans, StmtsSpan: stmtsSpan}
 +}
 +
 +// predictNext guesses from the first instruction of a generic for's
@@ -22454,7 +23427,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 +
 +// forBody is the scope of a for's variables and its block.
-+func (p *parser) forBody(nvars int) []ast.Stmt {
++func (p *parser) forBody(nvars int) ([]ast.Stmt, ast.Span) {
 +	p.enterBlock(false)
 +	p.adjustLocalVars(nvars)
 +	if p.jit {
@@ -22462,9 +23435,9 @@ regenerates the diff below; this header is edited by hand.
 +	} else if p.r51 {
 +		p.fs.rReserve(p, uint32(nvars))
 +	}
-+	stmts := p.block()
++	stmts, span := p.block()
 +	p.leaveBlock()
-+	return stmts
++	return stmts, span
 +}
 +
 +func (p *parser) funcStat(line int) ast.Stmt {
@@ -22473,27 +23446,32 @@ regenerates the diff below; this header is edited by hand.
 +	var v, b expDesc
 +	p.next()
 +	// funcname: NAME {'.' NAME} [':' NAME]
-+	name, nameLine := p.strCheckName()
++	nameStart := ls.t.start
++	name, nameLine, nameSpan := p.strCheckName()
 +	p.singleVar(fs, name, &v, true)
 +	if p.r51 && v.k == vGlobal {
 +		v.info = fs.rStringK(name)
 +	}
 +	var fn ast.Expr = &ast.IdentExpr{Value: name}
 +	fn.SetLine(nameLine)
++	fn.SetSpan(nameSpan)
 +	for ls.t.typ == '.' {
-+		key, keyLine := p.field(&v)
++		key, keyLine, keySpan := p.field(&v)
 +		k := &ast.StringExpr{Value: key}
 +		k.SetLine(keyLine)
++		k.SetSpan(keySpan)
 +		fn = &ast.AttrGetExpr{Object: fn, Key: k}
 +		fn.SetLine(keyLine)
++		fn.SetSpan(p.spanFrom(nameStart))
 +	}
 +	funcname := &ast.FuncName{Func: fn}
 +	needself := false
 +	if ls.t.typ == ':' {
 +		needself = true
-+		method, _ := p.field(&v)
-+		funcname = &ast.FuncName{Receiver: fn, Method: method}
++		method, _, methodSpan := p.field(&v)
++		funcname = &ast.FuncName{Receiver: fn, Method: method, MethodSpan: methodSpan}
 +	}
++	funcname.SetSpan(p.spanFrom(nameStart))
 +	body := p.body(&b, needself, line)
 +	if p.jit {
 +		fs.store(p, &v, &b)
@@ -22507,15 +23485,15 @@ regenerates the diff below; this header is edited by hand.
 +}
 +
 +// field parses '.' NAME or ':' NAME, an index of v under LuaJIT
-+// (expr_field): the name and its line.
-+func (p *parser) field(v *expDesc) (string, int) {
++// (expr_field): the name, its line and its span.
++func (p *parser) field(v *expDesc) (string, int, ast.Span) {
 +	if p.jit {
 +		p.fs.toAnyReg(p, v)
 +	} else if p.r51 {
 +		p.fs.rExp2AnyReg(p, v)
 +	}
 +	p.next()
-+	name, line := p.strCheckName()
++	name, line, span := p.strCheckName()
 +	if p.jit {
 +		var k expDesc
 +		k.init(vKStr, 0)
@@ -22526,15 +23504,17 @@ regenerates the diff below; this header is edited by hand.
 +		k.init(vKStr, p.fs.rStringK(name))
 +		p.fs.rIndexed(p, v, &k)
 +	}
-+	return name, line
++	return name, line, span
 +}
 +
 +func (p *parser) localStat(line int) ast.Stmt {
 +	var names []string
++	var spans []ast.Span
 +	for {
-+		name, _ := p.strCheckName()
++		name, _, span := p.strCheckName()
 +		p.newLocalVar(name, len(names))
 +		names = append(names, name)
++		spans = append(spans, span)
 +		if !p.testNext(',') {
 +			break
 +		}
@@ -22555,7 +23535,7 @@ regenerates the diff below; this header is edited by hand.
 +		p.rAdjustAssign(len(names), len(exprs), &e)
 +	}
 +	p.adjustLocalVars(len(names))
-+	st := &ast.LocalAssignStmt{Names: names, Exprs: exprs}
++	st := &ast.LocalAssignStmt{Names: names, Exprs: exprs, NameSpans: spans}
 +	st.SetLine(line)
 +	return st
 +}
@@ -22591,25 +23571,26 @@ regenerates the diff below; this header is edited by hand.
 +}
 +
 +// labelStat parses LuaJIT's '::' NAME '::' and the labels right after it.
-+func (p *parser) labelStat(stmts *[]ast.Stmt) {
++func (p *parser) labelStat() {
 +	ls := p.ls
-+	line := ls.t.line
++	line, start := ls.t.line, ls.t.start
 +	fs := p.fs
 +	fs.lasttarget = fs.pc
 +	fs.bl.hasGola = true
 +	p.next()
-+	name, _ := p.strCheckName()
++	name, _, nameSpan := p.strCheckName()
 +	if p.golaFindLabel(name) >= 0 {
 +		ls.lexError(fmt.Sprintf("duplicate label '%s'", name), 0)
 +	}
 +	idx := p.golaNew(name, true, 0, fs.pc)
 +	p.checkNext(tkLabel)
-+	st := &ast.LabelStmt{Name: name}
++	st := &ast.LabelStmt{Name: name, NameSpan: nameSpan}
 +	st.SetLine(line)
-+	*stmts = append(*stmts, st)
++	st.SetSpan(p.spanFrom(start))
++	p.stmtStack = append(p.stmtStack, st)
 +	if ls.t.typ == tkLabel {
 +		p.enterLevel()
-+		p.labelStat(stmts)
++		p.labelStat()
 +		p.leaveLevel()
 +	}
 +	// a label at the end of a block is out of the scope of its locals
@@ -22769,7 +23750,7 @@ regenerates the diff below; this header is edited by hand.
 +	pfs := p.fs
 +	p.openFunc(line, false)
 +	fs := p.fs
-+	parenLine := ls.t.line
++	parenLine, start := ls.t.line, ls.t.start
 +	p.checkNext('(')
 +	if needself {
 +		p.newLocalVar("self", 0)
@@ -22781,10 +23762,12 @@ regenerates the diff below; this header is edited by hand.
 -			if yyExca[xi+0] == -1 && int(yyExca[xi+1]) == yystate {
 +			switch {
 +			case p.isName():
-+				name, _ := p.strCheckName()
++				name, _, span := p.strCheckName()
 +				p.newLocalVar(name, len(parlist.Names))
 +				parlist.Names = append(parlist.Names, name)
++				parlist.NameSpans = append(parlist.NameSpans, span)
 +			case ls.t.typ == tkDots:
++				parlist.VarargSpan = p.tokenSpan()
 +				p.next()
 +				if !p.jit { // LUA_COMPAT_VARARG: a local "arg"
 +					p.newLocalVar("arg", len(parlist.Names))
@@ -22818,10 +23801,11 @@ regenerates the diff below; this header is edited by hand.
 +		fs.rReserve(p, fs.nactvar())
 +	}
 +	p.checkNext(')')
++	parlist.SetSpan(p.spanFrom(start))
 +	if p.jit {
 +		fs.emit(p, insAD(bcFUNCF, 0, 0)) // the header's place
 +	}
-+	stmts := p.chunk()
++	stmts, stmtsSpan := p.chunk()
 +	endLine := ls.t.line
 +	if !p.jit {
 +		p.checkMatch(tkEnd, tkFunction, line)
@@ -22881,9 +23865,10 @@ regenerates the diff below; this header is edited by hand.
 -				yyp--
 +		p.next()
 +	}
-+	fn := &ast.FunctionExpr{ParList: parlist, Stmts: stmts}
++	fn := &ast.FunctionExpr{ParList: parlist, Stmts: stmts, StmtsSpan: stmtsSpan}
 +	fn.SetLine(parenLine)
 +	fn.SetLastLine(endLine)
++	fn.SetSpan(p.spanFrom(start))
 +	return fn
 +}
 +
@@ -22925,6 +23910,7 @@ regenerates the diff below; this header is edited by hand.
 +	case tkString:
 +		s := &ast.StringExpr{Value: ls.t.sem}
 +		s.SetLine(ls.t.line)
++		s.SetSpan(p.tokenSpan())
 +		if p.jit {
 +			a.init(vKStr, 0)
 +			a.sval = ls.t.sem
@@ -22974,6 +23960,7 @@ regenerates the diff below; this header is edited by hand.
 +	var e ast.Expr
 +	var kind int
 +	var kv expDesc // a key, declared out of the loop so that it does not escape
++	start := ls.t.start
 +	switch {
 +	case ls.t.typ == '(':
 +		where := ls.linenumber
@@ -22982,6 +23969,10 @@ regenerates the diff below; this header is edited by hand.
 +		var k int
 +		e, k = p.expr(v)
 +		p.checkMatch(')', '(', where)
++		ps := e.Parens()
++		ps.Count++
++		ps.Span = p.spanFrom(start)
++		e.SetParens(ps)
 +		if p.jit {
 +			fs.discharge(p, v)
 +		} else if p.r51 {
@@ -23000,13 +23991,14 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		kind = kindParen
 +	case p.isName():
-+		name, line := p.strCheckName()
++		name, line, span := p.strCheckName()
 +		p.singleVar(fs, name, v, true)
 +		if p.r51 && v.k == vGlobal {
 +			v.info = fs.rStringK(name)
 +		}
 +		e = &ast.IdentExpr{Value: name}
 +		e.SetLine(line)
++		e.SetSpan(span)
 +		kind = kindVar
 +	default:
 +		ls.syntaxError("unexpected symbol")
@@ -23014,11 +24006,13 @@ regenerates the diff below; this header is edited by hand.
 +	for {
 +		switch ls.t.typ {
 +		case '.':
-+			name, line := p.field(v)
++			name, line, span := p.field(v)
 +			key := &ast.StringExpr{Value: name}
 +			key.SetLine(line)
++			key.SetSpan(span)
 +			a := &ast.AttrGetExpr{Object: e, Key: key}
 +			a.SetLine(e.Line())
++			a.SetSpan(p.spanFrom(start))
 +			e, kind = a, kindVar
 +		case '[':
 +			if p.jit {
@@ -23034,10 +24028,11 @@ regenerates the diff below; this header is edited by hand.
 +			}
 +			a := &ast.AttrGetExpr{Object: e, Key: key}
 +			a.SetLine(e.Line())
++			a.SetSpan(p.spanFrom(start))
 +			e, kind = a, kindVar
 +		case ':':
 +			p.next()
-+			method, _ := p.strCheckName()
++			method, _, methodSpan := p.strCheckName()
 +			if p.jit {
 +				fs.method(p, v, method)
 +			} else if p.r51 {
@@ -23045,7 +24040,9 @@ regenerates the diff below; this header is edited by hand.
 +			}
 +			args, line, endLine := p.funcArgs(v)
 +			c := &ast.FuncCallExpr{Method: method, Receiver: e, Args: args, ArgsLine: line, ArgsEndLine: endLine}
++			c.SetMethodSpan(methodSpan)
 +			c.SetLine(e.Line())
++			c.SetSpan(p.spanFrom(start))
 +			e, kind = c, kindCall
 +		case '(', tkString, '{':
 +			if p.jit {
@@ -23057,6 +24054,7 @@ regenerates the diff below; this header is edited by hand.
 +			args, line, endLine := p.funcArgs(v)
 +			c := &ast.FuncCallExpr{Func: e, Args: args, ArgsLine: line, ArgsEndLine: endLine}
 +			c.SetLine(e.Line())
++			c.SetSpan(p.spanFrom(start))
 +			e, kind = c, kindCall
 +		default:
 +			return e, kind
@@ -23129,17 +24127,17 @@ regenerates the diff below; this header is edited by hand.
 +	case '{':
 +		return p.constructor(v), kindOther
 +	case tkFunction:
-+		line := ls.t.line
++		line, start := ls.t.line, ls.t.start
 +		p.next()
-+		body := p.body(v, false, ls.linenumber)
-+		fn := &ast.FunctionExpr{ParList: body.ParList, Stmts: body.Stmts}
-+		fn.SetLine(line)
-+		fn.SetLastLine(body.LastLine())
++		fn := p.body(v, false, ls.linenumber)
++		fn.SetLine(line) // its last line is the body's
++		fn.SetSpan(p.spanFrom(start))
 +		return fn, kindOther
 +	default:
 +		return p.primaryExp(v)
 +	}
 +	e.SetLine(ls.t.line)
++	e.SetSpan(p.tokenSpan())
 +	p.next()
 +	return e, kindOther
 +}
@@ -23162,7 +24160,7 @@ regenerates the diff below; this header is edited by hand.
 +	ls := p.ls
 +	fs := p.fs
 +	where := ls.linenumber
-+	line, prevLine := ls.t.line, ls.prevLine
++	line, prevLine, start := ls.t.line, ls.prevLine, ls.t.start
 +	if prevLine == 0 {
 +		prevLine = line
 +	}
@@ -23179,12 +24177,13 @@ regenerates the diff below; this header is edited by hand.
 +		c.v51.init(vVoid, 0)
 +	}
 +	p.checkNext('{')
-+	fields := []*ast.Field{}
++	base := len(p.fieldStack)
 +	// declared out of the loop, so that their address passed to the
 +	// expression functions does not make them escape
 +	var key, val expDesc
 +	for ls.t.typ != '}' {
 +		var k ast.Expr
++		fieldStart := ls.t.start
 +		c.vcall = false
 +		if p.r51 {
 +			p.rCloseListField(&c, v)
@@ -23201,9 +24200,10 @@ regenerates the diff below; this header is edited by hand.
 +				fs.rExp2RK(p, &key)
 +			}
 +		case p.isName() && ls.lookahead() == '=':
-+			name, nameLine := p.strCheckName()
++			name, nameLine, nameSpan := p.strCheckName()
 +			s := &ast.StringExpr{Value: name}
 +			s.SetLine(nameLine)
++			s.SetSpan(nameSpan)
 +			k = s
 +			key.init(vKStr, 0)
 +			key.sval = name
@@ -23221,7 +24221,9 @@ regenerates the diff below; this header is edited by hand.
 +			c.vcall = true
 +		}
 +		value, _ := p.expr(&val)
-+		fields = append(fields, &ast.Field{Key: k, Value: value})
++		field := &ast.Field{Key: k, Value: value}
++		field.SetSpan(p.spanFrom(fieldStart))
++		p.fieldStack = append(p.fieldStack, field)
 +		if p.jit {
 +			p.tableItem(&c, v, &key, &val)
 +			fs.freereg = c.freg
@@ -23257,9 +24259,13 @@ regenerates the diff below; this header is edited by hand.
 +	} else if p.r51 {
 +		p.rLastListField(&c, v)
 +	}
++	fields := append([]*ast.Field{}, p.fieldStack[base:]...)
++	clear(p.fieldStack[base:])
++	p.fieldStack = p.fieldStack[:base]
 +	t := &ast.TableExpr{Fields: fields, PrevLine: prevLine}
 +	t.SetLine(line)
 +	t.SetLastLine(endLine)
++	t.SetSpan(p.spanFrom(start))
 +	return t
 +}
 +
@@ -23424,6 +24430,7 @@ regenerates the diff below; this header is edited by hand.
 +	p.enterLevel()
 +	var e ast.Expr
 +	kind := kindOther
++	start := ls.t.start
 +	switch ls.t.typ {
 +	case tkNot, '-', '#':
 +		op := ls.t.typ
@@ -23441,6 +24448,7 @@ regenerates the diff below; this header is edited by hand.
 +			e = &ast.UnaryLenOpExpr{Expr: operand}
 +			bc = bcLEN
 +		}
++		e.SetSpan(p.spanFrom(start))
 +		if p.jit {
 +			p.fs.unop(p, bc, v)
 +		} else if p.r51 {
@@ -23481,6 +24489,7 @@ regenerates the diff below; this header is edited by hand.
 +			e = &ast.RelationalOpExpr{Lhs: e, Operator: b.op, Rhs: rhs}
 +		}
 +		e.SetLine(line)
++		e.SetSpan(p.spanFrom(start))
 +		kind = kindOther
 +		op = nextop
 +	}
@@ -23492,7 +24501,11 @@ regenerates the diff below; this header is edited by hand.
 +// (explist1 / expr_list).
 +func (p *parser) exprList(v *expDesc) []ast.Expr {
 +	e, _ := p.expr(v)
-+	list := []ast.Expr{e}
++	if p.ls.t.typ != ',' {
++		return []ast.Expr{e}
++	}
++	base := len(p.exprStack)
++	p.exprStack = append(p.exprStack, e)
 +	for p.testNext(',') {
 +		if p.jit {
 +			p.fs.toNextReg(p, v)
@@ -23500,8 +24513,11 @@ regenerates the diff below; this header is edited by hand.
 +			p.fs.rExp2NextReg(p, v)
 +		}
 +		e, _ = p.expr(v)
-+		list = append(list, e)
++		p.exprStack = append(p.exprStack, e)
 +	}
++	list := append([]ast.Expr(nil), p.exprStack[base:]...)
++	clear(p.exprStack[base:])
++	p.exprStack = p.exprStack[:base]
 +	return list
 +}
 +
@@ -23514,6 +24530,16 @@ regenerates the diff below; this header is edited by hand.
 +	default:
 +		return true
 +	}
++}
++
++// isPositionField: the dump leaves out the positions of the nodes, and
++// the unexported fields (go-moonscript patch).
++func isPositionField(t reflect.Type) bool {
++	switch t {
++	case reflect.TypeOf(ast.SpanBase{}), reflect.TypeOf(ast.Span{}), reflect.TypeOf([]ast.Span{}):
++		return true
++	}
++	return false
 +}
 +
 +func dump(node interface{}, level int, s string) string {
@@ -23537,7 +24563,7 @@ regenerates the diff below; this header is edited by hand.
 +		tt := rt.Elem()
 +		indicies := []int{}
 +		for i := 0; i < tt.NumField(); i++ {
-+			if strings.Index(tt.Field(i).Name, "Base") > -1 {
++			if strings.Index(tt.Field(i).Name, "Base") > -1 || !tt.Field(i).IsExported() || isPositionField(tt.Field(i).Type) {
 +				continue
  			}
 +			indicies = append(indicies, i)
@@ -24190,6 +25216,1258 @@ regenerates the diff below; this header is edited by hand.
  }
 +
 +// }}
+--- a/parse/span_check_test.go
++++ b/parse/span_check_test.go
+@@ -0,0 +1,717 @@
++package parse
++
++// go-moonscript patch: a checker of the spans, comments and lines of a
++// parsed chunk, for the span tests and the fuzz test.
++
++import (
++	"bytes"
++	"fmt"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++)
++
++// spanChecker checks a chunk parsed from src against the tokens the lexer
++// reads from src:
++//
++//   - every element has a span from a token's start to a token's end, in
++//     its parent's span (with the parentheses), after its previous sibling;
++//   - its parentheses are Count "(" tokens before it and Count ")" after;
++//   - a leaf's text is its token (a name, a string or number whose value is
++//     the node's, a keyword), a name's span is the name, a block's span
++//     is its statements and separators, a statement starts with its
++//     keyword;
++//   - the line of each token's offset (ast.Lines) is the line the lexer
++//     gives it, and a leaf's Line is its token's;
++//   - with reparse, the text of each element parses, in a context that
++//     accepts it, to the same tree;
++//   - the comments, the header, the tokens and white space make up the
++//     whole source, and each comment's text is what the lexer read.
++type spanChecker struct {
++	tb      testing.TB
++	name    string
++	src     []byte
++	opts    Options
++	chunk   *ast.Chunk
++	tokens  []token
++	byStart map[int]int // token start -> index
++	byEnd   map[int]int // token end -> index
++	reparse bool
++	errors  int
++	checked int // elements checked
++	parsed  int // elements reparsed
++}
++
++const maxSpanErrors = 20
++
++func dialectName(d Dialect) string {
++	if d == LuaJIT {
++		return "luajit"
++	}
++	return "lua51"
++}
++
++func (c *spanChecker) errorf(format string, args ...any) {
++	c.errors++
++	if c.errors <= maxSpanErrors {
++		c.tb.Helper()
++		c.tb.Errorf("%s (%s): %s", c.name, dialectName(c.opts.Dialect), fmt.Sprintf(format, args...))
++	}
++}
++
++// checkSpans checks the chunk parsed from src with opts (see spanChecker)
++// and returns the number of elements checked and reparsed.
++func checkSpans(tb testing.TB, name string, src []byte, opts Options, chunk *ast.Chunk, reparse bool) (int, int) {
++	tb.Helper()
++	c := &spanChecker{tb: tb, name: name, src: src, opts: opts, chunk: chunk, reparse: reparse,
++		byStart: map[int]int{}, byEnd: map[int]int{}}
++	c.lex()
++	c.checkLines()
++	c.checkCover()
++	if chunk.Span() != (ast.Span{Start: 0, End: len(src)}) {
++		c.errorf("chunk span %v", chunk.Span())
++	}
++	c.checkBlock(chunk.StmtsSpan, chunk.Stmts, "chunk")
++	v := &spanVisitor{c: c}
++	ast.Walk(v, chunk)
++	return c.checked, c.parsed
++}
++
++// lex reads the tokens of the source.
++func (c *spanChecker) lex() {
++	defer func() {
++		if e := recover(); e != nil {
++			c.errorf("the lexer fails: %v", e)
++		}
++	}()
++	ls := newLexer(c.src, c.name, c.opts.Dialect, c.opts.Shebang)
++	for {
++		ls.nextToken()
++		if ls.t.typ == tkEOS {
++			return
++		}
++		c.byStart[ls.t.start] = len(c.tokens)
++		c.byEnd[ls.t.end] = len(c.tokens)
++		c.tokens = append(c.tokens, ls.t)
++	}
++}
++
++// checkLines checks the lines of the tokens' offsets.
++func (c *spanChecker) checkLines() {
++	lines := c.chunk.Lines
++	for _, t := range c.tokens {
++		if p := lines.Pos(t.start); p.Line != t.line || p.Offset != t.start ||
++			p.Column != t.start-lines.Start(p.Line)+1 {
++			c.errorf("token %q at %d: line %d, Lines.Pos %v", c.src[t.start:t.end], t.start, t.line, p)
++		}
++	}
++}
++
++func isWhite(b byte) bool { return b == ' ' || '\t' <= b && b <= '\r' }
++
++// checkCover checks that the header, the comments, the tokens and white
++// space make up the source, and the comments.
++func (c *spanChecker) checkCover() {
++	type piece struct {
++		span ast.Span
++		what string
++	}
++	var pieces []piece
++	if h := c.chunk.Header; h != (ast.Span{}) {
++		pieces = append(pieces, piece{h, "header"})
++		if h.Start != 0 {
++			c.errorf("header %v", h)
++		}
++		b := c.src[h.Start:h.End]
++		if bytes.HasPrefix(b, []byte("\xef\xbb\xbf")) && c.opts.Dialect == LuaJIT {
++			b = b[3:]
++		}
++		if len(b) > 0 && (b[0] != '#' || bytes.ContainsAny(b, "\r\n")) {
++			c.errorf("header %q", b)
++		}
++	} else if c.opts.Dialect == LuaJIT && (bytes.HasPrefix(c.src, []byte("\xef\xbb\xbf")) || bytes.HasPrefix(c.src, []byte("#"))) ||
++		c.opts.Shebang && bytes.HasPrefix(c.src, []byte("#")) {
++		c.errorf("no header")
++	}
++	if c.opts.Comments {
++		for _, cm := range c.chunk.Comments {
++			pieces = append(pieces, piece{cm.Span, "comment"})
++			c.checkComment(cm)
++		}
++	} else if c.chunk.Comments != nil {
++		c.errorf("comments not asked for")
++	}
++	tokens := c.tokens
++	at := 0
++	for _, p := range pieces {
++		for len(tokens) > 0 && tokens[0].start < p.span.Start {
++			c.checkGap(at, tokens[0].start)
++			at = tokens[0].end
++			tokens = tokens[1:]
++		}
++		c.checkGap(at, p.span.Start)
++		at = p.span.End
++	}
++	for _, t := range tokens {
++		c.checkGap(at, t.start)
++		at = t.end
++	}
++	if c.opts.Comments {
++		c.checkGap(at, len(c.src))
++	}
++}
++
++// checkGap checks that there is only white space from i to j.
++func (c *spanChecker) checkGap(i, j int) {
++	if i > j {
++		c.errorf("pieces overlap at %d-%d", j, i)
++		return
++	}
++	if !c.opts.Comments {
++		return // comments in the gaps
++	}
++	for k := i; k < j; k++ {
++		if !isWhite(c.src[k]) {
++			c.errorf("%q at %d is no token, comment or space", c.src[k:min(j, k+20)], k)
++			return
++		}
++	}
++}
++
++func (c *spanChecker) checkComment(cm ast.Comment) {
++	s := cm.Span
++	if s.Start < 0 || s.End > len(c.src) || s.End < s.Start+2 || string(c.src[s.Start:s.Start+2]) != "--" {
++		c.errorf("comment %v", s)
++		return
++	}
++	body := c.src[s.Start+2 : s.End]
++	if !cm.Long {
++		if string(body) != cm.Text || bytes.ContainsAny(body, "\r\n") {
++			c.errorf("short comment %q: %q", body, cm.Text)
++		}
++		if s.End < len(c.src) && !(c.src[s.End] == '\n' || c.src[s.End] == '\r') {
++			c.errorf("short comment %q ends before %q", body, c.src[s.End])
++		}
++		return
++	}
++	// a long comment is a long bracket, which lexes as a string
++	ls := newLexer(body, "comment", c.opts.Dialect, false)
++	func() {
++		defer func() {
++			if e := recover(); e != nil {
++				c.errorf("long comment %q: %v", body, e)
++			}
++		}()
++		ls.nextToken()
++		if ls.t.typ != tkString || ls.t.end != len(body) || ls.t.sem != cm.Text {
++			c.errorf("long comment %q: %q", body, cm.Text)
++		}
++	}()
++}
++
++// tokenText is the text from the token starting at start to the one ending
++// at end, checking they are tokens.
++func (c *spanChecker) checkSpan(s ast.Span, what string) bool {
++	if s.Start < 0 || s.End > len(c.src) || s.Start >= s.End {
++		c.errorf("%s: span %v", what, s)
++		return false
++	}
++	_, ok1 := c.byStart[s.Start]
++	_, ok2 := c.byEnd[s.End]
++	if !ok1 || !ok2 {
++		c.errorf("%s: span %v %q is not from a token to a token", what, s, c.src[s.Start:s.End])
++		return false
++	}
++	return true
++}
++
++// checkBlock checks the span of a block.
++func (c *spanChecker) checkBlock(s ast.Span, stmts []ast.Stmt, what string) {
++	if len(stmts) == 0 {
++		if s.Start != s.End || s.Start < 0 || s.Start > len(c.src) {
++			c.errorf("%s: empty block %v", what, s)
++			return
++		}
++		if _, ok := c.byStart[s.Start]; !ok && s.Start != c.eof() {
++			c.errorf("%s: empty block %v not at a token", what, s)
++		}
++		return
++	}
++	if !c.checkSpan(s, what+" block") {
++		return
++	}
++	if first := stmts[0].Span(); first.Start != s.Start {
++		c.errorf("%s: block %v starts before its first statement %v", what, s, first)
++	}
++	last := stmts[len(stmts)-1].Span()
++	if last.End != s.End {
++		i := c.byEnd[s.End]
++		if c.tokens[i].typ != ';' || c.tokens[i-1].end != last.End {
++			c.errorf("%s: block %v ends after its last statement %v", what, s, last)
++		}
++	}
++}
++
++// eof is the offset of the end of the source as the lexer sees it.
++func (c *spanChecker) eof() int { return len(c.src) }
++
++func (c *spanChecker) text(s ast.Span) string { return string(c.src[s.Start:s.End]) }
++
++// checkName checks the span of a name.
++func (c *spanChecker) checkName(s ast.Span, name, what string) {
++	if !c.checkSpan(s, what) {
++		return
++	}
++	if t := c.text(s); t != name {
++		c.errorf("%s %q spans %q", what, name, t)
++	}
++}
++
++func (c *spanChecker) checkNames(spans []ast.Span, names []string, what string) {
++	if len(spans) != len(names) {
++		c.errorf("%s: %d spans for %d names", what, len(spans), len(names))
++		return
++	}
++	for i, s := range spans {
++		c.checkName(s, names[i], what)
++	}
++}
++
++// outer is the span of n with its parentheses.
++func outer(n ast.Element) ast.Span {
++	if e, ok := n.(ast.Expr); ok {
++		return e.OuterSpan()
++	}
++	return n.Span()
++}
++
++type spanFrame struct {
++	n       ast.Element
++	lastEnd int // the end of the last child
++}
++
++type spanVisitor struct {
++	c     *spanChecker
++	stack []spanFrame
++}
++
++func (v *spanVisitor) Visit(n ast.Element) ast.Visitor {
++	if n == nil {
++		v.stack = v.stack[:len(v.stack)-1]
++		return nil
++	}
++	c := v.c
++	c.checked++
++	what := fmt.Sprintf("%T", n)
++	s := n.Span()
++	if len(v.stack) > 0 {
++		f := &v.stack[len(v.stack)-1]
++		o, ps := outer(n), f.n.Span()
++		if o.Start < ps.Start || o.End > ps.End {
++			c.errorf("%s %v (%v) is out of its parent %T %v", what, s, o, f.n, ps)
++		}
++		if o.Start < f.lastEnd {
++			c.errorf("%s %v (%v) overlaps its previous sibling, ending at %d", what, s, o, f.lastEnd)
++		}
++		f.lastEnd = o.End
++	}
++	v.stack = append(v.stack, spanFrame{n: n})
++	if _, ok := n.(*ast.Chunk); ok {
++		return v
++	}
++	if !c.checkSpan(s, what) {
++		return v
++	}
++	c.checkParens(n)
++	c.checkElement(n)
++	if c.reparse {
++		c.reparseElement(n)
++	}
++	return v
++}
++
++// checkParens checks that the parentheses of an expression are Count "("
++// tokens before it and Count ")" tokens after it.
++func (c *spanChecker) checkParens(n ast.Element) {
++	e, ok := n.(ast.Expr)
++	if !ok {
++		return
++	}
++	p, s := e.Parens(), e.Span()
++	if p.Count == 0 {
++		if e.OuterSpan() != s {
++			c.errorf("%T: outer span %v without parentheses", n, e.OuterSpan())
++		}
++		return
++	}
++	if !c.checkSpan(p.Span, "parentheses") {
++		return
++	}
++	i, j := c.byStart[p.Span.Start], c.byStart[s.Start]
++	k, l := c.byEnd[s.End], c.byEnd[p.Span.End]
++	if j-i != p.Count || l-k != p.Count {
++		c.errorf("%T %q: %d parentheses in %q", n, c.text(s), p.Count, c.text(p.Span))
++		return
++	}
++	for _, t := range c.tokens[i:j] {
++		if t.typ != '(' {
++			c.errorf("%T %q: parentheses %q", n, c.text(s), c.text(p.Span))
++		}
++	}
++	for _, t := range c.tokens[k+1 : l+1] {
++		if t.typ != ')' {
++			c.errorf("%T %q: parentheses %q", n, c.text(s), c.text(p.Span))
++		}
++	}
++}
++
++// relex reads the text of a span as one token.
++func (c *spanChecker) relex(s ast.Span) (t token, ok bool) {
++	defer func() {
++		if recover() != nil {
++			ok = false
++		}
++	}()
++	ls := newLexer(c.src[s.Start:s.End], "relex", c.opts.Dialect, false)
++	ls.nextToken()
++	return ls.t, ls.t.end == s.End-s.Start
++}
++
++var stmtKeywords = map[string]string{
++	"*ast.LocalAssignStmt": "local", "*ast.DoBlockStmt": "do", "*ast.WhileStmt": "while",
++	"*ast.RepeatStmt": "repeat", "*ast.NumberForStmt": "for", "*ast.GenericForStmt": "for",
++	"*ast.FuncDefStmt": "function", "*ast.ReturnStmt": "return", "*ast.BreakStmt": "break",
++	"*ast.GotoStmt": "goto", "*ast.LabelStmt": "::",
++}
++
++func (c *spanChecker) checkElement(n ast.Element) {
++	s := n.Span()
++	text := c.text(s)
++	what := fmt.Sprintf("%T", n)
++	first := c.tokens[c.byStart[s.Start]]
++	if kw, ok := stmtKeywords[what]; ok && !strings.HasPrefix(text, kw) {
++		c.errorf("%s starts with %q", what, text)
++	}
++	leaf := func(value string) {
++		if text != value {
++			c.errorf("%s %q spans %q", what, value, text)
++		}
++	}
++	if ph, ok := n.(ast.PositionHolder); ok {
++		switch n.(type) {
++		case *ast.IdentExpr, *ast.NumberExpr, *ast.NilExpr, *ast.TrueExpr, *ast.FalseExpr,
++			*ast.Comma3Expr, *ast.TableExpr, *ast.CdataNumberExpr, *ast.StringExpr:
++			if n.(ast.Expr).Parens().Count == 0 && ph.Line() != first.line {
++				c.errorf("%s %q: line %d, its token's %d", what, text, ph.Line(), first.line)
++			}
++		}
++	}
++	switch n := n.(type) {
++	case *ast.IdentExpr:
++		leaf(n.Value)
++	case *ast.NilExpr:
++		leaf("nil")
++	case *ast.TrueExpr:
++		leaf("true")
++	case *ast.FalseExpr:
++		leaf("false")
++	case *ast.Comma3Expr:
++		leaf("...")
++	case *ast.CdataNumberExpr:
++		leaf(n.Value)
++	case *ast.NumberExpr:
++		if t, ok := c.relex(s); !ok || t.typ != tkNumber || t.sem != n.Value {
++			c.errorf("number %q spans %q", n.Value, text)
++		}
++	case *ast.StringExpr:
++		if text[0] == '"' || text[0] == '\'' || text[0] == '[' {
++			if t, ok := c.relex(s); !ok || t.typ != tkString || t.sem != n.Value {
++				c.errorf("string %q spans %q", n.Value, text)
++			}
++		} else {
++			leaf(n.Value)
++		}
++	case *ast.FuncCallExpr:
++		if n.Receiver != nil {
++			c.checkName(n.MethodSpan(), n.Method, "method")
++		} else if n.MethodSpan() != (ast.Span{}) {
++			c.errorf("call %q has a method span", text)
++		}
++	case *ast.FunctionExpr:
++		if text[0] != '(' && !strings.HasPrefix(text, "function") || !strings.HasSuffix(text, "end") {
++			c.errorf("function %q", text)
++		}
++		c.checkBlock(n.StmtsSpan, n.Stmts, "function")
++	case *ast.ParList:
++		c.checkNames(n.NameSpans, n.Names, "parameter")
++		if text[0] != '(' || text[len(text)-1] != ')' {
++			c.errorf("parameters %q", text)
++		}
++		if n.HasVargs {
++			c.checkName(n.VarargSpan, "...", "vararg")
++		} else if n.VarargSpan != (ast.Span{}) {
++			c.errorf("parameters %q: vararg span", text)
++		}
++	case *ast.FuncName:
++		if n.Receiver != nil {
++			c.checkName(n.MethodSpan, n.Method, "method")
++		}
++	case *ast.LocalAssignStmt:
++		c.checkNames(n.NameSpans, n.Names, "local")
++	case *ast.NumberForStmt:
++		c.checkName(n.NameSpan, n.Name, "for variable")
++		c.checkBlock(n.StmtsSpan, n.Stmts, "for")
++	case *ast.GenericForStmt:
++		c.checkNames(n.NameSpans, n.Names, "for variable")
++		c.checkBlock(n.StmtsSpan, n.Stmts, "for")
++	case *ast.LabelStmt:
++		c.checkName(n.NameSpan, n.Name, "label")
++	case *ast.GotoStmt:
++		c.checkName(n.LabelSpan, n.Label, "goto label")
++	case *ast.DoBlockStmt:
++		c.checkBlock(n.StmtsSpan, n.Stmts, "do")
++	case *ast.WhileStmt:
++		c.checkBlock(n.StmtsSpan, n.Stmts, "while")
++	case *ast.RepeatStmt:
++		c.checkBlock(n.StmtsSpan, n.Stmts, "repeat")
++	case *ast.IfStmt:
++		if !strings.HasPrefix(text, "if") && !strings.HasPrefix(text, "elseif") {
++			c.errorf("if %q", text)
++		}
++		c.checkBlock(n.ThenSpan, n.Then, "then")
++		if elseif, ok := c.elseif(n); ok {
++			if n.ElseSpan != elseif.Span() {
++				c.errorf("if %q: else span %v, elseif %v", text, n.ElseSpan, elseif.Span())
++			}
++		} else if len(n.Else) > 0 || n.ElseSpan != (ast.Span{}) { // the zero Span without an else
++			c.checkBlock(n.ElseSpan, n.Else, "else")
++		}
++	}
++}
++
++// elseif returns the IfStmt of an "elseif" after n.
++func (c *spanChecker) elseif(n *ast.IfStmt) (*ast.IfStmt, bool) {
++	if len(n.Else) != 1 {
++		return nil, false
++	}
++	st, ok := n.Else[0].(*ast.IfStmt)
++	return st, ok && strings.HasPrefix(c.text(st.Span()), "elseif")
++}
++
++/* reparsing */
++
++// fingerprint describes a tree without its lines and spans; the root's
++// parentheses (outside its span) are left out.
++func fingerprint(n ast.Element) string {
++	var b strings.Builder
++	root := true
++	ast.Inspect(n, func(n ast.Element) bool {
++		fmt.Fprintf(&b, "%T", n)
++		if e, ok := n.(ast.Expr); ok && !root {
++			fmt.Fprintf(&b, "(%d)", e.Parens().Count)
++		}
++		switch n := n.(type) {
++		case *ast.IdentExpr:
++			fmt.Fprintf(&b, "%q", n.Value)
++		case *ast.StringExpr:
++			fmt.Fprintf(&b, "%q", n.Value)
++		case *ast.NumberExpr:
++			fmt.Fprintf(&b, "%q", n.Value)
++		case *ast.CdataNumberExpr:
++			fmt.Fprintf(&b, "%q", n.Value)
++		case *ast.Comma3Expr:
++			if !root {
++				fmt.Fprintf(&b, "%v", n.AdjustRet)
++			}
++		case *ast.FuncCallExpr:
++			fmt.Fprintf(&b, "%q%d%v", n.Method, len(n.Args), n.Receiver != nil)
++			if !root {
++				fmt.Fprintf(&b, "%v", n.AdjustRet)
++			}
++		case *ast.LogicalOpExpr:
++			b.WriteString(n.Operator)
++		case *ast.RelationalOpExpr:
++			b.WriteString(n.Operator)
++		case *ast.ArithmeticOpExpr:
++			b.WriteString(n.Operator)
++		case *ast.TableExpr:
++			fmt.Fprintf(&b, "%d", len(n.Fields))
++		case *ast.Field:
++			fmt.Fprintf(&b, "%v", n.Key != nil)
++		case *ast.FunctionExpr:
++			fmt.Fprintf(&b, "%d", len(n.Stmts))
++		case *ast.ParList:
++			fmt.Fprintf(&b, "%q%v%v", n.Names, n.HasVargs, n.NoArg)
++		case *ast.FuncName:
++			fmt.Fprintf(&b, "%q%v", n.Method, n.Receiver != nil)
++		case *ast.AssignStmt:
++			fmt.Fprintf(&b, "%d,%d", len(n.Lhs), len(n.Rhs))
++		case *ast.LocalAssignStmt:
++			fmt.Fprintf(&b, "%q%d%v", n.Names, len(n.Exprs), n.IsFunction)
++		case *ast.IfStmt:
++			fmt.Fprintf(&b, "%d,%d", len(n.Then), len(n.Else))
++		case *ast.NumberForStmt:
++			fmt.Fprintf(&b, "%q%v%d", n.Name, n.Step != nil, len(n.Stmts))
++		case *ast.GenericForStmt:
++			fmt.Fprintf(&b, "%q%d,%d", n.Names, len(n.Exprs), len(n.Stmts))
++		case *ast.DoBlockStmt:
++			fmt.Fprintf(&b, "%d", len(n.Stmts))
++		case *ast.WhileStmt:
++			fmt.Fprintf(&b, "%d", len(n.Stmts))
++		case *ast.RepeatStmt:
++			fmt.Fprintf(&b, "%d", len(n.Stmts))
++		case *ast.ReturnStmt:
++			fmt.Fprintf(&b, "%d", len(n.Exprs))
++		case *ast.LabelStmt:
++			fmt.Fprintf(&b, "%q", n.Name)
++		case *ast.GotoStmt:
++			fmt.Fprintf(&b, "%q", n.Label)
++		}
++		b.WriteByte(' ')
++		root = false
++		return true
++	})
++	return b.String()
++}
++
++// maxReparse is the longest text reparsed, which keeps the check linear.
++const maxReparse = 400
++
++// reparseElement parses the text of n in a context that accepts it and
++// checks that it gives the same tree.
++func (c *spanChecker) reparseElement(n ast.Element) {
++	text := c.text(n.Span())
++	if len(text) > maxReparse {
++		return
++	}
++	var src string
++	var pick func(*ast.Chunk) ast.Element
++	// fn is the function expression of "return function(...) <body> end"
++	fn := func(ch *ast.Chunk) *ast.FunctionExpr {
++		if len(ch.Stmts) != 1 {
++			return nil
++		}
++		r, ok := ch.Stmts[0].(*ast.ReturnStmt)
++		if !ok || len(r.Exprs) != 1 {
++			return nil
++		}
++		f, _ := r.Exprs[0].(*ast.FunctionExpr)
++		return f
++	}
++	switch n.(type) {
++	case *ast.IfStmt:
++		if strings.HasPrefix(text, "elseif") {
++			return // in its if
++		}
++		src = "return function(...) while true do\n" + text + "\nend end"
++	case *ast.LabelStmt, *ast.GotoStmt:
++		return // their labels are out of the text
++	case *ast.StringExpr:
++		if text[0] != '"' && text[0] != '\'' && text[0] != '[' {
++			return // a name
++		}
++		src = "return function(...) return " + text + "\nend"
++		pick = func(ch *ast.Chunk) ast.Element {
++			if f := fn(ch); f != nil && len(f.Stmts) == 1 {
++				if r, ok := f.Stmts[0].(*ast.ReturnStmt); ok && len(r.Exprs) == 1 {
++					return r.Exprs[0]
++				}
++			}
++			return nil
++		}
++	case ast.Stmt:
++		src = "return function(...) while true do\n" + text + "\nend end"
++		pick = func(ch *ast.Chunk) ast.Element {
++			if f := fn(ch); f != nil && len(f.Stmts) == 1 {
++				if w, ok := f.Stmts[0].(*ast.WhileStmt); ok && len(w.Stmts) == 1 {
++					return w.Stmts[0]
++				}
++			}
++			return nil
++		}
++	case *ast.FunctionExpr:
++		if text[0] == '(' {
++			text = "function" + text
++		}
++		src = "return " + text
++		pick = func(ch *ast.Chunk) ast.Element { return fn(ch) }
++	case ast.Expr:
++		src = "return function(...) return " + text + "\nend"
++		pick = func(ch *ast.Chunk) ast.Element {
++			if f := fn(ch); f != nil && len(f.Stmts) == 1 {
++				if r, ok := f.Stmts[0].(*ast.ReturnStmt); ok && len(r.Exprs) == 1 {
++					return r.Exprs[0]
++				}
++			}
++			return nil
++		}
++	case *ast.Field:
++		src = "return {" + text + "}"
++		pick = func(ch *ast.Chunk) ast.Element {
++			if r, ok := ch.Stmts[0].(*ast.ReturnStmt); ok && len(r.Exprs) == 1 {
++				if t, ok := r.Exprs[0].(*ast.TableExpr); ok && len(t.Fields) == 1 {
++					return t.Fields[0]
++				}
++			}
++			return nil
++		}
++	case *ast.ParList:
++		src = "return function" + text + " end"
++		pick = func(ch *ast.Chunk) ast.Element {
++			if f := fn(ch); f != nil {
++				return f.ParList
++			}
++			return nil
++		}
++	case *ast.FuncName:
++		src = "function " + text + "() end"
++		pick = func(ch *ast.Chunk) ast.Element {
++			if d, ok := ch.Stmts[0].(*ast.FuncDefStmt); ok {
++				return d.Name
++			}
++			return nil
++		}
++	default:
++		return
++	}
++	if pick == nil { // an if: the first statement of the loop
++		pick = func(ch *ast.Chunk) ast.Element {
++			if f := fn(ch); f != nil && len(f.Stmts) == 1 {
++				if w, ok := f.Stmts[0].(*ast.WhileStmt); ok && len(w.Stmts) == 1 {
++					return w.Stmts[0]
++				}
++			}
++			return nil
++		}
++	}
++	ch, err := ParseChunk([]byte(src), "reparse", Options{Dialect: c.opts.Dialect})
++	if err != nil {
++		if hasGotoOrLabel(n) {
++			return // a goto out of the text
++		}
++		c.errorf("%T %q does not parse alone: %v", n, text, err)
++		return
++	}
++	got := pick(ch)
++	if got == nil {
++		c.errorf("%T %q parses alone to %s", n, text, fingerprint(ch))
++		return
++	}
++	c.parsed++
++	if a, b := fingerprint(n), fingerprint(got); a != b {
++		c.errorf("%T %q parses alone to another tree:\n%s\n%s", n, text, a, b)
++	}
++}
++
++func hasGotoOrLabel(n ast.Element) bool {
++	found := false
++	ast.Inspect(n, func(n ast.Element) bool {
++		switch n.(type) {
++		case *ast.GotoStmt, *ast.LabelStmt:
++			found = true
++		}
++		return !found
++	})
++	return found
++}
+--- a/parse/span_test.go
++++ b/parse/span_test.go
+@@ -0,0 +1,529 @@
++package parse
++
++// go-moonscript patch: tests of the spans, positions, parentheses and
++// comments of the tree (ast/doc.go), and of the walker.
++
++import (
++	"archive/tar"
++	"bytes"
++	"compress/gzip"
++	"errors"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++)
++
++var bothDialects = []Dialect{Lua51, LuaJIT}
++
++// describe lists the elements of a chunk in source order as
++// "<type> <start>-<end> <text>", "(<count>)" after a parenthesized
++// expression's.
++func describe(src string, c *ast.Chunk) []string {
++	var out []string
++	ast.Inspect(c, func(n ast.Element) bool {
++		if _, ok := n.(*ast.Chunk); ok {
++			return true
++		}
++		s, e := c.Positions(n)
++		d := fmt.Sprintf("%s %v-%v %s", strings.TrimPrefix(fmt.Sprintf("%T", n), "*ast."), s, e,
++			src[n.Span().Start:n.Span().End])
++		if x, ok := n.(ast.Expr); ok && x.Parens().Count > 0 {
++			ps, pe := c.Lines.Positions(x.Parens().Span)
++			d += fmt.Sprintf(" (%d %v-%v)", x.Parens().Count, ps, pe)
++		}
++		out = append(out, d)
++		return true
++	})
++	return out
++}
++
++func mustChunk(t *testing.T, src string, opts Options) *ast.Chunk {
++	t.Helper()
++	c, err := ParseChunk([]byte(src), "test", opts)
++	if err != nil {
++		t.Fatalf("%q: %v", src, err)
++	}
++	checkSpans(t, "test", []byte(src), opts, c, true)
++	return c
++}
++
++// TestSpanPositions checks the positions of the elements of chunks with
++// the line breaks the lexer accepts, tabs, multi-byte identifiers, tokens
++// over several lines and headers.
++func TestSpanPositions(t *testing.T) {
++	tests := []struct {
++		name    string
++		dialect Dialect
++		shebang bool
++		src     string
++		want    []string
++		header  string
++	}{
++		{"crlf", Lua51, false, "a = 1\r\nb = 2\r\n", []string{
++			"AssignStmt 1:1-1:6 a = 1", "IdentExpr 1:1-1:2 a", "NumberExpr 1:5-1:6 1",
++			"AssignStmt 2:1-2:6 b = 2", "IdentExpr 2:1-2:2 b", "NumberExpr 2:5-2:6 2"}, ""},
++		{"cr lfcr", Lua51, false, "a = 1\rb = 2\n\rc = 3\n\nd = 4\r\r e = 5", []string{
++			"AssignStmt 1:1-1:6 a = 1", "IdentExpr 1:1-1:2 a", "NumberExpr 1:5-1:6 1",
++			"AssignStmt 2:1-2:6 b = 2", "IdentExpr 2:1-2:2 b", "NumberExpr 2:5-2:6 2",
++			"AssignStmt 3:1-3:6 c = 3", "IdentExpr 3:1-3:2 c", "NumberExpr 3:5-3:6 3",
++			"AssignStmt 5:1-5:6 d = 4", "IdentExpr 5:1-5:2 d", "NumberExpr 5:5-5:6 4",
++			"AssignStmt 7:2-7:7 e = 5", "IdentExpr 7:2-7:3 e", "NumberExpr 7:6-7:7 5"}, ""},
++		{"tabs", Lua51, false, "\t\tx\t=\t1", []string{
++			"AssignStmt 1:3-1:8 x\t=\t1", "IdentExpr 1:3-1:4 x", "NumberExpr 1:7-1:8 1"}, ""},
++		{"long string", Lua51, false, "x = [[\nab\r\ncd]] y = 1", []string{
++			"AssignStmt 1:1-3:5 x = [[\nab\r\ncd]]", "IdentExpr 1:1-1:2 x", "StringExpr 1:5-3:5 [[\nab\r\ncd]]",
++			"AssignStmt 3:6-3:11 y = 1", "IdentExpr 3:6-3:7 y", "NumberExpr 3:10-3:11 1"}, ""},
++		{"long comment", LuaJIT, false, "--[==[\r\n x \n]==] z = 1", []string{
++			"AssignStmt 3:6-3:11 z = 1", "IdentExpr 3:6-3:7 z", "NumberExpr 3:10-3:11 1"}, ""},
++		{"escaped line break", Lua51, false, "s = 'a\\\r\nb' t = 1", []string{
++			"AssignStmt 1:1-2:3 s = 'a\\\r\nb'", "IdentExpr 1:1-1:2 s", "StringExpr 1:5-2:3 'a\\\r\nb'",
++			"AssignStmt 2:4-2:9 t = 1", "IdentExpr 2:4-2:5 t", "NumberExpr 2:8-2:9 1"}, ""},
++		{"\\z", LuaJIT, false, "s = 'a\\z\n \t b' t = 1", []string{
++			"AssignStmt 1:1-2:6 s = 'a\\z\n \t b'", "IdentExpr 1:1-1:2 s", "StringExpr 1:5-2:6 'a\\z\n \t b'",
++			"AssignStmt 2:7-2:12 t = 1", "IdentExpr 2:7-2:8 t", "NumberExpr 2:11-2:12 1"}, ""},
++		{"utf-8 names", LuaJIT, false, "\tлок = 'ü' .. ключ", []string{
++			"AssignStmt 1:2-1:27 лок = 'ü' .. ключ", "IdentExpr 1:2-1:8 лок",
++			"StringConcatOpExpr 1:11-1:27 'ü' .. ключ", "StringExpr 1:11-1:15 'ü'", "IdentExpr 1:19-1:27 ключ"}, ""},
++		{"shebang", LuaJIT, false, "#!/usr/bin/lua\nx = 1", []string{
++			"AssignStmt 2:1-2:6 x = 1", "IdentExpr 2:1-2:2 x", "NumberExpr 2:5-2:6 1"}, "#!/usr/bin/lua"},
++		{"bom shebang", LuaJIT, false, "\xef\xbb\xbf#!lua\r\nx = 1", []string{
++			"AssignStmt 2:1-2:6 x = 1", "IdentExpr 2:1-2:2 x", "NumberExpr 2:5-2:6 1"}, "\xef\xbb\xbf#!lua"},
++		{"bom", LuaJIT, false, "\xef\xbb\xbfx = 1", []string{
++			"AssignStmt 1:4-1:9 x = 1", "IdentExpr 1:4-1:5 x", "NumberExpr 1:8-1:9 1"}, "\xef\xbb\xbf"},
++		{"shebang only", LuaJIT, false, "# x", nil, "# x"},
++		{"lua51 shebang", Lua51, true, "#!/x\r\nx = 1", []string{
++			"AssignStmt 2:1-2:6 x = 1", "IdentExpr 2:1-2:2 x", "NumberExpr 2:5-2:6 1"}, "#!/x"},
++		{"lua51 no shebang", Lua51, true, "x = 1", []string{
++			"AssignStmt 1:1-1:6 x = 1", "IdentExpr 1:1-1:2 x", "NumberExpr 1:5-1:6 1"}, ""},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			c := mustChunk(t, tt.src, Options{Dialect: tt.dialect, Shebang: tt.shebang, Comments: true})
++			if got := describe(tt.src, c); strings.Join(got, "\n") != strings.Join(tt.want, "\n") {
++				t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tt.want, "\n"))
++			}
++			if h := tt.src[c.Header.Start:c.Header.End]; h != tt.header {
++				t.Errorf("header %q, want %q", h, tt.header)
++			}
++		})
++	}
++	if _, err := ParseChunk([]byte("#!x\nx = 1"), "test", Options{Dialect: Lua51}); err == nil {
++		t.Error("a # line parses under Lua51 without Shebang")
++	}
++}
++
++// TestSpanNodes checks the spans of the elements of every kind.
++func TestSpanNodes(t *testing.T) {
++	src := `local a, b = (f()), {x = 1, [2] = 'y'; 3}
++function a.b:c(d, ...) return ((d)), (...) end
++if a then elseif b then x = 1 else y = 2 end
++for i = 1, 2 do end for k, v in pairs(t) do local function g() end end
++while (a).b do t:m"s" break end repeat until -x * #y
++do ::l:: goto l end return not a`
++	want := []string{
++		"LocalAssignStmt 1:1-1:42 local a, b = (f()), {x = 1, [2] = 'y'; 3}",
++		"FuncCallExpr 1:15-1:18 f() (1 1:14-1:19)",
++		"IdentExpr 1:15-1:16 f",
++		"TableExpr 1:21-1:42 {x = 1, [2] = 'y'; 3}",
++		"Field 1:22-1:27 x = 1", "StringExpr 1:22-1:23 x", "NumberExpr 1:26-1:27 1",
++		"Field 1:29-1:38 [2] = 'y'", "NumberExpr 1:30-1:31 2", "StringExpr 1:35-1:38 'y'",
++		"Field 1:40-1:41 3", "NumberExpr 1:40-1:41 3",
++		"FuncDefStmt 2:1-2:47 function a.b:c(d, ...) return ((d)), (...) end",
++		"FuncName 2:10-2:15 a.b:c", "AttrGetExpr 2:10-2:13 a.b", "IdentExpr 2:10-2:11 a", "StringExpr 2:12-2:13 b",
++		"FunctionExpr 2:15-2:47 (d, ...) return ((d)), (...) end",
++		"ParList 2:15-2:23 (d, ...)",
++		"ReturnStmt 2:24-2:43 return ((d)), (...)",
++		"IdentExpr 2:33-2:34 d (2 2:31-2:36)",
++		"Comma3Expr 2:39-2:42 ... (1 2:38-2:43)",
++		"IfStmt 3:1-3:45 if a then elseif b then x = 1 else y = 2 end",
++		"IdentExpr 3:4-3:5 a",
++		"IfStmt 3:11-3:41 elseif b then x = 1 else y = 2",
++		"IdentExpr 3:18-3:19 b",
++		"AssignStmt 3:25-3:30 x = 1", "IdentExpr 3:25-3:26 x", "NumberExpr 3:29-3:30 1",
++		"AssignStmt 3:36-3:41 y = 2", "IdentExpr 3:36-3:37 y", "NumberExpr 3:40-3:41 2",
++		"NumberForStmt 4:1-4:20 for i = 1, 2 do end", "NumberExpr 4:9-4:10 1", "NumberExpr 4:12-4:13 2",
++		"GenericForStmt 4:21-4:71 for k, v in pairs(t) do local function g() end end",
++		"FuncCallExpr 4:33-4:41 pairs(t)", "IdentExpr 4:33-4:38 pairs", "IdentExpr 4:39-4:40 t",
++		"LocalAssignStmt 4:45-4:67 local function g() end",
++		"FunctionExpr 4:61-4:67 () end", "ParList 4:61-4:63 ()",
++		"WhileStmt 5:1-5:32 while (a).b do t:m\"s\" break end",
++		"AttrGetExpr 5:7-5:12 (a).b", "IdentExpr 5:8-5:9 a (1 5:7-5:10)", "StringExpr 5:11-5:12 b",
++		"FuncCallStmt 5:16-5:22 t:m\"s\"", "FuncCallExpr 5:16-5:22 t:m\"s\"", "IdentExpr 5:16-5:17 t", "StringExpr 5:19-5:22 \"s\"",
++		"BreakStmt 5:23-5:28 break",
++		"RepeatStmt 5:33-5:53 repeat until -x * #y",
++		"ArithmeticOpExpr 5:46-5:53 -x * #y", "UnaryMinusOpExpr 5:46-5:48 -x", "IdentExpr 5:47-5:48 x",
++		"UnaryLenOpExpr 5:51-5:53 #y", "IdentExpr 5:52-5:53 y",
++		"DoBlockStmt 6:1-6:20 do ::l:: goto l end",
++		"LabelStmt 6:4-6:9 ::l::", "GotoStmt 6:10-6:16 goto l",
++		"ReturnStmt 6:21-6:33 return not a", "UnaryNotOpExpr 6:28-6:33 not a", "IdentExpr 6:32-6:33 a",
++	}
++	c := mustChunk(t, src, Options{Dialect: LuaJIT})
++	if got := describe(src, c); strings.Join(got, "\n") != strings.Join(want, "\n") {
++		t.Errorf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
++	}
++	text := func(s ast.Span) string { return src[s.Start:s.End] }
++	st := c.Stmts
++	local := st[0].(*ast.LocalAssignStmt)
++	if text(local.NameSpans[0]) != "a" || text(local.NameSpans[1]) != "b" {
++		t.Errorf("local names %v", local.NameSpans)
++	}
++	def := st[1].(*ast.FuncDefStmt)
++	if text(def.Name.MethodSpan) != "c" || text(def.Func.ParList.NameSpans[0]) != "d" ||
++		text(def.Func.ParList.VarargSpan) != "..." || text(def.Func.StmtsSpan) != "return ((d)), (...)" {
++		t.Errorf("function %v %v %v", def.Name.MethodSpan, def.Func.ParList, def.Func.StmtsSpan)
++	}
++	if call := local.Exprs[0].(*ast.FuncCallExpr); !call.AdjustRet {
++		t.Error("(f()) without AdjustRet")
++	}
++	ret := def.Func.Stmts[0].(*ast.ReturnStmt)
++	if v := ret.Exprs[1].(*ast.Comma3Expr); !v.AdjustRet {
++		t.Error("(...) without AdjustRet")
++	}
++	ifs := st[2].(*ast.IfStmt)
++	elseif := ifs.Else[0].(*ast.IfStmt)
++	if text(ifs.ThenSpan) != "" || ifs.ThenSpan.Start != strings.Index(src, "elseif") ||
++		ifs.ElseSpan != elseif.Span() || text(elseif.ThenSpan) != "x = 1" || text(elseif.ElseSpan) != "y = 2" {
++		t.Errorf("if %v %v %v %v", ifs.ThenSpan, ifs.ElseSpan, elseif.ThenSpan, elseif.ElseSpan)
++	}
++	nfor := st[3].(*ast.NumberForStmt)
++	gfor := st[4].(*ast.GenericForStmt)
++	if text(nfor.NameSpan) != "i" || nfor.StmtsSpan.Start != strings.Index(src, "end for") ||
++		text(gfor.NameSpans[1]) != "v" || text(gfor.StmtsSpan) != "local function g() end" {
++		t.Errorf("for %v %v %v %v", nfor.NameSpan, nfor.StmtsSpan, gfor.NameSpans, gfor.StmtsSpan)
++	}
++	lf := gfor.Stmts[0].(*ast.LocalAssignStmt)
++	if text(lf.NameSpans[0]) != "g" || !lf.IsFunction {
++		t.Errorf("local function %v", lf.NameSpans)
++	}
++	w := st[5].(*ast.WhileStmt)
++	if m := w.Stmts[0].(*ast.FuncCallStmt).Expr.(*ast.FuncCallExpr); text(m.MethodSpan()) != "m" ||
++		text(w.StmtsSpan) != "t:m\"s\" break" {
++		t.Errorf("while %v %v", m.MethodSpan(), w.StmtsSpan)
++	}
++	if r := st[6].(*ast.RepeatStmt); r.StmtsSpan.Start != r.StmtsSpan.End || src[r.StmtsSpan.Start:][:5] != "until" {
++		t.Errorf("repeat %v", r.StmtsSpan)
++	}
++	do := st[7].(*ast.DoBlockStmt)
++	if l, g := do.Stmts[0].(*ast.LabelStmt), do.Stmts[1].(*ast.GotoStmt); text(l.NameSpan) != "l" ||
++		text(g.LabelSpan) != "l" || text(do.StmtsSpan) != "::l:: goto l" {
++		t.Errorf("labels %v %v %v", l.NameSpan, g.LabelSpan, do.StmtsSpan)
++	}
++	if text(c.StmtsSpan) != src {
++		t.Errorf("chunk block %v", c.StmtsSpan)
++	}
++	// the lines are those of the parser's tree: a parenthesized expression is
++	// on the line of its "(", a unary operation on its operand's
++	c = mustChunk(t, "x = (\na)\ny = -\nb", Options{Dialect: Lua51})
++	a := c.Stmts[0].(*ast.AssignStmt).Rhs[0]
++	neg := c.Stmts[1].(*ast.AssignStmt).Rhs[0]
++	if a.Line() != 1 || c.Pos(a.Span().Start).Line != 2 || neg.Line() != 4 || c.Pos(neg.Span().Start).Line != 3 {
++		t.Errorf("lines %d %v %d %v", a.Line(), c.Pos(a.Span().Start), neg.Line(), c.Pos(neg.Span().Start))
++	}
++}
++
++// TestSpanComments checks the comments of a chunk.
++func TestSpanComments(t *testing.T) {
++	src := "-- a\n--[[ b\r\nc ]] --[==[]==]\n---x\n--[=x\n--[[\n\rd]]return 1 -- end"
++	want := []ast.Comment{
++		{Span: ast.Span{Start: 0, End: 4}, Text: " a"},
++		{Span: ast.Span{Start: 5, End: 17}, Text: " b\nc ", Long: true},
++		{Span: ast.Span{Start: 18, End: 28}, Text: "", Long: true},
++		{Span: ast.Span{Start: 29, End: 33}, Text: "-x"},
++		{Span: ast.Span{Start: 34, End: 39}, Text: "[=x"},
++		{Span: ast.Span{Start: 40, End: 49}, Text: "d", Long: true},
++		{Span: ast.Span{Start: 58, End: 64}, Text: " end"},
++	}
++	for _, d := range bothDialects {
++		c := mustChunk(t, src, Options{Dialect: d, Comments: true})
++		if fmt.Sprint(c.Comments) != fmt.Sprint(want) {
++			t.Errorf("%v: got %v, want %v", d, c.Comments, want)
++		}
++		if p := c.Pos(c.Comments[5].Span.Start); p != (ast.Pos{Offset: 40, Line: 6, Column: 1}) {
++			t.Errorf("%v: comment at %v", d, p)
++		}
++		c = mustChunk(t, src, Options{Dialect: d})
++		if c.Comments != nil {
++			t.Errorf("%v: comments %v not asked for", d, c.Comments)
++		}
++	}
++}
++
++// TestSpanTree: ParseChunk's tree is ParseBytes's, which has the spans.
++func TestSpanTree(t *testing.T) {
++	src := []byte("local t = {f(), (g())}\nreturn t[1] .. 'x', ...")
++	for _, d := range bothDialects {
++		stmts, err := ParseBytes(src, "test", d)
++		if err != nil {
++			t.Fatal(err)
++		}
++		c := mustChunk(t, string(src), Options{Dialect: d, Comments: true})
++		if Dump(stmts) != Dump(c.Stmts) || fingerprint(&ast.Chunk{Stmts: stmts}) != fingerprint(c) {
++			t.Errorf("%v: the trees differ", d)
++		}
++		if a, b := describe(string(src), &ast.Chunk{Stmts: stmts, Lines: ast.NewLines(src)}), describe(string(src), c); strings.Join(a, "\n") != strings.Join(b, "\n") {
++			t.Errorf("%v: the spans differ:\n%s\n%s", d, a, b)
++		}
++	}
++}
++
++// TestLines checks Lines.
++func TestLines(t *testing.T) {
++	l := ast.NewLines([]byte("ab\r\n\n\rc\rd"))
++	if l.Count() != 4 || l.Start(1) != 0 || l.Start(2) != 4 || l.Start(3) != 6 || l.Start(4) != 8 || l.Start(5) != -1 || l.Start(0) != -1 {
++		t.Errorf("lines %d %d %d %d %d", l.Count(), l.Start(1), l.Start(2), l.Start(3), l.Start(4))
++	}
++	for _, tt := range []struct {
++		off  int
++		want ast.Pos
++	}{
++		{-1, ast.Pos{Offset: 0, Line: 1, Column: 1}}, {2, ast.Pos{Offset: 2, Line: 1, Column: 3}},
++		{3, ast.Pos{Offset: 3, Line: 1, Column: 4}}, {4, ast.Pos{Offset: 4, Line: 2, Column: 1}},
++		{5, ast.Pos{Offset: 5, Line: 2, Column: 2}}, {6, ast.Pos{Offset: 6, Line: 3, Column: 1}},
++		{9, ast.Pos{Offset: 9, Line: 4, Column: 2}}, {99, ast.Pos{Offset: 9, Line: 4, Column: 2}},
++	} {
++		if p := l.Pos(tt.off); p != tt.want {
++			t.Errorf("Pos(%d) = %+v, want %+v", tt.off, p, tt.want)
++		}
++	}
++	if s, e := l.Positions(ast.Span{}); s.IsValid() || e.IsValid() || s.String() != "-" {
++		t.Errorf("zero span at %v %v", s, e)
++	}
++	if l := ast.NewLines(nil); l.Count() != 1 || l.Pos(0) != (ast.Pos{Line: 1, Column: 1}) {
++		t.Errorf("empty source: %d %v", l.Count(), l.Pos(0))
++	}
++}
++
++// TestSetSpan checks the spans that are no spans and those past 4 GiB.
++func TestSetSpan(t *testing.T) {
++	var n ast.IdentExpr
++	for _, s := range []ast.Span{{Start: -1, End: 2}, {Start: 3, End: 2}, {Start: 0, End: 1 << 32}} {
++		n.SetSpan(ast.Span{Start: 1, End: 2})
++		if n.SetSpan(s); n.Span() != (ast.Span{}) {
++			t.Errorf("SetSpan(%v): %v", s, n.Span())
++		}
++	}
++	n.SetSpan(ast.Span{Start: 1<<32 - 2, End: 1<<32 - 1})
++	if n.Span() != (ast.Span{Start: 1<<32 - 2, End: 1<<32 - 1}) {
++		t.Errorf("span %v", n.Span())
++	}
++	c := &ast.FuncCallExpr{Method: "m"}
++	if c.SetMethodSpan(ast.Span{Start: 5, End: 99}); c.MethodSpan() != (ast.Span{Start: 5, End: 6}) {
++		t.Errorf("method span %v", c.MethodSpan())
++	}
++	if c.SetMethodSpan(ast.Span{}); c.MethodSpan() != (ast.Span{}) {
++		t.Errorf("method span %v", c.MethodSpan())
++	}
++	n.SetParens(ast.Parens{Count: 1, Span: ast.Span{Start: 0, End: 9}})
++	if n.Parens().Count != 1 || n.OuterSpan() != (ast.Span{Start: 0, End: 9}) {
++		t.Errorf("parens %v %v", n.Parens(), n.OuterSpan())
++	}
++	if n.SetParens(ast.Parens{}); n.Parens() != (ast.Parens{}) || n.OuterSpan() != n.Span() {
++		t.Errorf("parens %v %v", n.Parens(), n.OuterSpan())
++	}
++}
++
++type countVisitor struct {
++	visits, leaves *int
++	skip           func(ast.Element) bool
++}
++
++func (v countVisitor) Visit(n ast.Element) ast.Visitor {
++	if n == nil {
++		*v.leaves++
++		return nil
++	}
++	*v.visits++
++	if v.skip != nil && v.skip(n) {
++		return nil
++	}
++	return v
++}
++
++// TestWalk checks the walker: source order, nil after the children, a nil
++// visitor skipping them, nil children skipped.
++func TestWalk(t *testing.T) {
++	src := "local x = {a = f(1, ...), [g] = h:m()}; function a.b:c() return - #x end"
++	c := mustChunk(t, src, Options{Dialect: LuaJIT})
++	var starts []int
++	ast.Inspect(c, func(n ast.Element) bool {
++		starts = append(starts, outer(n).Start)
++		return true
++	})
++	for i := 1; i < len(starts); i++ {
++		if starts[i] < starts[i-1] {
++			t.Errorf("not in source order: %v", starts)
++		}
++	}
++	var visits, leaves int
++	ast.Walk(countVisitor{&visits, &leaves, nil}, c)
++	if visits != len(starts) || leaves != visits {
++		t.Errorf("%d elements: %d visits, %d ends", len(starts), visits, leaves)
++	}
++	visits, leaves = 0, 0
++	ast.Walk(countVisitor{&visits, &leaves, func(n ast.Element) bool {
++		_, ok := n.(*ast.TableExpr)
++		return ok
++	}}, c)
++	if visits != 14 || leaves != 13 { // all but the table's 5 children; no end for the table
++		t.Errorf("skipping a table: %d visits, %d ends", visits, leaves)
++	}
++	// built trees: nil children and nil pointers
++	var nilCall *ast.FuncCallExpr
++	tree := &ast.Chunk{Stmts: []ast.Stmt{
++		&ast.NumberForStmt{Init: &ast.NumberExpr{Value: "1"}, Limit: nilCall},
++		&ast.FuncDefStmt{Func: &ast.FunctionExpr{}},
++		&ast.ReturnStmt{Exprs: []ast.Expr{&ast.TableExpr{Fields: []*ast.Field{nil, {Value: &ast.NilExpr{}}}}}},
++	}}
++	var types []string
++	ast.Inspect(tree, func(n ast.Element) bool {
++		types = append(types, fmt.Sprintf("%T", n))
++		return true
++	})
++	if got := strings.Join(types, " "); got != "*ast.Chunk *ast.NumberForStmt *ast.NumberExpr *ast.FuncDefStmt "+
++		"*ast.FunctionExpr *ast.ReturnStmt *ast.TableExpr *ast.Field *ast.NilExpr" {
++		t.Errorf("built tree: %s", got)
++	}
++	ast.Inspect(nil, func(ast.Element) bool { t.Error("nil visited"); return true })
++}
++
++// luaFiles returns the Lua files under dir.
++func luaFiles(t testing.TB, dir string) map[string][]byte {
++	files := map[string][]byte{}
++	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
++		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".lua") {
++			return err
++		}
++		b, err := os.ReadFile(path)
++		files[path] = b
++		return err
++	})
++	if err != nil {
++		t.Fatal(err)
++	}
++	return files
++}
++
++// checkFiles parses the files in both dialects and checks their spans.
++func checkFiles(t *testing.T, files map[string][]byte, reparse bool) {
++	for _, d := range bothDialects {
++		var nfiles, nodes, reparsed, comments, failed int
++		for name, src := range files {
++			opts := Options{Dialect: d, Comments: true, Shebang: true}
++			c, err := ParseChunk(src, name, opts)
++			if err != nil {
++				failed++
++				continue
++			}
++			n, r := checkSpans(t, name, src, opts, c, reparse)
++			nfiles++
++			nodes += n
++			reparsed += r
++			comments += len(c.Comments)
++		}
++		t.Logf("%s: %d files (%d do not parse): %d elements, %d reparsed, %d comments", dialectName(d), nfiles, failed, nodes, reparsed, comments)
++	}
++}
++
++// TestSpansCompat checks the spans of the compatibility test scripts.
++func TestSpansCompat(t *testing.T) {
++	files := luaFiles(t, filepath.Join("..", "testdata"))
++	if len(files) == 0 {
++		t.Fatal("no scripts")
++	}
++	checkFiles(t, files, true)
++}
++
++// archivesDir holds go-moonscript's archives of Lua test suites and
++// projects (internal/luasuites).
++var archivesDir = filepath.Join("..", "..", "..", "internal", "luasuites", "testdata", "archives")
++
++// TestSpansArchives checks the spans of the Lua files of the archives.
++func TestSpansArchives(t *testing.T) {
++	paths, _ := filepath.Glob(filepath.Join(archivesDir, "*.tar.gz"))
++	if len(paths) == 0 {
++		t.Skip("no archives in", archivesDir)
++	}
++	if testing.Short() {
++		t.Skip("short")
++	}
++	files := map[string][]byte{}
++	for _, p := range paths {
++		if err := readTarGz(p, files); err != nil {
++			t.Fatal(err)
++		}
++	}
++	checkFiles(t, files, true)
++}
++
++func readTarGz(path string, files map[string][]byte) error {
++	f, err := os.Open(path)
++	if err != nil {
++		return err
++	}
++	defer func() { _ = f.Close() }()
++	zr, err := gzip.NewReader(f)
++	if err != nil {
++		return err
++	}
++	tr := tar.NewReader(zr)
++	for {
++		hdr, err := tr.Next()
++		if errors.Is(err, io.EOF) {
++			return nil
++		}
++		if err != nil {
++			return err
++		}
++		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(hdr.Name, ".lua") && !strings.HasSuffix(hdr.Name, ".t") {
++			continue
++		}
++		b, err := io.ReadAll(tr)
++		if err != nil {
++			return err
++		}
++		files[filepath.Base(path)+"/"+hdr.Name] = b
++	}
++}
++
++// FuzzSpans parses random sources and checks the spans of those that
++// parse (see spanChecker), and that the tree is ParseBytes's.
++func FuzzSpans(f *testing.F) {
++	for _, s := range []string{
++		"local a, b = (f()), {x = 1, [2] = 'y'; 3} -- c",
++		"--[==[\r\nlong\r\n]==]\nfunction a.b:c(d, ...) return ((d)) end",
++		"if a then elseif b then x = 1 else y = 2 end",
++		"#!/bin/lua\r\nfor i = 1, 2 do ::l:: goto l end",
++		"\xef\xbb\xbfs = 'a\\z\n  b' .. [[\n]] .. \"\\\r\n\"",
++		"x = 0x1p4 + 1e3 + 1LL + .5 - -#t\n\r--x\rreturn",
++		"while (a).b do t:m\"s\" break end repeat local z until -x * #y",
++	} {
++		f.Add([]byte(s))
++	}
++	for name, src := range luaFiles(f, filepath.Join("..", "testdata", "compat")) {
++		if len(src) < 2000 && !strings.Contains(name, "limits") {
++			f.Add(src)
++		}
++	}
++	f.Fuzz(func(t *testing.T, src []byte) {
++		for _, d := range bothDialects {
++			opts := Options{Dialect: d, Comments: true, Shebang: true}
++			c, err := ParseChunk(src, "fuzz", opts)
++			stmts, err2 := ParseBytes(src, "fuzz", d)
++			if (err == nil) != (err2 == nil) && !bytes.HasPrefix(src, []byte("#")) {
++				t.Fatalf("%v: ParseChunk: %v, ParseBytes: %v", d, err, err2)
++			}
++			if err != nil {
++				continue
++			}
++			checkSpans(t, "fuzz", src, opts, c, len(src) < 4000)
++			if err2 == nil && fingerprint(&ast.Chunk{Stmts: stmts}) != fingerprint(c) {
++				t.Fatalf("%v: the trees differ", d)
++			}
++		}
++	})
++}
 --- a/parse/strscan.go
 +++ b/parse/strscan.go
 @@ -0,0 +1,335 @@
