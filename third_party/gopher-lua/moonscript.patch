@@ -21635,11 +21635,12 @@ regenerates the diff below; this header is edited by hand.
 +print(math.floor("3.7"), math.max("0x10", "1e1"))
 --- a/testdata/compat/gc_collectgarbage.lua
 +++ b/testdata/compat/gc_collectgarbage.lua
-@@ -0,0 +1,34 @@
+@@ -0,0 +1,35 @@
 +-- collectgarbage's results and the steps of a cycle (Lua 5.1)
 +print(collectgarbage("stop"), collectgarbage("step"), collectgarbage("restart"), collectgarbage("step"))
 +print(collectgarbage("collect"), collectgarbage(), select("#", collectgarbage("count")))
-+print(type(collectgarbage("count")), type(gcinfo()), gcinfo() == math.floor(gcinfo()))
++local kb = gcinfo() -- one reading: two may differ by the allocations between them
++print(type(collectgarbage("count")), type(kb), kb == math.floor(kb))
 +print(collectgarbage("setpause", 150), collectgarbage("setpause", 200))
 +print(collectgarbage("setstepmul", 400), collectgarbage("setstepmul", 200))
 +print((pcall(collectgarbage, "isrunning")))
@@ -21929,7 +21930,7 @@ regenerates the diff below; this header is edited by hand.
 +print((pcall(string.sub, "abc", "1x")), (pcall(math.random, "1.5x")))
 --- a/testdata/compat/lib_base_51.lua
 +++ b/testdata/compat/lib_base_51.lua
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,67 @@
 +-- base and table library details of Lua 5.1: tostring and __tostring,
 +-- setmetatable's checks, getfenv/setfenv levels, string.char's range,
 +-- table.insert/concat errors, gcinfo, table.foreach/foreachi/getn/setn,
@@ -21978,7 +21979,8 @@ regenerates the diff below; this header is edited by hand.
 +print(pcall(table.concat, {1, {}, 3}), pcall(table.concat, {1, 2}, ",", 1, 5))
 +print(pcall(table.setn, {}, 3), pcall(table.foreach, {}, 1))
 +
-+print(type(gcinfo()), gcinfo() == math.floor(gcinfo()), gcinfo() > 0)
++local kb = gcinfo() -- one reading: two may differ by the allocations between them
++print(type(kb), kb == math.floor(kb), kb > 0)
 +local seen = {}
 +print(table.foreach({10, 20, x = 30}, function(k, v) seen[#seen + 1] = tostring(k) .. "=" .. v end), #seen)
 +print(table.foreach({1, 2, 3}, function(k, v) if v == 2 then return "found", k end end))

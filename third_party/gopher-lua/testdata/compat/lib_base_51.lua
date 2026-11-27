@@ -46,7 +46,8 @@ print(pcall(table.insert, {}, 1, 2, 3), pcall(table.insert, {}))
 print(pcall(table.concat, {1, {}, 3}), pcall(table.concat, {1, 2}, ",", 1, 5))
 print(pcall(table.setn, {}, 3), pcall(table.foreach, {}, 1))
 
-print(type(gcinfo()), gcinfo() == math.floor(gcinfo()), gcinfo() > 0)
+local kb = gcinfo() -- one reading: two may differ by the allocations between them
+print(type(kb), kb == math.floor(kb), kb > 0)
 local seen = {}
 print(table.foreach({10, 20, x = 30}, function(k, v) seen[#seen + 1] = tostring(k) .. "=" .. v end), #seen)
 print(table.foreach({1, 2, 3}, function(k, v) if v == 2 then return "found", k end end))

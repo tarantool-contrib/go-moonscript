@@ -1,7 +1,8 @@
 -- collectgarbage's results and the steps of a cycle (Lua 5.1)
 print(collectgarbage("stop"), collectgarbage("step"), collectgarbage("restart"), collectgarbage("step"))
 print(collectgarbage("collect"), collectgarbage(), select("#", collectgarbage("count")))
-print(type(collectgarbage("count")), type(gcinfo()), gcinfo() == math.floor(gcinfo()))
+local kb = gcinfo() -- one reading: two may differ by the allocations between them
+print(type(collectgarbage("count")), type(kb), kb == math.floor(kb))
 print(collectgarbage("setpause", 150), collectgarbage("setpause", 200))
 print(collectgarbage("setstepmul", 400), collectgarbage("setstepmul", 200))
 print((pcall(collectgarbage, "isrunning")))
