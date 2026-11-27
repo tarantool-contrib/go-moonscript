@@ -72,6 +72,7 @@ type blockScope struct {
 	vstart   int
 	hasBreak bool
 	hasGola  bool
+	hasUpval bool // FSCOPE_UPVAL: a local of the block is an upvalue
 }
 
 // gola is a goto or label of LuaJIT's (lj_parse.c's VarInfo): the number
@@ -96,6 +97,11 @@ type funcState struct {
 	upvals  []int     // variable ids
 	bl      *blockScope
 	vstack  []gola // LuaJIT
+	// ucloLine is LuaJIT's code position: when the last instruction is
+	// the UCLO that ended a block with upvalues (nothing emitted since),
+	// its line, else 0. bcemit_jmp merges the jump of a goto or break
+	// into that UCLO, so the goto has its line in errors.
+	ucloLine int
 }
 
 type parser struct {
@@ -210,6 +216,9 @@ func (p *parser) leaveBlock() {
 	bl := fs.bl
 	fs.actvar = fs.actvar[:bl.nactvar]
 	fs.bl = bl.prev
+	if bl.hasUpval {
+		fs.ucloLine = p.ls.lastline
+	}
 	if bl.hasBreak {
 		if bl.isLoop {
 			idx := p.golaNew(breakName, true, 0)
@@ -317,6 +326,15 @@ func (p *parser) singleVar(fs *funcState, name string) (int, bool) {
 	}
 	for i := len(fs.actvar) - 1; i >= 0; i-- {
 		if fs.actvar[i].name == name {
+			if fs != p.fs { // fscope_uvmark
+				bl := fs.bl
+				for bl != nil && bl.nactvar > i {
+					bl = bl.prev
+				}
+				if bl != nil {
+					bl.hasUpval = true
+				}
+			}
 			return fs.actvar[i].id, true
 		}
 	}
@@ -371,6 +389,20 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 	line := ls.linenumber
 	tokLine := ls.t.line
 	add := func(s ast.Stmt) { *stmts = append(*stmts, s) }
+	// LuaJIT: a goto or break right after a UCLO takes its line; any
+	// statement but do (a block without code of its own) emits code or a
+	// jump target, before its blocks and after them
+	uclo := p.fs.ucloLine
+	jmpLine := func() int {
+		if uclo != 0 {
+			return uclo
+		}
+		return ls.lastline
+	}
+	if ls.t.typ != tkDo {
+		p.fs.ucloLine = 0
+		defer func(fs *funcState) { fs.ucloLine = 0 }(p.fs)
+	}
 	switch ls.t.typ {
 	case tkIf:
 		add(p.ifStat(line))
@@ -441,7 +473,7 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 		p.next()
 		if p.jit { // a goto, resolved when the loop ends
 			p.fs.bl.hasBreak = true
-			p.golaNew(breakName, false, ls.lastline)
+			p.golaNew(breakName, false, jmpLine())
 		} else {
 			bl := p.fs.bl
 			for bl != nil && !bl.isLoop {
@@ -461,8 +493,12 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 		if ls.lookahead() == tkName {
 			p.next()
 			name, _ := p.strCheckName()
+			line := jmpLine()
+			if p.golaFindLabel(name) { // a backward goto: a LOOP first
+				line = ls.lastline
+			}
 			p.fs.bl.hasGola = true
-			p.golaNew(name, false, ls.lastline)
+			p.golaNew(name, false, line)
 			st := &ast.GotoStmt{Label: name}
 			st.SetLine(tokLine)
 			add(st)
@@ -478,10 +514,16 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 func (p *parser) ifStat(line int) ast.Stmt {
 	ls := p.ls
 	ifLine := ls.t.line
+	// LuaJIT: a branch ends with a jump out of the if, or a jump target
+	thenBlock := func() []ast.Stmt {
+		b := p.block()
+		p.fs.ucloLine = 0
+		return b
+	}
 	p.next()
 	cond, _ := p.expr()
 	p.checkNext(tkThen)
-	top := &ast.IfStmt{Condition: cond, Then: p.block()}
+	top := &ast.IfStmt{Condition: cond, Then: thenBlock()}
 	top.SetLine(ifLine)
 	cur := top
 	for ls.t.typ == tkElseif {
@@ -489,7 +531,7 @@ func (p *parser) ifStat(line int) ast.Stmt {
 		p.next()
 		cond, _ := p.expr()
 		p.checkNext(tkThen)
-		st := &ast.IfStmt{Condition: cond, Then: p.block()}
+		st := &ast.IfStmt{Condition: cond, Then: thenBlock()}
 		st.SetLine(elseifLine)
 		cur.Else = []ast.Stmt{st}
 		cur = st
