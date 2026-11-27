@@ -94,6 +94,7 @@ func parseSource(src []byte, name string, opts Options) (chunk []ast.Stmt, block
 	p := &parser{jit: dialect == LuaJIT}
 	sc := scratchPool.Get().(*scratch)
 	p.fsCache, p.bcstack, p.lnstack = sc.fsCache, sc.bcstack, sc.lnstack
+	p.stmtStack, p.exprStack, p.fieldStack = sc.stmtStack, sc.exprStack, sc.fieldStack
 	defer func() {
 		p.release(sc)
 		if e := recover(); e != nil {
@@ -121,11 +122,15 @@ func parseSource(src []byte, name string, opts Options) (chunk []ast.Stmt, block
 }
 
 // scratch is the memory a parser passes on to the next chunks: the states
-// of the functions by depth, LuaJIT's bytecode stack.
+// of the functions by depth, LuaJIT's bytecode stack, the stacks of the
+// lists of the tree being parsed.
 type scratch struct {
-	fsCache []*funcState
-	bcstack []bcIns
-	lnstack []int32
+	fsCache    []*funcState
+	bcstack    []bcIns
+	lnstack    []int32
+	stmtStack  []ast.Stmt
+	exprStack  []ast.Expr
+	fieldStack []*ast.Field
 }
 
 var scratchPool = sync.Pool{New: func() any { return &scratch{} }}
@@ -144,6 +149,11 @@ func (p *parser) release(sc *scratch) {
 	if len(p.bcstack) <= maxPooledBytecode {
 		sc.bcstack, sc.lnstack = p.bcstack, p.lnstack
 	}
+	// what a syntax error left on the stacks (the rest is cleared)
+	clear(p.stmtStack)
+	clear(p.exprStack)
+	clear(p.fieldStack)
+	sc.stmtStack, sc.exprStack, sc.fieldStack = p.stmtStack[:0], p.exprStack[:0], p.fieldStack[:0]
 	scratchPool.Put(sc)
 }
 
@@ -248,6 +258,11 @@ type parser struct {
 	// functions being parsed
 	fsCache []*funcState
 	depth   int
+	// go-moonscript patch: the lists of the tree being parsed, built on
+	// stacks and copied into slices of their size when they end
+	stmtStack  []ast.Stmt
+	exprStack  []ast.Expr
+	fieldStack []*ast.Field
 }
 
 // expression kinds, for the statements
@@ -604,17 +619,20 @@ func blockFollow(tok int) bool {
 // chunk parses a block: its statements and its span, from its first token
 // to its last, or empty at the token after it.
 func (p *parser) chunk() ([]ast.Stmt, ast.Span) {
-	stmts := []ast.Stmt{}
+	base := len(p.stmtStack)
 	start := p.ls.t.start
 	p.enterLevel()
 	for islast := false; !islast && !blockFollow(p.ls.t.typ); {
-		islast = p.statement(&stmts)
+		islast = p.statement()
 		p.testNext(';')
 		if p.jit || p.r51 {
 			p.fs.freereg = p.fs.nactvar() // the registers are free after each statement
 		}
 	}
 	p.leaveLevel()
+	stmts := append([]ast.Stmt{}, p.stmtStack[base:]...)
+	clear(p.stmtStack[base:])
+	p.stmtStack = p.stmtStack[:base]
 	return stmts, ast.Span{Start: start, End: max(start, p.ls.prevEnd)}
 }
 
@@ -646,9 +664,9 @@ func (p *parser) cond() (ast.Expr, uint32) {
 	return e, v.f
 }
 
-// statement parses a statement into stmts; it reports whether the
-// statement must be the last one of its block.
-func (p *parser) statement(stmts *[]ast.Stmt) bool {
+// statement parses a statement onto the statement stack; it reports
+// whether the statement must be the last one of its block.
+func (p *parser) statement() bool {
 	ls := p.ls
 	fs := p.fs
 	line := ls.linenumber
@@ -656,7 +674,7 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 	start := ls.t.start
 	add := func(s ast.Stmt) {
 		s.SetSpan(p.spanFrom(start))
-		*stmts = append(*stmts, s)
+		p.stmtStack = append(p.stmtStack, s)
 	}
 	switch ls.t.typ {
 	case tkIf:
@@ -780,7 +798,7 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 		add(st)
 		return true
 	case tkLabel:
-		p.labelStat(stmts)
+		p.labelStat()
 	case tkGoto:
 		if ls.lookahead() == tkName {
 			p.next()
@@ -1211,7 +1229,7 @@ func (p *parser) assignAdjust(nvars, nexps int, e *expDesc) {
 }
 
 // labelStat parses LuaJIT's '::' NAME '::' and the labels right after it.
-func (p *parser) labelStat(stmts *[]ast.Stmt) {
+func (p *parser) labelStat() {
 	ls := p.ls
 	line, start := ls.t.line, ls.t.start
 	fs := p.fs
@@ -1227,10 +1245,10 @@ func (p *parser) labelStat(stmts *[]ast.Stmt) {
 	st := &ast.LabelStmt{Name: name, NameSpan: nameSpan}
 	st.SetLine(line)
 	st.SetSpan(p.spanFrom(start))
-	*stmts = append(*stmts, st)
+	p.stmtStack = append(p.stmtStack, st)
 	if ls.t.typ == tkLabel {
 		p.enterLevel()
-		p.labelStat(stmts)
+		p.labelStat()
 		p.leaveLevel()
 	}
 	// a label at the end of a block is out of the scope of its locals
@@ -1744,7 +1762,7 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 		c.v51.init(vVoid, 0)
 	}
 	p.checkNext('{')
-	fields := []*ast.Field{}
+	base := len(p.fieldStack)
 	// declared out of the loop, so that their address passed to the
 	// expression functions does not make them escape
 	var key, val expDesc
@@ -1790,7 +1808,7 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 		value, _ := p.expr(&val)
 		field := &ast.Field{Key: k, Value: value}
 		field.SetSpan(p.spanFrom(fieldStart))
-		fields = append(fields, field)
+		p.fieldStack = append(p.fieldStack, field)
 		if p.jit {
 			p.tableItem(&c, v, &key, &val)
 			fs.freereg = c.freg
@@ -1814,6 +1832,9 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 	} else if p.r51 {
 		p.rLastListField(&c, v)
 	}
+	fields := append([]*ast.Field{}, p.fieldStack[base:]...)
+	clear(p.fieldStack[base:])
+	p.fieldStack = p.fieldStack[:base]
 	t := &ast.TableExpr{Fields: fields, PrevLine: prevLine}
 	t.SetLine(line)
 	t.SetLastLine(endLine)
@@ -1969,7 +1990,11 @@ func (p *parser) subExpr(v *expDesc, limit int) (ast.Expr, int, int) {
 // (explist1 / expr_list).
 func (p *parser) exprList(v *expDesc) []ast.Expr {
 	e, _ := p.expr(v)
-	list := []ast.Expr{e}
+	if p.ls.t.typ != ',' {
+		return []ast.Expr{e}
+	}
+	base := len(p.exprStack)
+	p.exprStack = append(p.exprStack, e)
 	for p.testNext(',') {
 		if p.jit {
 			p.fs.toNextReg(p, v)
@@ -1977,8 +2002,11 @@ func (p *parser) exprList(v *expDesc) []ast.Expr {
 			p.fs.rExp2NextReg(p, v)
 		}
 		e, _ = p.expr(v)
-		list = append(list, e)
+		p.exprStack = append(p.exprStack, e)
 	}
+	list := append([]ast.Expr(nil), p.exprStack[base:]...)
+	clear(p.exprStack[base:])
+	p.exprStack = p.exprStack[:base]
 	return list
 }
 

@@ -100,6 +100,39 @@ func TestASTRoundTrip(t *testing.T) {
 	}
 }
 
+// BenchmarkParseArchives parses every Lua file of the archives, in each
+// dialect: with parse.ParseBytes (the tree, with its spans), and with
+// parse.ParseChunk keeping the comments (chunk).
+func BenchmarkParseArchives(b *testing.B) {
+	srcs := archiveSources(b)
+	bufs := make([][]byte, len(srcs))
+	size := 0
+	for i, s := range srcs {
+		bufs[i] = []byte(s.src)
+		size += len(s.src)
+	}
+	for _, d := range dialects {
+		b.Run(d.name+"/tree", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+			for b.Loop() {
+				for _, src := range bufs {
+					_, _ = parse.ParseBytes(src, "src", d.parse)
+				}
+			}
+		})
+		b.Run(d.name+"/chunk", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+			for b.Loop() {
+				for _, src := range bufs {
+					_, _ = parse.ParseChunk(src, "src", parse.Options{Dialect: d.parse, Comments: true})
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkLoadArchives parses and compiles every Lua file of the archives,
 // in each dialect: with LState.LoadChunk (source), with parse.ParseBytes
 // and LState.LoadAST (ast), and with LoadAST alone on the parsed trees
