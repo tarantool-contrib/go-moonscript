@@ -68,6 +68,12 @@ type Options struct {
 	// before it, as lj_lex_setup does; under Lua51 without Shebang it is
 	// a syntax error, as for loadstring.
 	Shebang bool
+	// Tokens makes the parser keep the tokens of the source as written,
+	// with the trivia (white space, line breaks, comments, the header), in
+	// Chunk.Tokens: their texts in order are the source. Keeping them costs
+	// 12 bytes a token (a source has about one per 4 bytes) and a tenth of
+	// the parse time, and nothing when they are not asked for.
+	Tokens bool
 }
 
 // ParseChunk parses a chunk held in memory into its tree, with the
@@ -82,7 +88,7 @@ func ParseChunk(src []byte, name string, opts Options) (*ast.Chunk, error) {
 		return nil, err
 	}
 	c := &ast.Chunk{Name: name, Stmts: stmts, StmtsSpan: block, Header: ls.header, Comments: ls.comments,
-		Lines: ast.NewLines(src)}
+		Tokens: ls.tokens, Lines: ast.NewLines(src)}
 	c.SetSpan(ast.Span{Start: 0, End: len(src)})
 	return c, nil
 }
@@ -105,7 +111,10 @@ func parseSource(src []byte, name string, opts Options) (chunk []ast.Stmt, block
 			chunk, block, ls, err = nil, ast.Span{}, nil, pe
 		}
 	}()
-	p.ls = newLexer(src, name, dialect, opts.Shebang) // it may raise an error
+	if opts.Tokens && uint64(len(src)) > math.MaxUint32 {
+		return nil, ast.Span{}, nil, errTooLarge(name)
+	}
+	p.ls = newTokenLexer(src, name, dialect, opts.Shebang, opts.Tokens) // it may raise an error
 	p.ls.keepComments = opts.Comments
 	if !p.jit {
 		p.level = lua51BaseLevel

@@ -101,8 +101,9 @@ func TestASTRoundTrip(t *testing.T) {
 }
 
 // BenchmarkParseArchives parses every Lua file of the archives, in each
-// dialect: with parse.ParseBytes (the tree, with its spans), and with
-// parse.ParseChunk keeping the comments (chunk).
+// dialect: with parse.ParseBytes (the tree, with its spans), with
+// parse.ParseChunk keeping the comments (chunk) or the tokens (tokens), and
+// with parse.Tokenize (tokenize).
 func BenchmarkParseArchives(b *testing.B) {
 	srcs := archiveSources(b)
 	bufs := make([][]byte, len(srcs))
@@ -127,6 +128,24 @@ func BenchmarkParseArchives(b *testing.B) {
 			for b.Loop() {
 				for _, src := range bufs {
 					_, _ = parse.ParseChunk(src, "src", parse.Options{Dialect: d.parse, Comments: true})
+				}
+			}
+		})
+		b.Run(d.name+"/tokens", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+			for b.Loop() {
+				for _, src := range bufs {
+					_, _ = parse.ParseChunk(src, "src", parse.Options{Dialect: d.parse, Tokens: true})
+				}
+			}
+		})
+		b.Run(d.name+"/tokenize", func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+			for b.Loop() {
+				for _, src := range bufs {
+					_, _ = parse.Tokenize(src, "src", parse.Options{Dialect: d.parse})
 				}
 			}
 		})

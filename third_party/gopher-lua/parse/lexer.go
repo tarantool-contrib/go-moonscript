@@ -139,19 +139,44 @@ type lexer struct {
 	ahead      token // the look-ahead token, typ tkEOS if none
 	prevLine   int   // the line of the token before t
 	// go-moonscript patch: the end of the token before t, the comments
-	// read if keepComments, the bytes skipped before the first token
+	// read if keepComments, the bytes skipped before the first token, the
+	// tokens and trivia read if keepTokens
 	prevEnd      int
 	keepComments bool
+	keepTokens   bool
 	comments     []ast.Comment
 	header       ast.Span
+	tokens       ast.Tokens
 }
 
 // newLexer returns a lexer of src; shebang is Options.Shebang.
 func newLexer(src []byte, source string, dialect Dialect, shebang bool) *lexer {
-	ls := &lexer{src: src, linenumber: 1, lastline: 1, source: source, dialect: dialect}
+	return newTokenLexer(src, source, dialect, shebang, false)
+}
+
+// newTokenLexer returns a lexer of src that keeps the tokens it reads if
+// keepTokens (Options.Tokens). go-moonscript patch.
+func newTokenLexer(src []byte, source string, dialect Dialect, shebang, keepTokens bool) *lexer {
+	ls := allocLexer(src, source, dialect, keepTokens)
+	ls.skipHeader(shebang)
+	return ls
+}
+
+// allocLexer returns a lexer of src at its start, before its header.
+func allocLexer(src []byte, source string, dialect Dialect, keepTokens bool) *lexer {
+	ls := &lexer{src: src, linenumber: 1, lastline: 1, source: source, dialect: dialect, keepTokens: keepTokens}
+	if keepTokens {
+		ls.tokens = make(ast.Tokens, 0, len(src)/3+1) // the archives' sources: 4 bytes a token
+	}
 	ls.ahead.typ = tkEOS
 	ls.next()
-	if dialect == LuaJIT { // lj_lex_setup skips a UTF-8 BOM and a "#" line
+	return ls
+}
+
+// skipHeader skips the header (Chunk.Header) of the source; it may raise
+// an error.
+func (ls *lexer) skipHeader(shebang bool) {
+	if ls.dialect == LuaJIT { // lj_lex_setup skips a UTF-8 BOM and a "#" line
 		header := false
 		if ls.current == 0xef && len(ls.src) >= ls.pos+2 && ls.src[ls.pos] == 0xbb && ls.src[ls.pos+1] == 0xbf {
 			ls.pos += 2
@@ -161,9 +186,11 @@ func newLexer(src []byte, source string, dialect Dialect, shebang bool) *lexer {
 		}
 		if ls.current == '#' {
 			if !ls.skipLine() {
-				return ls
+				return
 			}
 			header = true
+		} else if header {
+			ls.addHeader()
 		}
 		// bytecode after a header is refused, the chunk name not echoed
 		if header && ls.current == 0x1b {
@@ -172,7 +199,6 @@ func newLexer(src []byte, source string, dialect Dialect, shebang bool) *lexer {
 	} else if shebang && ls.current == '#' { // luaL_loadfile's skipcomment
 		ls.skipLine()
 	}
-	return ls
 }
 
 // skipLine skips the line of a header, without its line break; it reports
@@ -182,6 +208,7 @@ func (ls *lexer) skipLine() bool {
 		ls.next()
 		if ls.current == EOF {
 			ls.header.End = len(ls.src)
+			ls.addHeader()
 			return false
 		}
 		if ls.currIsNewline() {
@@ -189,9 +216,64 @@ func (ls *lexer) skipLine() bool {
 		}
 	}
 	ls.header.End = ls.offset()
+	ls.addHeader()
 	ls.inclinenumber()
+	if ls.keepTokens {
+		ls.addTrivia(ast.TokenNewline, ls.header.End)
+	}
 	return true
 }
+
+// addHeader adds the header's token if keepTokens. go-moonscript patch.
+func (ls *lexer) addHeader() {
+	if ls.keepTokens {
+		ls.tokens = append(ls.tokens, ast.NewLexeme(ast.TokenHeader, ls.header))
+	}
+}
+
+// addTrivia adds the trivia of the kind from start to the current
+// character. go-moonscript patch.
+func (ls *lexer) addTrivia(kind ast.TokenKind, start int) {
+	ls.tokens = append(ls.tokens, ast.NewLexeme(kind, ast.Span{Start: start, End: ls.offset()}))
+}
+
+// addToken adds the token tok, and the end of the source once: the lexer
+// reads it again after a look-ahead that read it. go-moonscript patch.
+func (ls *lexer) addToken(tok *token) {
+	kind := tokenKinds[tok.typ]
+	if kind == ast.TokenEOF && len(ls.tokens) > 0 && ls.tokens[len(ls.tokens)-1].Kind == ast.TokenEOF {
+		return
+	}
+	ls.tokens = append(ls.tokens, ast.NewLexeme(kind, ast.Span{Start: tok.start, End: tok.end}))
+}
+
+// tokenKinds are the kinds of the lexer's tokens: a character that is no
+// token of the grammar is ast.TokenOther. go-moonscript patch.
+var tokenKinds = func() (k [tkEOS + 1]ast.TokenKind) {
+	for c := 0; c < firstReserved; c++ {
+		k[c] = ast.TokenOther
+	}
+	for c, kind := range map[byte]ast.TokenKind{
+		'+': ast.TokenPlus, '-': ast.TokenMinus, '*': ast.TokenStar, '/': ast.TokenSlash,
+		'%': ast.TokenPercent, '^': ast.TokenCaret, '#': ast.TokenHash, '<': ast.TokenLt,
+		'>': ast.TokenGt, '=': ast.TokenAssign, '(': ast.TokenLParen, ')': ast.TokenRParen,
+		'{': ast.TokenLBrace, '}': ast.TokenRBrace, '[': ast.TokenLBracket, ']': ast.TokenRBracket,
+		';': ast.TokenSemicolon, ':': ast.TokenColon, ',': ast.TokenComma, '.': ast.TokenDot,
+	} {
+		k[c] = kind
+	}
+	for i, kind := range [...]ast.TokenKind{ // in the order of tkAnd...tkEOS
+		ast.TokenAnd, ast.TokenBreak, ast.TokenDo, ast.TokenElse, ast.TokenElseif, ast.TokenEnd,
+		ast.TokenFalse, ast.TokenFor, ast.TokenFunction, ast.TokenGoto, ast.TokenIf, ast.TokenIn,
+		ast.TokenLocal, ast.TokenNil, ast.TokenNot, ast.TokenOr, ast.TokenRepeat, ast.TokenReturn,
+		ast.TokenThen, ast.TokenTrue, ast.TokenUntil, ast.TokenWhile, ast.TokenConcat, ast.TokenDots,
+		ast.TokenEq, ast.TokenGe, ast.TokenLe, ast.TokenNe, ast.TokenDoubleColon, ast.TokenNumber,
+		ast.TokenName, ast.TokenString, ast.TokenEOF,
+	} {
+		k[firstReserved+i] = kind
+	}
+	return k
+}()
 
 // offset is the offset of the current character, len(src) at the end.
 func (ls *lexer) offset() int {
@@ -660,6 +742,9 @@ func (ls *lexer) llex(tok *token) int {
 		switch c := ls.current; c {
 		case '\n', '\r':
 			ls.inclinenumber()
+			if ls.keepTokens {
+				ls.addTrivia(ast.TokenNewline, tok.start)
+			}
 			continue
 		case '-':
 			ls.next()
@@ -677,6 +762,9 @@ func (ls *lexer) llex(tok *token) int {
 					if ls.keepComments {
 						ls.addComment(tok.start, sep)
 					}
+					if ls.keepTokens {
+						ls.addTrivia(ast.TokenComment, tok.start)
+					}
 					continue
 				}
 			}
@@ -685,6 +773,9 @@ func (ls *lexer) llex(tok *token) int {
 			}
 			if ls.keepComments {
 				ls.addComment(tok.start, -1)
+			}
+			if ls.keepTokens {
+				ls.addTrivia(ast.TokenComment, tok.start)
 			}
 			continue
 		case '[':
@@ -767,6 +858,9 @@ func (ls *lexer) llex(tok *token) int {
 			for isSpace(ls.current) && !ls.currIsNewline() { // go-moonscript patch: a run at once
 				ls.next()
 			}
+			if ls.keepTokens {
+				ls.addTrivia(ast.TokenWhitespace, tok.start)
+			}
 			continue
 		case isDigit(c):
 			if jit {
@@ -805,6 +899,9 @@ func (ls *lexer) nextToken() {
 		ls.t.sem = ""
 		ls.t.typ = ls.llex(&ls.t)
 		ls.t.end = ls.offset()
+		if ls.keepTokens {
+			ls.addToken(&ls.t)
+		}
 	}
 }
 
@@ -813,6 +910,9 @@ func (ls *lexer) lookahead() int {
 	ls.ahead.sem = ""
 	ls.ahead.typ = ls.llex(&ls.ahead)
 	ls.ahead.end = ls.offset()
+	if ls.keepTokens {
+		ls.addToken(&ls.ahead)
+	}
 	return ls.ahead.typ
 }
 
