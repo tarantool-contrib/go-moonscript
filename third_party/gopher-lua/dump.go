@@ -88,6 +88,7 @@ const (
 	dumpConstTrue
 	dumpConstNumber
 	dumpConstString
+	dumpConstCdataNumeral // cdataNumeralFn (compile.go)
 )
 
 func (d *dumper) proto(fp *FunctionProto) {
@@ -113,6 +114,12 @@ func (d *dumper) proto(fp *FunctionProto) {
 				d.buf = append(d.buf, dumpConstTrue)
 			} else {
 				d.buf = append(d.buf, dumpConstFalse)
+			}
+		case *LFunction:
+			if v == cdataNumeralFn {
+				d.buf = append(d.buf, dumpConstCdataNumeral)
+			} else {
+				d.buf = append(d.buf, dumpConstNil)
 			}
 		default:
 			d.buf = append(d.buf, dumpConstNil)
@@ -246,6 +253,8 @@ func (u *undumper) proto(depth int) *FunctionProto {
 			}
 		case dumpConstString:
 			fp.Constants[i] = LString(u.str())
+		case dumpConstCdataNumeral:
+			fp.Constants[i] = cdataNumeralFn
 		default:
 			u.fail("bad constant")
 		}

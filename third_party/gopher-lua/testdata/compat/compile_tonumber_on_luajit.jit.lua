@@ -2,8 +2,9 @@
 -- yuin/gopher-lua#478, halogencapital/gopher-lua d3de08565a: strings convert
 -- to numbers as with strtod (tonumber and arithmetic). Left out: the
 -- cases where LuaJIT's lj_strscan differs from strtod ("0b101" is 5,
--- "nan(123)" and strings with a NUL are not numbers), which the VM does
--- not follow in its LuaJIT dialect yet.
+-- "nan(123)" and strings with a NUL are not numbers): tonumber follows
+-- lj_strscan (lib_tonumber_strscan_on_luajit.jit.lua), the arithmetic and
+-- library argument coercions don't yet.
 local function fmt(v)
   if type(v) ~= "number" then return tostring(v) end
   if v ~= v then return "nan" end

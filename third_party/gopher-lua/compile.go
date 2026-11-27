@@ -142,6 +142,23 @@ func lnumberValue(expr ast.Expr) (LNumber, bool) {
 	return 0, false
 }
 
+// cdataNumeralFn is the function a LuaJIT FFI numeral (1LL, 1ULL, 1i,
+// ast.CdataNumberExpr) compiles to a call of, with the numeral: such a
+// numeral is cdata, which the VM doesn't have, so evaluating it is an error
+// (the function is a constant, which string.dump keeps). go-moonscript
+// patch.
+var cdataNumeralFn = newLFunctionG(cdataNumeral, nil, 0)
+
+func cdataNumeral(L *LState) int {
+	s := L.CheckString(1)
+	kind := "64-bit integer"
+	if s[len(s)-1]|0x20 == 'i' {
+		kind = "complex number"
+	}
+	L.RaiseError("%s literal '%s' needs the FFI, which is not supported", kind, s)
+	return 0
+}
+
 /* utilities }}} */
 
 type gotoLabelDesc struct { // {{{
@@ -1586,6 +1603,17 @@ func compileExpr(context *funcContext, reg int, expr ast.Expr, ec *expcontext) i
 			num = LNumber(math.NaN())
 		}
 		code.AddABx(OP_LOADK, sreg, context.ConstIndex(num), sline(ex))
+		return sused
+	case *ast.CdataNumberExpr:
+		// go-moonscript patch: a LuaJIT FFI numeral calls cdataNumeral,
+		// which raises the error, in free registers (a call may write
+		// above its function's register)
+		code.AddABx(OP_LOADK, reg, context.ConstIndex(cdataNumeralFn), sline(ex))
+		code.AddABx(OP_LOADK, reg+1, context.ConstIndex(LString(ex.Value)), sline(ex))
+		code.AddABC(OP_CALL, reg, 2, 2, sline(ex))
+		if sreg != reg {
+			code.AddABC(OP_MOVE, sreg, reg, 0, sline(ex))
+		}
 		return sused
 	case *constLValueExpr:
 		code.AddABx(OP_LOADK, sreg, context.ConstIndex(ex.Value), sline(ex))

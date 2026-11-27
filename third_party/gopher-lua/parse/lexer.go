@@ -8,7 +8,6 @@ package parse
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
@@ -26,8 +25,10 @@ const (
 	Lua51 Dialect = iota
 	// LuaJIT is LuaJIT 2.1's (without LUAJIT_ENABLE_LUA52COMPAT): goto and
 	// labels, hexadecimal floats and binary numerals, \x \z \u{} escapes,
-	// identifiers with non-ASCII bytes. Its FFI numerals (1LL, 1ULL, 1i)
-	// are not accepted: they are cdata, which the VM doesn't have.
+	// identifiers with non-ASCII bytes, numerals as lj_strscan reads them.
+	// Its FFI numerals (1LL, 1ULL, 1i) are accepted, as LuaJIT with the FFI
+	// does, but are cdata, which the VM doesn't have: they are
+	// ast.CdataNumberExpr, which evaluate to an error.
 	LuaJIT
 )
 
@@ -106,9 +107,10 @@ var reserved = func() map[string]int {
 // token is a token, its semantic value (a name, the value of a string, the
 // text of a number) and the line it starts on.
 type token struct {
-	typ  int
-	sem  string
-	line int
+	typ   int
+	sem   string
+	line  int
+	cdata bool // a LuaJIT FFI numeral (1LL, 1ULL, 1i), sem its text
 }
 
 type lexer struct {
@@ -299,9 +301,11 @@ func isNumeral(s string) bool {
 	return i == len(s)
 }
 
-// lexNumber is LuaJIT's lex_number. The value is the numeral, which strtod
-// reads as lj_strscan does, but for a binary numeral, given as its value.
-func (ls *lexer) lexNumber() string {
+// lexNumber is LuaJIT's lex_number: the numeral, as lj_strscan reads it with
+// the FFI (scanNumeral). It returns the token's value, the number formatted
+// to convert back exactly (by parseNumber) or the numeral of a cdata one
+// (1LL, 1ULL, 1i), and whether the numeral is cdata.
+func (ls *lexer) lexNumber() (string, bool) {
 	xp := 'e'
 	c := ls.current
 	if c == '0' {
@@ -316,115 +320,14 @@ func (ls *lexer) lexNumber() string {
 		ls.saveNext()
 	}
 	s := string(ls.buff)
-	v, ok := strscan(s)
+	v, cdata, ok := scanNumeral(s)
 	if !ok {
 		ls.lexError("malformed number", tkNumber)
 	}
-	if len(s) > 1 && s[0] == '0' && s[1]|0x20 == 'b' {
-		return strconv.FormatFloat(v, 'g', -1, 64)
+	if cdata {
+		return s, true
 	}
-	return s
-}
-
-// strscan is lj_strscan_scan's check of a numeral (with STRSCAN_OPT_TONUM,
-// without the FFI's LL, ULL and i suffixes). It computes the value of a
-// binary numeral only (NaN for the others).
-func strscan(s string) (float64, bool) {
-	at := func(i int) int {
-		if i < len(s) {
-			return int(s[i])
-		}
-		return 0
-	}
-	p, base, digit := 0, 10, isDigit
-	dp, hasdig, dig := -1, false, 0
-	if at(p) <= '0' { // the base, leading zeros
-		if at(p) == '0' {
-			if at(p+1)|0x20 == 'x' {
-				base, digit = 16, isXDigit
-				p += 2
-			} else if at(p+1)|0x20 == 'b' {
-				base = 2
-				p += 2
-			}
-		}
-		for ; ; p++ {
-			if at(p) == '0' {
-				hasdig = true
-			} else if at(p) == '.' {
-				if dp >= 0 {
-					return 0, false
-				}
-				dp = p
-			} else {
-				break
-			}
-		}
-	}
-	sp := p
-	for ; ; p++ {
-		if digit(at(p)) {
-			dig++
-		} else if at(p) == '.' {
-			if dp >= 0 {
-				return 0, false
-			}
-			dp = p
-		} else {
-			break
-		}
-	}
-	if !hasdig && dig == 0 {
-		return 0, false
-	}
-	if dp >= 0 {
-		if base == 2 {
-			return 0, false
-		}
-		if dig > 0 {
-			ex := dp - (p - 1)
-			for q := p - 1; ex < 0 && at(q) == '0'; q-- {
-				ex++
-				dig--
-			}
-			if ex <= -(1 << 20) {
-				return 0, false
-			}
-		}
-	}
-	if base == 16 && at(p)|0x20 == 'p' || base == 10 && at(p)|0x20 == 'e' {
-		p++
-		if at(p) == '+' || at(p) == '-' {
-			p++
-		}
-		if !isDigit(at(p)) {
-			return 0, false
-		}
-		xx := at(p) & 15
-		for p++; isDigit(at(p)); p++ {
-			xx = xx*10 + at(p)&15
-			if xx >= 1<<20 {
-				return 0, false
-			}
-		}
-	}
-	if p < len(s) { // a suffix: the FFI's, or garbage
-		return 0, false
-	}
-	if base == 2 {
-		if dig > 64 {
-			return 0, false
-		}
-		var x uint64
-		for i := sp; i < p; i++ {
-			if s[i]&^1 != '0' {
-				return 0, false
-			}
-			x = x<<1 | uint64(s[i]&1)
-		}
-		return float64(x), true
-	}
-	return math.NaN(), true
+	return strconv.FormatFloat(v, 'g', -1, 64), false
 }
 
 func (ls *lexer) skipSep() int {
@@ -687,6 +590,7 @@ func encodeUTF8(b []byte, c int) int {
 // line into tok.
 func (ls *lexer) llex(tok *token) int {
 	ls.buff = ls.buff[:0]
+	tok.cdata = false
 	jit := ls.dialect == LuaJIT
 	for {
 		tok.line = ls.linenumber
@@ -779,7 +683,7 @@ func (ls *lexer) llex(tok *token) int {
 				return '.'
 			}
 			if jit {
-				tok.sem = ls.lexNumber()
+				tok.sem, tok.cdata = ls.lexNumber()
 			} else {
 				tok.sem = ls.readNumeral()
 			}
@@ -794,7 +698,7 @@ func (ls *lexer) llex(tok *token) int {
 			continue
 		case isDigit(c):
 			if jit {
-				tok.sem = ls.lexNumber()
+				tok.sem, tok.cdata = ls.lexNumber()
 			} else {
 				tok.sem = ls.readNumeral()
 			}

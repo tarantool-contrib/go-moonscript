@@ -237,8 +237,13 @@ messages, `math.random` sequence (glibc's `rand`, as PUC on Linux) and
 5.2 compatibility mode: `goto` and labels, `\x`/`\z`/`\u{}` escapes, hex
 floats, the `bit` library, a `jit` module (interpreter only),
 `table.new`/`table.clear`, `load` with strings and modes, `xpcall` with
-arguments and so on, with LuaJIT's number formatting and `math.random`.
-There is no FFI. `moon` runs in the Lua 5.1 dialect, as the reference does;
+arguments and so on, with LuaJIT's number formatting and `math.random`,
+and its number scanning (`lj_strscan`) for numerals and `tonumber`:
+binary `0b101`, `tonumber("0b101")` is 5, `tonumber("nan(1)")` is nil.
+There is no FFI. Its numerals `1LL`, `1ULL` and `12.5i` parse, as with
+`luajit`, so that such sources load, but evaluating one raises "64-bit
+integer literal '1LL' needs the FFI, which is not supported" (or "complex
+number literal ..."). `moon` runs in the Lua 5.1 dialect, as the reference does;
 with the environment variable `MOON_LUA=luajit` it runs in the LuaJIT
 dialect and behaves like upstream `moon` run by `luajit` (`MOON_LUA=lua51`
 or unset is the default, any other value is an error). The VM still keeps

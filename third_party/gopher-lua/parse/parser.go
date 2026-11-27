@@ -825,7 +825,11 @@ func (p *parser) simpleExp() (ast.Expr, int) {
 	var e ast.Expr
 	switch ls.t.typ {
 	case tkNumber:
-		e = &ast.NumberExpr{Value: ls.t.sem}
+		if ls.t.cdata { // go-moonscript patch: LuaJIT's FFI numerals
+			e = &ast.CdataNumberExpr{Value: ls.t.sem}
+		} else {
+			e = &ast.NumberExpr{Value: ls.t.sem}
+		}
 	case tkString:
 		e = &ast.StringExpr{Value: ls.t.sem}
 	case tkNil:

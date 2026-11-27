@@ -1,0 +1,161 @@
+1	0x1p+0	0x1p+0
+ 1	0x1p+0	0x1p+0
+1 	0x1p+0	0x1p+0
+ 1 	0x1p+0	0x1p+0
+\9\10\11\12\131\13\10\12\11\9	0x1p+0	0x1p+0
+1 2	nil	nil
+- 1	nil	nil
+-1	-0x1p+0	-0x1p+0
++1	0x1p+0	0x1p+0
+--1	nil	nil
++-1	nil	nil
+-+1	nil	nil
+-0	-0x0p+0	-0x0p+0
++0	0x0p+0	0x0p+0
+-0.0	-0x0p+0	-0x0p+0
+-0x10	-0x1p+4	-0x1p+4
++0x10	0x1p+4	0x1p+4
+-0b11	-0x1.8p+1	-0x1.8p+1
++0b11	0x1.8p+1	0x1.8p+1
++.5	0x1p-1	0x1p-1
+-.5e1	-0x1.4p+2	-0x1.4p+2
+-	nil	nil
++	nil	nil
+-.	nil	nil
+.	nil	nil
+ -inf 	-inf	-inf
+\9+inf\10	inf	inf
+inf	inf	inf
+INF	inf	inf
+Inf	inf	inf
+iNf	inf	inf
+-inf	-inf	-inf
++inf	inf	inf
+infinity	inf	inf
+INFINITY	inf	inf
+-Infinity	-inf	-inf
+infinit	nil	nil
+infinityy	nil	nil
+infx	nil	nil
+inf x	nil	nil
+inf inity	nil	nil
+nan	nan	nan
+NaN	nan	nan
+NAN	nan	nan
+-nan	nan	nan
++nan	nan	nan
+nan(1)	nil	nil
+nan()	nil	nil
+nan 	nan	nan
+ nan	nan	nan
+nanx	nil	nil
+nana	nil	nil
+in	nil	nil
+i	nil	nil
+n	nil	nil
+na	nil	nil
+infnan	nil	nil
+nan inf	nil	nil
+-nan(1)	nil	nil
+x	nil	nil
+_1	nil	nil
+[1	nil	nil
+~1	nil	nil
+@1	nil	nil
+\2261	nil	nil
+\1951	nil	nil
+	nil	nil
+ 	nil	nil
+\0	nil	nil
+1\0	nil	nil
+\01	nil	nil
+1 \0	nil	nil
+inf\0	nil	nil
+nan\0	nil	nil
+0x10\0	nil	nil
+ \0	nil	nil
+1\0 	nil	nil
+10	0x1.4p+3	0x1.4p+3
+010	0x1.4p+3	0x1.4p+3
+00011	0x1.6p+3	0x1.6p+3
+1.	0x1p+0	0x1p+0
+.5	0x1p-1	0x1p-1
+5.	0x1.4p+2	0x1.4p+2
+-1.	-0x1p+0	-0x1p+0
+1e2	0x1.9p+6	0x1.9p+6
+1E+2	0x1.9p+6	0x1.9p+6
+1e-06	0x1.0c6f7a0b5ed8dp-20	0x1.0c6f7a0b5ed8dp-20
++.5e1	0x1.4p+2	0x1.4p+2
+1e	nil	nil
+1e+	nil	nil
+e1	nil	nil
+1.5e3x	nil	nil
+1e400	inf	inf
+-1e400	-inf	-inf
+1e-400	0x0p+0	0x0p+0
+-1e-400	-0x0p+0	-0x0p+0
+1e1.5	nil	nil
+3.4.5	nil	nil
+1_000	nil	nil
+0o17	nil	nil
+123456789012345678901234567890	0x1.8ee90ff6c373ep+96	0x1.8ee90ff6c373ep+96
+9007199254740993	0x1p+53	0x1p+53
+4.9406564584124654e-324	0x1p-1074	0x1p-1074
+2.4703282292062328e-324	0x1p-1074	0x1p-1074
+2.4703282292062327e-324	0x0p+0	0x0p+0
+1e1048575	inf	inf
+1e1048576	nil	nil
+1e-1048575	0x0p+0	0x0p+0
+1e00000000000000000005	0x1.86ap+16	0x1.86ap+16
+1e5 	0x1.86ap+16	0x1.86ap+16
+ 1e5	0x1.86ap+16	0x1.86ap+16
+1 e5	nil	nil
+1e 5	nil	nil
+1e- 5	nil	nil
+0x	nil	nil
+0x10	0x1p+4	0x1p+4
+0X1f	0x1.fp+4	0x1.fp+4
+ 0x10 	0x1p+4	0x1p+4
+0x-1	nil	nil
+0x1p4	0x1p+4	0x1p+4
+0x1.8	0x1.8p+0	0x1.8p+0
+0x.8	0x1p-1	0x1p-1
+0xA.8p1	0x1.5p+4	0x1.5p+4
+0x1p	nil	nil
+0x.	nil	nil
+0x1e+1	nil	nil
+0x1P-1074	0x1p-1074	0x1p-1074
+0x1p-1075	0x0p+0	0x0p+0
+0x1.8p-1075	0x1p-1074	0x1p-1074
+0xffffffffffffffffff	0x1p+72	0x1p+72
+0x1p1048576	nil	nil
+0x7fffffffffffffff	0x1p+63	0x1p+63
+0b	nil	nil
+0b101	0x1.4p+2	0x1.4p+2
+0B11	0x1.8p+1	0x1.8p+1
+0b2	nil	nil
+0b1.0	nil	nil
+0b1111111111111111111111111111...(66)...11111111111111111111	0x1p+64	0x1p+64
+0b1111111111111111111111111111...(67)...11111111111111111111	nil	nil
+0b111111111111111111111111111111111111111111111111111111	0x1p+54	0x1p+54
+0xg	nil	nil
+0x 1	nil	nil
+0 x1	nil	nil
+1LL	nil	nil
+1ULL	nil	nil
+1i	nil	nil
+1U	nil	nil
+1L	nil	nil
+0x10LL	nil	nil
+1.5i	nil	nil
+1 LL	nil	nil
+1LL 	nil	nil
+1 i	nil	nil
+780	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
+791	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
+800	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
+801	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
+900	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	-0x1p+53
+0x0p+0	nil
+0x1p+0
+10	-0.5	inf	nil	nil	nil

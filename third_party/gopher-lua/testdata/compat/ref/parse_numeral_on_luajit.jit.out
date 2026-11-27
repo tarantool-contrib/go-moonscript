@@ -1,0 +1,185 @@
+0	0x0p+0
+00	0x0p+0
+1	0x1p+0
+007	0x1.cp+2
+1.	0x1p+0
+.5	0x1p-1
+1.5	0x1.8p+0
+0.1	0x1.999999999999ap-4
+1e5	0x1.86ap+16
+1E+5	0x1.86ap+16
+1e-5	0x1.4f8b588e368f1p-17
+1.e5	0x1.86ap+16
+1.5e-3	0x1.89374bc6a7efap-10
+123456789012345678901234567890	0x1.8ee90ff6c373ep+96
+9007199254740993	0x1p+53
+9007199254740995	0x1.0000000000002p+53
+1e308	0x1.1ccf385ebc8ap+1023
+1.7976931348623157e308	0x1.fffffffffffffp+1023
+1.7976931348623158e308	0x1.fffffffffffffp+1023
+1.7976931348623159e308	inf
+1e309	inf
+1e400	inf
+4.9406564584124654e-324	0x1p-1074
+2.4703282292062328e-324	0x1p-1074
+2.4703282292062327e-324	0x0p+0
+1e-400	0x0p+0
+2.2250738585072011e-308	0x1.ffffffffffffep-1023
+2.2250738585072012e-308	0x1p-1022
+1e	1: malformed number near '1e'
+1e+	1: malformed number near '1e+'
+1e-	1: malformed number near '1e-'
+1.5e	1: malformed number near '1.5e'
+1..5	1: malformed number near '1..5'
+3.4.5	1: malformed number near '3.4.5'
+1e1.5	1: malformed number near '1e1.5'
+1e5.	1: malformed number near '1e5.'
+1x	1: malformed number near '1x'
+1a	1: malformed number near '1a'
+1f	1: malformed number near '1f'
+1_000	1: malformed number near '1_000'
+1end	1: malformed number near '1end'
+1e+5+3	0x1.86a3p+16
+1-1	0x0p+0
+1e-1-1	-0x1.ccccccccccccdp-1
+1E-2	0x1.47ae147ae147bp-7
+1e1048575	inf
+1e1048576	1: malformed number near '1e1048576'
+1e-1048575	0x0p+0
+0e1048575	0x0p+0
+0e1048576	1: malformed number near '0e1048576'
+1e00000000000000000005	0x1.86ap+16
+0x	1: malformed number near '0x'
+0X	1: malformed number near '0X'
+0x.	1: malformed number near '0x.'
+0x.8	0x1p-1
+0x1.	0x1p+0
+0x1p	1: malformed number near '0x1p'
+0x1p+	1: malformed number near '0x1p+'
+0x1p-	1: malformed number near '0x1p-'
+0x1p4	0x1p+4
+0X1P-4	0x1p-4
+0xA.8p1	0x1.5p+4
+0x1e+1	0x1.fp+4
+0xe+1	0x1.ep+3
+0xep1	0x1.cp+4
+0xg	1: malformed number near '0xg'
+0x1g	1: malformed number near '0x1g'
+0x1.8	0x1.8p+0
+0x.p1	1: malformed number near '0x.p1'
+0x1p1023	0x1p+1023
+0x1p1024	inf
+0x1.fffffffffffffp1023	0x1.fffffffffffffp+1023
+0x1.fffffffffffff8p1023	inf
+0x1p-1022	0x1p-1022
+0x1p-1074	0x1p-1074
+0x1p-1075	0x0p+0
+0x1.0000000000001p-1075	0x1p-1074
+0x1.8p-1074	0x1p-1073
+0x1.8p-1075	0x1p-1074
+0x3p-1076	0x1p-1074
+0x1.00000000000008p0	0x1p+0
+0x1.000000000000080000000001p0	0x1.0000000000001p+0
+0x1.00000000000018p0	0x1.0000000000002p+0
+0x1.000000000000180p0	0x1.0000000000002p+0
+0xffffffffffffffff	0x1p+64
+0xffffffffffffffffff	0x1p+72
+0x123456789abcdef0123	0x1.23456789abcdfp+72
+0x00000000000000000001	0x1p+0
+0x1P	1: malformed number near '0x1P'
+0x1p1048575	inf
+0x1p1048576	1: malformed number near '0x1p1048576'
+0x10e	0x1.0ep+8
+0x1.p1	0x1p+1
+0x1..2	1: malformed number near '0x1..2'
+0b	1: malformed number near '0b'
+0B	1: malformed number near '0B'
+0b0	0x0p+0
+0b1	0x1p+0
+0b101	0x1.4p+2
+0B11	0x1.8p+1
+0b2	1: malformed number near '0b2'
+0b12	1: malformed number near '0b12'
+0b1.0	1: malformed number near '0b1.0'
+0b.1	1: malformed number near '0b.1'
+0b1.	1: malformed number near '0b1.'
+0b11e1	1: malformed number near '0b11e1'
+0b1p1	1: malformed number near '0b1p1'
+0b11111111111111111111111111111111111111111111111111111	0x1.fffffffffffffp+52
+0b111111111111111111111111111111111111111111111111111111	0x1p+54
+0b1111111111111111111111111111111111111111111111111111111111111111	0x1p+64
+0b11111111111111111111111111111111111111111111111111111111111111111	1: malformed number near '0b11111111111111111111111111111111111111111111111111111111111111111'
+0b00000000000000000000000000000000000000000000000000000000000000000000001	0x1p+0
+0b1000000000000000000000000000000000000000000000000000000000000000	0x1p+63
+1LL	cdata
+1ll	cdata
+1lL	cdata
+1uLL	cdata
+1ULL	cdata
+1ull	cdata
+1LLU	cdata
+1llu	cdata
+1LLu	cdata
+1U	1: malformed number near '1U'
+1u	1: malformed number near '1u'
+1L	1: malformed number near '1L'
+1l	1: malformed number near '1l'
+1UL	1: malformed number near '1UL'
+1LU	1: malformed number near '1LU'
+1LLL	1: malformed number near '1LLL'
+1ULLU	1: malformed number near '1ULLU'
+1LLUU	1: malformed number near '1LLUU'
+1UU	1: malformed number near '1UU'
+1i	cdata
+1I	cdata
+1.5i	cdata
+.5i	cdata
+1e3i	cdata
+1e-3I	cdata
+0x10i	cdata
+0x1p4i	cdata
+0b11i	cdata
+1ii	1: malformed number near '1ii'
+1iLL	1: malformed number near '1iLL'
+1LLi	1: malformed number near '1LLi'
+1.5LL	1: malformed number near '1.5LL'
+1e2LL	1: malformed number near '1e2LL'
+1.LL	1: malformed number near '1.LL'
+0x1p4LL	1: malformed number near '0x1p4LL'
+0x10LL	cdata
+0x10ULL	cdata
+0xffffffffffffffffULL	cdata
+0xffffffffffffffffLL	cdata
+0x10000000000000000LL	1: malformed number near '0x10000000000000000LL'
+0x00000000000000000001LL	cdata
+18446744073709551615ULL	cdata
+18446744073709551616ULL	1: malformed number near '18446744073709551616ULL'
+18446744073709551615LL	cdata
+9223372036854775808LL	cdata
+99999999999999999999LL	1: malformed number near '99999999999999999999LL'
+100000000000000000000LL	1: malformed number near '100000000000000000000LL'
+00000000000000000000000001LL	cdata
+0LL	cdata
+0ll	cdata
+0ULL	cdata
+00LL	cdata
+0b1LL	cdata
+0b1111111111111111111111111111111111111111111111111111111111111111ULL	cdata
+0b11111111111111111111111111111111111111111111111111111111111111111ULL	1: malformed number near '0b11111111111111111111111111111111111111111111111111111111111111111ULL'
+0b2LL	1: malformed number near '0b2LL'
+0xLL	1: malformed number near '0xLL'
+0bLL	1: malformed number near '0bLL'
+1LLx	1: malformed number near '1LLx'
+1i5	1: malformed number near '1i5'
+1e5LL	1: malformed number near '1e5LL'
+780	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
+791	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
+800	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
+801	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
+900	0x1p+53	0x1.999999999999ap+49	0x1.0000000000001p+53	0x1p+53
+inf	0x0p+0
+0x0p+0	1: malformed number near '0.00000000000000000000000000000000...(1048605)...000000000000000000000000000000000000001'
+0x1p+0	0x1.999999999999ap-4
+0x1.b6b667e83f483p+594	0x1p+4	inf
+1: malformed number near '1000000000000000000000000000000000...(1048606)...0000000000000000000000000000000000000LL'	cdata
+100003	-0.5	15	0	0.5	16	12

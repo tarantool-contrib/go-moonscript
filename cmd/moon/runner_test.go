@@ -295,7 +295,7 @@ var smokeSkipsLuaJIT = map[string]string{
 	"docs_reference_097":    smokeSkips["docs_reference_097"],
 	"docs_reference_116":    jitTailCall,
 	"docs_standard_lib_013": "VM: LuaJIT 2.1 reports a failing tail call whose arguments span lines at the line they end on, the VM at the line of the call as Lua 5.1",
-	"spec_inputs_literals":  "VM: no FFI, so LuaJIT's 64-bit integer literals (1LL, 1ULL) are malformed numbers",
+	"spec_inputs_literals":  "VM: no FFI, so evaluating LuaJIT's 64-bit integer literals (1LL, 1ULL) is an error",
 }
 
 // TestMoonLuaEnv: MOON_LUA selects the dialect, an unknown value is an

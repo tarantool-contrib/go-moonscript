@@ -43,7 +43,11 @@ The first version: a native Go port of MoonScript v0.8.0.
 - A dialect option for the VM, `lua.Options{Dialect: ...}` /
   `runtime.StateOptions`: PUC Lua 5.1.5 (the default) or LuaJIT 2.1 (its
   syntax and library extensions: `goto`, `bit`, `jit`, `table.new`, ...;
-  no FFI).
+  no FFI). Its numerals and `tonumber` follow LuaJIT's `lj_strscan`
+  (binary `0b101`, hexadecimal floats, `inf`/`nan`, correct rounding); the
+  FFI's numerals `1LL`, `1ULL` and `12.5i` parse, as with `luajit`, and
+  evaluating one is a runtime error ("64-bit integer literal '1LL' needs
+  the FFI, which is not supported").
 - `MOON_LUA=luajit` runs `moon` in the LuaJIT 2.1 dialect, checked against
   upstream `moon` run by `luajit` (`testdata/*/ref_luajit/`); unset or
   `lua51` is Lua 5.1, any other value an error. Upstream's command line is

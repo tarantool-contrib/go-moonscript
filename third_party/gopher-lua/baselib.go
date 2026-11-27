@@ -7,6 +7,8 @@ import (
 	"math/bits"
 	"os"
 	"strings"
+
+	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
 )
 
 /* basic functions {{{ */
@@ -449,8 +451,14 @@ func baseToNumber(L *LState) int {
 		case LNumber:
 			L.Push(L.Get(1)) // go-moonscript patch: without boxing it again
 		case LString:
-			if L.Dialect() == DialectLuaJIT && strings.IndexByte(string(lv), 0) >= 0 {
-				L.Push(LNil) // go-moonscript patch: LuaJIT scans the whole string
+			if L.Dialect() == DialectLuaJIT {
+				// go-moonscript patch: LuaJIT's lj_strscan ("0b101" is 5,
+				// "nan(1)" and a string with a NUL are no numbers)
+				if v, ok := parse.ScanNumberLuaJIT(string(lv)); ok {
+					pushNumber(L, LNumber(v))
+				} else {
+					L.Push(LNil)
+				}
 				break
 			}
 			// go-moonscript patch (halogencapital/gopher-lua d3de08565a,

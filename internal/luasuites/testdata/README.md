@@ -62,8 +62,7 @@ files. The same command lines run on the reference interpreters.
   `tarantool`, `vshard` and `crud`, real-world code) must be accepted or
   rejected by `loadstring` as by lua5.1 and by luajit (a first line
   starting with `#` is emptied, as `loadfile` does). A row is a file where
-  ours differs from either; LuaJIT-only syntax (`goto`, `0x1p4`, `1LL`,
-  `\u{...}`) differs from luajit by design.
+  ours differs from either.
 
 ## The ledger
 

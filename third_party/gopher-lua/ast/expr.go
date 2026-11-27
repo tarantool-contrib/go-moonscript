@@ -50,6 +50,16 @@ type StringExpr struct {
 
 /* ConstExprs }}} */
 
+// CdataNumberExpr is a numeral LuaJIT reads as cdata, accepted in the
+// LuaJIT dialect: a 64-bit integer (1LL, 1ULL, 1LLU) or an imaginary number
+// (1i). Value is its text. The VM has no FFI: evaluating one is an error.
+// go-moonscript patch.
+type CdataNumberExpr struct {
+	ExprBase
+
+	Value string
+}
+
 type Comma3Expr struct {
 	ExprBase
 	AdjustRet bool

@@ -60,7 +60,8 @@
 //   - Debug hooks are per coroutine and line events fall on Lua 5.1's
 //     lines, so moon -c reports Lua 5.1's coverage; LuaJIT's hook also
 //     runs in coroutines and its constant table fields have no line events.
-//   - There is no FFI: 64-bit integer literals (1LL, 1ULL) don't parse.
+//   - There is no FFI: 64-bit integer literals (1LL, 1ULL) parse, but
+//     evaluating one is an error.
 package main
 
 import (
