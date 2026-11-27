@@ -2537,11 +2537,28 @@ func (ls *LState) SetMetatable(obj LValue, mt LValue) {
 	case *LUserData:
 		v.Metatable = mt
 	default:
+		if ls.G.typeMtsFrozen { // go-moonscript patch (FreezeTypeMetatables)
+			ls.RaiseError("cannot change a protected metatable")
+		}
 		ls.G.builtinMts[int(obj.Type())] = mt
 		return
 	}
 	ls.gcSetMetatable(obj, mt) // go-moonscript patch: weak tables, __gc (gc.go)
 }
+
+// FreezeTypeMetatables makes the metatables of the types that share one
+// per state (strings, numbers, booleans, nil, functions, threads, channels)
+// final: from then on, setting one (debug.setmetatable, SetMetatable)
+// raises the Lua error "cannot change a protected metatable", as setmetatable
+// does for a metatable with a __metatable field. Tables and userdata keep
+// their own metatables. It is for good, for the state and its threads; the
+// metatable tables themselves are frozen with LTable.Freeze. By default the
+// metatables can be set, as in Lua. (go-moonscript patch)
+func (ls *LState) FreezeTypeMetatables() { ls.G.typeMtsFrozen = true }
+
+// TypeMetatablesFrozen reports whether FreezeTypeMetatables was called.
+// (go-moonscript patch)
+func (ls *LState) TypeMetatablesFrozen() bool { return ls.G.typeMtsFrozen }
 
 /* }}} */
 

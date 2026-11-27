@@ -190,8 +190,11 @@ type Global struct {
 	Global        *LTable
 
 	builtinMts map[int]LValue
-	tempFiles  []*os.File
-	gccount    int32
+	// go-moonscript patch: the metatables of the types other than tables
+	// and userdata can no longer be set (LState.FreezeTypeMetatables)
+	typeMtsFrozen bool
+	tempFiles     []*os.File
+	gccount       int32
 
 	// go-moonscript patch: the standard streams and open files of the io
 	// library (iolib.go)

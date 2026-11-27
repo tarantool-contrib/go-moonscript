@@ -564,6 +564,12 @@ that change.
     - sandbox/: Env freezes the library copies it gives;
       sandbox.FreezeLibraries freezes the state's library tables and the
       string and file metatables (the globals and package stay writable).
+    - _state.go/state.go, value.go: LState.FreezeTypeMetatables makes the
+      metatables the types other than tables and userdata share per state
+      final: SetMetatable/debug.setmetatable on a string, number, boolean,
+      nil, function, thread or channel raises lua5.1's "cannot change a
+      protected metatable" (off by default, as in Lua);
+      sandbox.FreezeLibraries calls it. Tests: typemt_fix_test.go.
 
   - Loading a syntax tree (go-moonscript):
     - compileast.go (new): lua.CompileAST(chunk, chunkname, dialect) and
@@ -1058,22 +1064,22 @@ regenerates the diff below; this header is edited by hand.
 +	uv := ls.uvcache
 +	for ; uv != nil && uv.index > idx; uv = uv.next {
 +		prev = uv
-+	}
-+	if uv != nil && uv.index == idx {
-+		return uv
  	}
 -	uv := &Upvalue{reg: ls.reg, index: idx, closed: false}
++	if uv != nil && uv.index == idx {
++		return uv
++	}
 +	nuv := &Upvalue{reg: ls.reg, index: idx, next: uv}
  	if prev != nil {
 -		prev.next = uv
 +		prev.next = nuv
  	} else {
 -		ls.uvcache = uv
-+		ls.uvcache = nuv
- 	}
+-	}
 -	if next != nil {
 -		uv.next = next
--	}
++		ls.uvcache = nuv
+ 	}
 -	return uv
 +	return nuv
  }
@@ -1585,12 +1591,11 @@ regenerates the diff below; this header is edited by hand.
 +		dialect = parse.LuaJIT
 +	}
 +	src, err := io.ReadAll(reader)
- 	if err != nil {
- 		return nil, newApiErrorE(ApiErrorSyntax, err)
- 	}
--	proto, err := Compile(chunk, name)
-+	chunk, err := parse.ParseBytes(src, parseName, dialect)
 +	if err != nil {
++		return nil, newApiErrorE(ApiErrorSyntax, err)
++	}
++	chunk, err := parse.ParseBytes(src, parseName, dialect)
+ 	if err != nil {
 +		// go-moonscript patch: a function that needs too many registers
 +		// before the error, which lua5.1 finds while parsing (lua51Overflow)
 +		if dialect == parse.Lua51 {
@@ -1603,8 +1608,9 @@ regenerates the diff below; this header is edited by hand.
 +		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
 +			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: parseName}
 +		}
-+		return nil, newApiErrorE(ApiErrorSyntax, err)
-+	}
+ 		return nil, newApiErrorE(ApiErrorSyntax, err)
+ 	}
+-	proto, err := Compile(chunk, name)
 +	proto, err := compileDialect(chunk, parseName, ls.Dialect()) // go-moonscript patch
 +	// go-moonscript patch: lua5.1 finds that a function needs too many
 +	// registers while parsing, and reports it near the token it is at; the
@@ -1670,7 +1676,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) SetMetatable(obj LValue, mt LValue) {
  	switch mt.(type) {
  	case *LNilType, *LTable:
-@@ -1917,12 +2317,17 @@
+@@ -1917,14 +2317,36 @@
  
  	switch v := obj.(type) {
  	case *LTable:
@@ -1681,14 +1687,33 @@ regenerates the diff below; this header is edited by hand.
  	case *LUserData:
  		v.Metatable = mt
  	default:
++		if ls.G.typeMtsFrozen { // go-moonscript patch (FreezeTypeMetatables)
++			ls.RaiseError("cannot change a protected metatable")
++		}
  		ls.G.builtinMts[int(obj.Type())] = mt
 +		return
  	}
 +	ls.gcSetMetatable(obj, mt) // go-moonscript patch: weak tables, __gc (gc.go)
  }
  
++// FreezeTypeMetatables makes the metatables of the types that share one
++// per state (strings, numbers, booleans, nil, functions, threads, channels)
++// final: from then on, setting one (debug.setmetatable, SetMetatable)
++// raises the Lua error "cannot change a protected metatable", as setmetatable
++// does for a metatable with a __metatable field. Tables and userdata keep
++// their own metatables. It is for good, for the state and its threads; the
++// metatable tables themselves are frozen with LTable.Freeze. By default the
++// metatables can be set, as in Lua. (go-moonscript patch)
++func (ls *LState) FreezeTypeMetatables() { ls.G.typeMtsFrozen = true }
++
++// TypeMetatablesFrozen reports whether FreezeTypeMetatables was called.
++// (go-moonscript patch)
++func (ls *LState) TypeMetatablesFrozen() bool { return ls.G.typeMtsFrozen }
++
  /* }}} */
-@@ -1935,7 +2340,10 @@
+ 
+ /* coroutine operations {{{ */
+@@ -1935,7 +2357,10 @@
  		status = "dead"
  	} else if ls.G.CurrentThread == th {
  		status = "running"
@@ -1700,7 +1725,7 @@ regenerates the diff below; this header is edited by hand.
  		status = "normal"
  	}
  	return status
-@@ -1943,7 +2351,7 @@
+@@ -1943,7 +2368,7 @@
  
  func (ls *LState) Resume(th *LState, fn *LFunction, args ...LValue) (ResumeState, error, []LValue) {
  	isstarted := th.isStarted()
@@ -1709,7 +1734,7 @@ regenerates the diff below; this header is edited by hand.
  		base := 0
  		th.stack.Push(callFrame{
  			Fn:         fn,
-@@ -1964,8 +2372,18 @@
+@@ -1964,8 +2389,18 @@
  	if th.Dead {
  		return ResumeError, newApiErrorS(ApiErrorRun, "can not resume a dead thread"), nil
  	}
@@ -1728,7 +1753,7 @@ regenerates the diff below; this header is edited by hand.
  	if !isstarted {
  		cf := th.stack.Last()
  		th.currentFrame = cf
-@@ -1976,10 +2394,13 @@
+@@ -1976,10 +2411,13 @@
  		cf.NArgs = len(args)
  		th.initCallFrame(cf)
  		th.Panic = panicWithoutTraceback
@@ -1742,7 +1767,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	top := ls.GetTop()
  	threadRun(th)
-@@ -1995,7 +2416,7 @@
+@@ -1995,7 +2433,7 @@
  
  	if haserror {
  		return ResumeError, newApiError(ApiErrorRun, ret[0]), nil
@@ -1751,7 +1776,7 @@ regenerates the diff below; this header is edited by hand.
  		return ResumeOK, nil, ret
  	}
  	return ResumeYield, nil, ret
-@@ -2015,8 +2436,15 @@
+@@ -2015,8 +2453,15 @@
  	}
  	top := ls.GetTop()
  	n = intMin(n, top)
@@ -25449,7 +25474,7 @@ regenerates the diff below; this header is edited by hand.
  /* }}} */
 --- a/sandbox/sandbox.go
 +++ b/sandbox/sandbox.go
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,317 @@
 +// Package sandbox builds an environment for untrusted Lua code from an
 +// allow-list of globals and modules, and loads chunks into it.
 +//
@@ -25576,10 +25601,12 @@ regenerates the diff below; this header is edited by hand.
 +//
 +// The globals table and package are not frozen: package.path,
 +// package.preload and package.loaded are the state's configuration and
-+// module cache, which require and programs write. debug.setmetatable can
-+// still replace the metatable of strings, as it is not a change to a
-+// table; the sandbox does not give the debug library by mask.
++// module cache, which require and programs write. The metatables of
++// strings and the other types without metatables of their own are made
++// final as well (lua.LState.FreezeTypeMetatables), so debug.setmetatable
++// cannot replace them.
 +func FreezeLibraries(L *lua.LState) {
++	L.FreezeTypeMetatables()
 +	globals := L.G.Global
 +	for _, name := range libraries {
 +		if lib, ok := globals.RawGetString(name).(*lua.LTable); ok {
@@ -25767,7 +25794,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/sandbox/sandbox_test.go
 +++ b/sandbox/sandbox_test.go
-@@ -0,0 +1,306 @@
+@@ -0,0 +1,321 @@
 +package sandbox_test
 +
 +import (
@@ -26031,6 +26058,21 @@ regenerates the diff below; this header is edited by hand.
 +			if want := "false sandboxed:1: attempt to modify a read-only table"; got != want {
 +				t.Errorf("%s: got %q, want %q", code, got, want)
 +			}
++		}
++		// debug.setmetatable cannot replace the metatable of strings (or of
++		// another type that shares one), from the host either
++		if err := L.DoString(`
++			for _, v in ipairs{"", 1, true, print} do
++				local ok, err = pcall(debug.setmetatable, v, {})
++				assert(not ok and err == "cannot change a protected metatable", tostring(err))
++			end
++			assert(not pcall(debug.setmetatable, nil, {}))
++			assert(getmetatable("").__index == string)
++			local t = {}
++			debug.setmetatable(t, {__index = {k = 1}})
++			assert(t.k == 1, "tables keep their own metatables")
++		`); err != nil {
++			t.Errorf("debug.setmetatable after FreezeLibraries: %v", err)
 +		}
 +		// the host cannot change them either, and the libraries work
 +		if err := L.DoString(`
@@ -26471,22 +26513,22 @@ regenerates the diff below; this header is edited by hand.
 +	uv := ls.uvcache
 +	for ; uv != nil && uv.index > idx; uv = uv.next {
 +		prev = uv
-+	}
-+	if uv != nil && uv.index == idx {
-+		return uv
  	}
 -	uv := &Upvalue{reg: ls.reg, index: idx, closed: false}
++	if uv != nil && uv.index == idx {
++		return uv
++	}
 +	nuv := &Upvalue{reg: ls.reg, index: idx, next: uv}
  	if prev != nil {
 -		prev.next = uv
 +		prev.next = nuv
  	} else {
 -		ls.uvcache = uv
-+		ls.uvcache = nuv
- 	}
+-	}
 -	if next != nil {
 -		uv.next = next
--	}
++		ls.uvcache = nuv
+ 	}
 -	return uv
 +	return nuv
  }
@@ -27012,12 +27054,11 @@ regenerates the diff below; this header is edited by hand.
 +		dialect = parse.LuaJIT
 +	}
 +	src, err := io.ReadAll(reader)
- 	if err != nil {
- 		return nil, newApiErrorE(ApiErrorSyntax, err)
- 	}
--	proto, err := Compile(chunk, name)
-+	chunk, err := parse.ParseBytes(src, parseName, dialect)
 +	if err != nil {
++		return nil, newApiErrorE(ApiErrorSyntax, err)
++	}
++	chunk, err := parse.ParseBytes(src, parseName, dialect)
+ 	if err != nil {
 +		// go-moonscript patch: a function that needs too many registers
 +		// before the error, which lua5.1 finds while parsing (lua51Overflow)
 +		if dialect == parse.Lua51 {
@@ -27030,8 +27071,9 @@ regenerates the diff below; this header is edited by hand.
 +		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
 +			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: parseName}
 +		}
-+		return nil, newApiErrorE(ApiErrorSyntax, err)
-+	}
+ 		return nil, newApiErrorE(ApiErrorSyntax, err)
+ 	}
+-	proto, err := Compile(chunk, name)
 +	proto, err := compileDialect(chunk, parseName, ls.Dialect()) // go-moonscript patch
 +	// go-moonscript patch: lua5.1 finds that a function needs too many
 +	// registers while parsing, and reports it near the token it is at; the
@@ -27097,7 +27139,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) SetMetatable(obj LValue, mt LValue) {
  	switch mt.(type) {
  	case *LNilType, *LTable:
-@@ -2130,12 +2530,17 @@
+@@ -2130,14 +2530,36 @@
  
  	switch v := obj.(type) {
  	case *LTable:
@@ -27108,14 +27150,33 @@ regenerates the diff below; this header is edited by hand.
  	case *LUserData:
  		v.Metatable = mt
  	default:
++		if ls.G.typeMtsFrozen { // go-moonscript patch (FreezeTypeMetatables)
++			ls.RaiseError("cannot change a protected metatable")
++		}
  		ls.G.builtinMts[int(obj.Type())] = mt
 +		return
  	}
 +	ls.gcSetMetatable(obj, mt) // go-moonscript patch: weak tables, __gc (gc.go)
  }
  
++// FreezeTypeMetatables makes the metatables of the types that share one
++// per state (strings, numbers, booleans, nil, functions, threads, channels)
++// final: from then on, setting one (debug.setmetatable, SetMetatable)
++// raises the Lua error "cannot change a protected metatable", as setmetatable
++// does for a metatable with a __metatable field. Tables and userdata keep
++// their own metatables. It is for good, for the state and its threads; the
++// metatable tables themselves are frozen with LTable.Freeze. By default the
++// metatables can be set, as in Lua. (go-moonscript patch)
++func (ls *LState) FreezeTypeMetatables() { ls.G.typeMtsFrozen = true }
++
++// TypeMetatablesFrozen reports whether FreezeTypeMetatables was called.
++// (go-moonscript patch)
++func (ls *LState) TypeMetatablesFrozen() bool { return ls.G.typeMtsFrozen }
++
  /* }}} */
-@@ -2148,7 +2553,10 @@
+ 
+ /* coroutine operations {{{ */
+@@ -2148,7 +2570,10 @@
  		status = "dead"
  	} else if ls.G.CurrentThread == th {
  		status = "running"
@@ -27127,7 +27188,7 @@ regenerates the diff below; this header is edited by hand.
  		status = "normal"
  	}
  	return status
-@@ -2156,7 +2564,7 @@
+@@ -2156,7 +2581,7 @@
  
  func (ls *LState) Resume(th *LState, fn *LFunction, args ...LValue) (ResumeState, error, []LValue) {
  	isstarted := th.isStarted()
@@ -27136,7 +27197,7 @@ regenerates the diff below; this header is edited by hand.
  		base := 0
  		th.stack.Push(callFrame{
  			Fn:         fn,
-@@ -2177,8 +2585,18 @@
+@@ -2177,8 +2602,18 @@
  	if th.Dead {
  		return ResumeError, newApiErrorS(ApiErrorRun, "can not resume a dead thread"), nil
  	}
@@ -27155,7 +27216,7 @@ regenerates the diff below; this header is edited by hand.
  	if !isstarted {
  		cf := th.stack.Last()
  		th.currentFrame = cf
-@@ -2189,10 +2607,13 @@
+@@ -2189,10 +2624,13 @@
  		cf.NArgs = len(args)
  		th.initCallFrame(cf)
  		th.Panic = panicWithoutTraceback
@@ -27169,7 +27230,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	top := ls.GetTop()
  	threadRun(th)
-@@ -2208,7 +2629,7 @@
+@@ -2208,7 +2646,7 @@
  
  	if haserror {
  		return ResumeError, newApiError(ApiErrorRun, ret[0]), nil
@@ -27178,7 +27239,7 @@ regenerates the diff below; this header is edited by hand.
  		return ResumeOK, nil, ret
  	}
  	return ResumeYield, nil, ret
-@@ -2228,8 +2649,15 @@
+@@ -2228,8 +2666,15 @@
  	}
  	top := ls.GetTop()
  	n = intMin(n, top)
@@ -49491,6 +49552,66 @@ regenerates the diff below; this header is edited by hand.
 +u:bump(1):bump(2)
 +add(u.n)
 +return table.concat(out, ";")
+--- a/typemt_fix_test.go
++++ b/typemt_fix_test.go
+@@ -0,0 +1,57 @@
++package lua
++
++// go-moonscript patch: tests of LState.FreezeTypeMetatables.
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestFreezeTypeMetatables(t *testing.T) {
++	for _, dialect := range []Dialect{DialectLua51, DialectLuaJIT} {
++		L := NewState(Options{Dialect: dialect})
++		// by default, as in Lua, they can be set
++		if err := L.DoString(`
++			debug.setmetatable(1, {__index = {double = function(n) return n * 2 end}})
++			assert((2):double() == 4)
++			debug.setmetatable(1, nil)
++		`); err != nil {
++			t.Fatalf("%v: before: %v", dialect, err)
++		}
++		if L.TypeMetatablesFrozen() {
++			t.Fatalf("%v: frozen by default", dialect)
++		}
++		L.FreezeTypeMetatables()
++		if !L.TypeMetatablesFrozen() {
++			t.Fatalf("%v: not frozen", dialect)
++		}
++		if err := L.DoString(`
++			for _, v in ipairs{"", 1, true, print, coroutine.create(function() end)} do
++				local ok, err = pcall(debug.setmetatable, v, {})
++				assert(not ok and err == "cannot change a protected metatable", type(v) .. ": " .. tostring(err))
++				ok, err = pcall(debug.setmetatable, v, nil)
++				assert(not ok, type(v) .. ": nil metatable set")
++			end
++			assert(getmetatable("").__index == string and getmetatable(1) == nil)
++			local mt = {}
++			assert(getmetatable(setmetatable({}, mt)) == mt)
++			local u = {} debug.setmetatable(u, mt) assert(getmetatable(u) == mt)
++			-- in a coroutine, which shares the state's metatables
++			local co = coroutine.create(function() return pcall(debug.setmetatable, "", {}) end)
++			local _, ok = coroutine.resume(co)
++			assert(ok == false)
++		`); err != nil {
++			t.Errorf("%v: after: %v", dialect, err)
++		}
++		// from Go: the Lua error
++		fn := L.NewFunction(func(L *LState) int {
++			L.SetMetatable(LString(""), L.NewTable())
++			return 0
++		})
++		L.Push(fn)
++		if err := L.PCall(0, 0, nil); err == nil || !strings.Contains(err.Error(), "cannot change a protected metatable") {
++			t.Errorf("%v: SetMetatable from Go: %v", dialect, err)
++		}
++		L.Close()
++	}
++}
 --- a/utils.go
 +++ b/utils.go
 @@ -4,6 +4,7 @@
@@ -49906,10 +50027,17 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (tb *LTable) String() string   { return fmt.Sprintf("table: %p", tb) }
-@@ -174,6 +192,16 @@
+@@ -172,8 +190,21 @@
+ 	Global        *LTable
+ 
  	builtinMts map[int]LValue
- 	tempFiles  []*os.File
- 	gccount    int32
+-	tempFiles  []*os.File
+-	gccount    int32
++	// go-moonscript patch: the metatables of the types other than tables
++	// and userdata can no longer be set (LState.FreezeTypeMetatables)
++	typeMtsFrozen bool
++	tempFiles     []*os.File
++	gccount       int32
 +
 +	// go-moonscript patch: the standard streams and open files of the io
 +	// library (iolib.go)
@@ -49923,7 +50051,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  type LState struct {
-@@ -189,12 +217,16 @@
+@@ -189,12 +220,16 @@
  	stack        callFrameStack
  	alloc        *allocator
  	currentFrame *callFrame

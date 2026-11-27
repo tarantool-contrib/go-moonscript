@@ -124,10 +124,12 @@ var libraries = []string{
 //
 // The globals table and package are not frozen: package.path,
 // package.preload and package.loaded are the state's configuration and
-// module cache, which require and programs write. debug.setmetatable can
-// still replace the metatable of strings, as it is not a change to a
-// table; the sandbox does not give the debug library by mask.
+// module cache, which require and programs write. The metatables of
+// strings and the other types without metatables of their own are made
+// final as well (lua.LState.FreezeTypeMetatables), so debug.setmetatable
+// cannot replace them.
 func FreezeLibraries(L *lua.LState) {
+	L.FreezeTypeMetatables()
 	globals := L.G.Global
 	for _, name := range libraries {
 		if lib, ok := globals.RawGetString(name).(*lua.LTable); ok {

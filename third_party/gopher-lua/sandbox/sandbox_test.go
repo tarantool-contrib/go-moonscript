@@ -262,6 +262,21 @@ func TestFreezeLibraries(t *testing.T) {
 				t.Errorf("%s: got %q, want %q", code, got, want)
 			}
 		}
+		// debug.setmetatable cannot replace the metatable of strings (or of
+		// another type that shares one), from the host either
+		if err := L.DoString(`
+			for _, v in ipairs{"", 1, true, print} do
+				local ok, err = pcall(debug.setmetatable, v, {})
+				assert(not ok and err == "cannot change a protected metatable", tostring(err))
+			end
+			assert(not pcall(debug.setmetatable, nil, {}))
+			assert(getmetatable("").__index == string)
+			local t = {}
+			debug.setmetatable(t, {__index = {k = 1}})
+			assert(t.k == 1, "tables keep their own metatables")
+		`); err != nil {
+			t.Errorf("debug.setmetatable after FreezeLibraries: %v", err)
+		}
 		// the host cannot change them either, and the libraries work
 		if err := L.DoString(`
 			for _, lib in ipairs{"string", "table", "math", "os", "io", "coroutine", "debug"} do
