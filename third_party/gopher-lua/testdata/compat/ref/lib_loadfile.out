@@ -1,0 +1,25 @@
+missing	nil	cannot open files/nonexist.lua: No such file or directory
+missing dofile	false	cannot open files/nonexist.lua: No such file or directory
+missing dir	nil	cannot open files/nodir/x.lua: No such file or directory
+directory	nil	cannot read files: Is a directory
+directory dofile	false	cannot read files: Is a directory
+empty name	nil	cannot open : No such file or directory
+empty name dofile	false	cannot open : No such file or directory
+not a string	false	bad argument #1 to '?' (string expected, got table)
+not a string dofile	false	bad argument #1 to '?' (string expected, got table)
+number name	nil	cannot open 42: No such file or directory
+results	3	1	2	3
+empty	true
+source	@files/err.lua	files/err.lua
+runtime error	false	files/err.lua:2: in err
+runtime error dofile	false	files/err.lua:2: in err
+shebang ran	2	@files/shebang.lua
+shebang	true	7
+shebang syntax error	nil	files/shebang_err.lua:2: unexpected symbol near '='
+shebang syntax error dofile	false	files/shebang_err.lua:2: unexpected symbol near '='
+shebang runtime error	false	files/shebang_rt.lua:3: rt
+shebang only	true
+binary	true	from the dump
+shebang binary	from the dump
+shebang no newline	true
+shebang lines	true	3

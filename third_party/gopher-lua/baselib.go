@@ -1,11 +1,9 @@
 package lua
 
 import (
-	"fmt"
 	"io"
 	"math"
 	"math/bits"
-	"os"
 	"strings"
 
 	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
@@ -71,13 +69,23 @@ func baseAssert(L *LState) int {
 	return L.GetTop()
 }
 
+// optFileName is luaL_optstring(L, 1, NULL) for loadfile and dofile: the
+// file name, or stdin true for none or nil (go-moonscript patch).
+func optFileName(L *LState) (path string, stdin bool) {
+	if L.Get(1) == LNil {
+		return "", true
+	}
+	return L.CheckString(1), false
+}
+
+// baseDoFile is luaB_dofile (go-moonscript patch): dofile(nil) runs the
+// standard input, a load error is raised as luaL_loadfile gives it.
 func baseDoFile(L *LState) int {
-	src := L.ToString(1)
+	path, stdin := optFileName(L)
 	top := L.GetTop()
-	fn, err := L.LoadFile(src)
+	fn, err := L.loadFile(path, stdin)
 	if err != nil {
-		L.Push(LString(err.Error()))
-		L.Panic(L)
+		L.Error(loadErrorValue(err), 0)
 	}
 	L.Push(fn)
 	L.Call(0, MultRet)
@@ -236,30 +244,15 @@ func baseLoad(L *LState) int {
 	return loadaux(L, strings.NewReader(buf.String()), chunkname)
 }
 
+// go-moonscript patch: loadfile is luaB_loadfile: luaL_loadfile's chunk
+// name ("@" + the file name, "=stdin" for none or nil), "#" line and
+// messages (chunkname.go).
 func baseLoadFile(L *LState) int {
 	if L.Dialect() == DialectLuaJIT { // go-moonscript patch (luajitlib.go)
 		return jitLoadFile(L)
 	}
-	var reader io.Reader
-	var chunkname string
-	var err error
-	if L.GetTop() < 1 {
-		reader = L.Stdin()   // go-moonscript patch: the io library's stdin
-		chunkname = "=stdin" // go-moonscript patch: Lua chunk names (chunkname.go)
-	} else {
-		chunkname = L.CheckString(1)
-		reader, err = os.Open(chunkname)
-		if err != nil {
-			L.Push(LNil)
-			L.Push(LString(fmt.Sprintf("can not open file: %v", chunkname)))
-			return 2
-		}
-		defer reader.(*os.File).Close()
-	}
-	if chunkname != "=stdin" {
-		chunkname = "@" + chunkname // go-moonscript patch
-	}
-	return loadaux(L, reader, chunkname)
+	fn, err := L.loadFile(optFileName(L))
+	return pushLoadResult(L, fn, err)
 }
 
 // go-moonscript patch: loadstring(s [, chunkname]) names the chunk s by

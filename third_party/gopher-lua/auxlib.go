@@ -1,11 +1,8 @@
 package lua
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 )
@@ -401,50 +398,16 @@ func (ls *LState) CallMeta(obj LValue, event string) LValue {
 
 /* load and function call operations {{{ */
 
+// LoadFile loads the chunk in file path, or in the standard input (the io
+// library's) if path is "". go-moonscript patch: it is luaL_loadfile, the
+// chunk named "@" + path ("=stdin"), so its errors show the path and
+// debug.getinfo its source as in Lua; a first line starting with '#' is
+// skipped, keeping the line numbers (and a binary chunk after it loads
+// under DialectLua51); a file that cannot be read is the ApiErrorFile
+// "cannot open <path>: <strerror>" ("cannot read ..."), its Cause the Go
+// error (chunkname.go).
 func (ls *LState) LoadFile(path string) (*LFunction, error) {
-	var file *os.File
-	var err error
-	if len(path) == 0 {
-		file = os.Stdin
-	} else {
-		file, err = os.Open(path)
-		defer file.Close()
-		if err != nil {
-			return nil, newApiErrorE(ApiErrorFile, err)
-		}
-	}
-
-	reader := bufio.NewReader(file)
-	// get the first character.
-	c, err := reader.ReadByte()
-	if err != nil && err != io.EOF {
-		return nil, newApiErrorE(ApiErrorFile, err)
-	}
-	// go-moonscript patch: LuaJIT's parser skips the "#" line itself (and
-	// refuses bytecode after it)
-	if c == byte('#') && ls.Dialect() != DialectLuaJIT {
-		// Unix exec. file?
-		// skip first line
-		_, err, _ = readBufioLine(reader)
-		if err != nil {
-			return nil, newApiErrorE(ApiErrorFile, err)
-		}
-	}
-
-	if err != io.EOF {
-		// if the file is not empty,
-		// unread the first character of the file or newline character(readBufioLine's last byte).
-		err = reader.UnreadByte()
-		if err != nil {
-			return nil, newApiErrorE(ApiErrorFile, err)
-		}
-	}
-
-	// go-moonscript patch: Lua chunk names (chunkname.go)
-	if len(path) == 0 {
-		return ls.LoadChunk(reader, "=stdin")
-	}
-	return ls.LoadChunk(reader, "@"+path)
+	return ls.loadFile(path, path == "")
 }
 
 func (ls *LState) LoadString(source string) (*LFunction, error) {

@@ -264,46 +264,18 @@ func jitHeaderBytecode(code string) bool {
 
 // jitLoadFile is LuaJIT 2.1's loadfile(filename [, mode [, env]]).
 func jitLoadFile(L *LState) int {
+	fname, hasName := jitOptString(L, 1)
 	mode, hasMode := jitOptString(L, 2)
 	env, _ := L.Get(3).(*LTable)
-	var code []byte
-	var chunkname string
-	var err error
-	if fname, ok := jitOptString(L, 1); ok {
-		chunkname = "@" + fname // go-moonscript patch: Lua chunk names
-		code, err = os.ReadFile(fname)
-	} else {
-		chunkname = "=stdin"
-		code, err = readAllStdin()
-	}
+	// go-moonscript patch: luaL_loadfilex's chunk name ("@" + the file name,
+	// "=stdin") and messages; the parser skips a first "#" line
+	// (lj_lex_setup; luaL_loadfilex reads the file as it is), and refuses
+	// bytecode after it (chunkname.go)
+	code, chunkname, err := L.readChunkFile(fname, !hasName)
 	if err != nil {
-		msg := err.Error()
-		if pe, ok := err.(*os.PathError); ok {
-			msg = pe.Err.Error()
-		}
-		if msg != "" {
-			msg = strings.ToUpper(msg[:1]) + msg[1:]
-		}
-		L.Push(LNil)
-		L.Push(LString("cannot open " + chunkname[1:] + ": " + msg))
-		return 2
+		return pushLoadResult(L, nil, err)
 	}
-	// go-moonscript patch: the parser skips a first "#" line (lj_lex_setup;
-	// luaL_loadfilex reads the file as it is), and refuses bytecode after it
-	src := string(code)
-	return jitLoadChecked(L, src, chunkname, mode, hasMode, env)
-}
-
-func readAllStdin() ([]byte, error) {
-	var buf []byte
-	tmp := make([]byte, 4096)
-	for {
-		n, err := os.Stdin.Read(tmp)
-		buf = append(buf, tmp[:n]...)
-		if err != nil {
-			return buf, nil
-		}
-	}
+	return jitLoadChecked(L, code, chunkname, mode, hasMode, env)
 }
 
 // jitAssert is LuaJIT 2.1's assert: a string or number message is raised

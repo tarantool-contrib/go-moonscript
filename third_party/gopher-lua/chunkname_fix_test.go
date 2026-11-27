@@ -1,13 +1,16 @@
 package lua
 
 // go-moonscript patch: Lua chunk names on a plain state (chunkname.go):
-// ChunkID, LState.Load's display names, LoadChunk, the chunk names of
-// LoadFile and DoFile, debug.getinfo's source and short_src. The Lua side
-// is in testdata/compat/lib_chunkname.lua.
+// ChunkID, LState.Load's display names, LoadChunk, LoadFile and DoFile as
+// luaL_loadfile (chunk name, messages, "#" line), debug.getinfo's source
+// and short_src. The Lua side is in testdata/compat/lib_chunkname.lua,
+// lib_loadfile.lua and lib_require.lua.
 
 import (
 	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -67,6 +70,10 @@ func TestPlainLoadFile(t *testing.T) {
 	writeFile(t, "q.lua", "local i = debug.getinfo(1, 'S')\nsrc, short = i.source, i.short_src\n")
 	writeFile(t, "err.lua", "local x = 1\nerror('boom')\n")
 	writeFile(t, "syn.lua", "local x = 1\nx = = 2\n")
+	writeFile(t, "sheb.lua", "#!/usr/bin/lua\n\nerror('sheb')\n")
+	if err := os.Mkdir("dir", 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, d := range []Dialect{DialectLua51, DialectLuaJIT} {
 		L := NewState(Options{Dialect: d})
 		if err := L.DoFile("q.lua"); err != nil {
@@ -87,7 +94,8 @@ func TestPlainLoadFile(t *testing.T) {
 			t.Errorf("GetInfo: Source %q, ChunkName %q, %v", dbg.Source, dbg.ChunkName, err)
 		}
 		for file, want := range map[string]string{
-			"err.lua": "err.lua:2: boom",
+			"err.lua":  "err.lua:2: boom",
+			"sheb.lua": "sheb.lua:3: sheb",
 		} {
 			err := L.DoFile(file)
 			var ae *ApiError
@@ -96,7 +104,9 @@ func TestPlainLoadFile(t *testing.T) {
 			}
 		}
 		for file, want := range map[string]string{
-			"syn.lua": "syn.lua:2: unexpected symbol near '='",
+			"syn.lua":     "syn.lua:2: unexpected symbol near '='",
+			"missing.lua": "cannot open missing.lua: No such file or directory",
+			"dir":         "cannot read dir: Is a directory",
 		} {
 			_, err := L.LoadFile(file)
 			var ae *ApiError
@@ -107,7 +117,35 @@ func TestPlainLoadFile(t *testing.T) {
 				t.Errorf("DoFile(%q) = %v, want %q", file, err2, want)
 			}
 		}
+		_, err = L.LoadFile("missing.lua")
+		var ae *ApiError
+		if !errors.As(err, &ae) || ae.Type != ApiErrorFile || !errors.Is(ae.Cause, fs.ErrNotExist) {
+			t.Errorf("LoadFile(missing): %#v", err)
+		}
 		L.Close()
+	}
+}
+
+func TestPlainLoadFilePermission(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any file")
+	}
+	name := filepath.Join(t.TempDir(), "noperm.lua")
+	writeFile(t, name, "return 1")
+	if err := os.Chmod(name, 0); err != nil {
+		t.Fatal(err)
+	}
+	L := NewState()
+	defer L.Close()
+	want := "cannot open " + name + ": Permission denied"
+	if _, err := L.LoadFile(name); err == nil || err.Error() != want {
+		t.Errorf("LoadFile = %v, want %q", err, want)
+	}
+	if err := L.CallByParam(P{Fn: L.GetGlobal("loadfile"), NRet: 2, Protect: true}, LString(name)); err != nil {
+		t.Fatal(err)
+	}
+	if got := L.Get(-1).String(); got != want {
+		t.Errorf("loadfile: %q, want %q", got, want)
 	}
 }
 

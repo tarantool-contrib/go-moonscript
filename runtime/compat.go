@@ -5,15 +5,14 @@ package runtime
 // libraries that MoonScript tooling depends on behave like the reference
 // interpreter:
 //
-//   - chunk names and syntax errors are gopher-lua's own
+//   - chunk names, syntax errors, loadfile and dofile are gopher-lua's own
 //     (third_party/gopher-lua/chunkname.go): Lua chunk names ("@foo.moon",
 //     "=(command line)", source strings) are shown as luaO_chunkid does
 //     ("foo.moon:3:", "(command line)", [string "..."]) and debug.getinfo
 //     reports them as source (short_src is the shown name), which
 //     moonscript.errors relies on: it looks the file name from an error
 //     position up as line_tables["@" .. name]. LoadLua is loadstring's
-//     loading; loadfile, dofile and the package loaders here read files
-//     as luaL_loadfile does.
+//     loading.
 //   - require follows ll_require: package.loaders is read from the package
 //     table on every call (so moonscript.insert_loader works), and the
 //     "module 'x' not found:" message lists each loader's reason.
@@ -30,7 +29,6 @@ package runtime
 //     tostring.
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -47,20 +45,6 @@ func ChunkID(source string) string {
 	return lua.ChunkID(source, lua.DialectLua51)
 }
 
-// load compiles Lua code as chunk chunkname (a Lua chunk name: "@file",
-// "=name" or the source itself) and pushes the function, or pushes nil and
-// the error message; it returns the number of values pushed.
-func load(L *lua.LState, code, chunkname string) int {
-	fn, err := loadLua(L, code, chunkname)
-	if err != nil {
-		L.Push(lua.LNil)
-		L.Push(lua.LString(err.Error()))
-		return 2
-	}
-	L.Push(fn)
-	return 1
-}
-
 // loadLua compiles code as chunk chunkname (a Lua chunk name: "@file",
 // "=name" or the source itself), named like PUC Lua in error messages
 // (lua.LState.LoadChunk).
@@ -68,89 +52,10 @@ func loadLua(L *lua.LState, code, chunkname string) (*lua.LFunction, error) {
 	return L.LoadChunk(strings.NewReader(code), chunkname)
 }
 
-// strerror is the C library text for an OS error ("No such file or
-// directory"); Go's texts are the same, uncapitalized.
-func strerror(err error) string {
-	var pe *os.PathError
-	if errors.As(err, &pe) {
-		err = pe.Err
-	}
-	return capitalize(err.Error())
-}
-
-// readChunkFile is luaL_loadfile's reading part: the file text with a first
-// line starting with '#' blanked (its newline kept, so lines don't shift;
-// removed before a binary chunk). Under LuaJIT the text is the file's: the
-// parser skips the line itself and refuses bytecode after it.
-func readChunkFile(L *lua.LState, path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		what := "open"
-		var pe *os.PathError
-		if errors.As(err, &pe) && pe.Op == "read" {
-			what = "read"
-		}
-		return "", fmt.Errorf("cannot %s %s: %s", what, path, strerror(err))
-	}
-	text := string(data)
-	if strings.HasPrefix(text, "#") && L.Dialect() != lua.DialectLuaJIT {
-		if i := strings.IndexByte(text, '\n'); i >= 0 {
-			text = text[i:]
-		} else {
-			text = ""
-		}
-		if lua.IsBinaryChunk(strings.TrimPrefix(text, "\n")) {
-			text = text[1:] // a binary chunk (string.dump) after the line
-		}
-	}
-	return text, nil
-}
-
-// loadFile is luaL_loadfile: path "" reads stdin.
-func loadFile(L *lua.LState, path string) (*lua.LFunction, error) {
-	if path == "" {
-		data, err := io.ReadAll(L.Stdin())
-		if err != nil {
-			return nil, fmt.Errorf("cannot read stdin: %s", strerror(err))
-		}
-		return loadLua(L, string(data), "=stdin")
-	}
-	text, err := readChunkFile(L, path)
-	if err != nil {
-		return nil, err
-	}
-	return loadLua(L, text, "@"+path)
-}
-
 // OpenCompat installs the Lua 5.1 compatibility patches described at the
 // top of this file. It needs the base, package, io and debug libraries.
 func OpenCompat(L *lua.LState) {
 	g := L.G.Global
-
-	g.RawSetString("loadfile", L.NewFunction(func(L *lua.LState) int {
-		fn, err := loadFile(L, L.OptString(1, ""))
-		if err != nil {
-			L.Push(lua.LNil)
-			L.Push(lua.LString(err.Error()))
-			return 2
-		}
-		L.Push(fn)
-		return 1
-	}))
-
-	g.RawSetString("dofile", L.NewFunction(func(L *lua.LState) int {
-		fn, err := loadFile(L, L.OptString(1, ""))
-		if err != nil {
-			L.Error(lua.LString(err.Error()), 0)
-		}
-		top := L.GetTop()
-		L.Push(fn)
-		L.Call(0, lua.MultRet)
-		return L.GetTop() - top
-	}))
-	if L.Dialect() == lua.DialectLuaJIT {
-		openLuaJITCompat(L) // LuaJIT's loadfile (luajit.go)
-	}
 
 	tostring := g.RawGetString("tostring").(*lua.LFunction)
 	g.RawSetString("tostring", L.NewFunction(func(L *lua.LState) int {
@@ -214,13 +119,6 @@ func OpenCompat(L *lua.LState) {
 			}))
 		}
 	}
-}
-
-func capitalize(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
 }
 
 // formatNumber is lua_number2str: "%.14g", with C's inf/nan spellings.
@@ -381,7 +279,7 @@ func loaderLua(L *lua.LState) int {
 		L.Push(lua.LString(msg))
 		return 1
 	}
-	fn, err := loadFile(L, fname)
+	fn, err := L.LoadFile(fname)
 	if err != nil {
 		raise(L, "error loading module '%s' from file '%s':\n\t%s", name, fname, err.Error())
 	}

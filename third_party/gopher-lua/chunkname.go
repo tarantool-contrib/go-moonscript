@@ -20,8 +20,12 @@ package lua
 // name.
 
 import (
+	"bufio"
+	"errors"
 	"io"
+	"os"
 	"strings"
+	"syscall"
 )
 
 const (
@@ -151,4 +155,79 @@ func (ls *LState) whereMessage(msg string) string {
 		return pos + " " + msg
 	}
 	return msg
+}
+
+// Strerror is the C library's text for an OS error, as strerror(errno)
+// gives it ("No such file or directory"); Go's texts are the same,
+// uncapitalized. The error of an *os.PathError is its underlying one.
+func Strerror(err error) string {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		err = pe.Err
+	}
+	s := err.Error()
+	var errno syscall.Errno
+	if errors.As(err, &errno) && s != "" {
+		s = strings.ToUpper(s[:1]) + s[1:]
+	}
+	return s
+}
+
+// fileError is luaL_loadfile's errfile: "cannot <open|read> <name>: <why>",
+// an ApiErrorFile whose Cause is err.
+func fileError(what, name string, err error) *ApiError {
+	return &ApiError{Type: ApiErrorFile, Object: LString("cannot " + what + " " + name + ": " + Strerror(err)), Cause: err}
+}
+
+// readChunkFile is luaL_loadfile's reading: the text of the chunk in file
+// path (the io library's standard input if stdin), and its chunk name
+// ("@" + path, "=stdin"). Under DialectLua51 a first line starting with '#'
+// is skipped, its newline kept so that lines don't shift, and if a binary
+// chunk follows it in a file, the chunk is from the file's first escape
+// byte on (as freopen and the loop after it do). Under DialectLuaJIT the
+// text is the file's: LuaJIT's lexer skips the line (lj_lex_setup) and
+// refuses bytecode after it. Errors are fileError's.
+func (ls *LState) readChunkFile(path string, stdin bool) (string, string, error) {
+	var data []byte
+	var err error
+	name, chunkname := path, "@"+path
+	if stdin {
+		name, chunkname = "stdin", "=stdin"
+		data, err = io.ReadAll(ls.Stdin())
+		if err != nil {
+			return "", "", fileError("read", name, err)
+		}
+	} else {
+		f, err := os.Open(path)
+		if err != nil {
+			return "", "", fileError("open", name, err)
+		}
+		data, err = io.ReadAll(bufio.NewReader(f))
+		_ = f.Close() // read only
+		if err != nil {
+			return "", "", fileError("read", name, err)
+		}
+	}
+	text := string(data)
+	if ls.Dialect() == DialectLuaJIT || !strings.HasPrefix(text, "#") {
+		return text, chunkname, nil
+	}
+	i := strings.IndexByte(text, '\n')
+	if i < 0 {
+		return "\n", chunkname, nil // the newline luaL_loadfile gives for the line
+	}
+	if !stdin && IsBinaryChunk(text[i+1:]) {
+		return text[strings.IndexByte(text, dumpSignature[0]):], chunkname, nil
+	}
+	return text[i:], chunkname, nil
+}
+
+// loadFile is luaL_loadfile: the chunk in file path, or in the standard
+// input if stdin.
+func (ls *LState) loadFile(path string, stdin bool) (*LFunction, error) {
+	text, chunkname, err := ls.readChunkFile(path, stdin)
+	if err != nil {
+		return nil, err
+	}
+	return ls.LoadChunk(strings.NewReader(text), chunkname)
 }
