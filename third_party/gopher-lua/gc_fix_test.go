@@ -172,3 +172,31 @@ func TestCloseOnFullStack(t *testing.T) {
 	}()
 	L.Close()
 }
+
+// A cycle that frees Lua garbage lowers the count (gc.lua's dosteps), every
+// time: the count is read exactly (the allocations from the spans cached by
+// the Ps are counted), and the collector's scratch, which grows when a cycle
+// marks more objects or sweeps more weak references than before, is not
+// counted. The tables of a are new marked objects, those of w new weak
+// references, at each round.
+func TestCountAfterCycle(t *testing.T) {
+	L := NewState()
+	defer L.Close()
+	if err := L.DoString(`
+		local keep = {}
+		for round = 1, 60 do
+			collectgarbage()
+			collectgarbage("stop")
+			local a, w = {}, setmetatable({}, {__mode = "k"})
+			for i = 1, 100 + round * 20 do a[i] = {{}}; w[{}] = i; local b = {} end
+			keep[round] = a
+			local x = gcinfo()
+			repeat until collectgarbage("step", round % 3)
+			local y = gcinfo()
+			assert(y < x, "round " .. round .. ": " .. x .. " Kbytes, then " .. y)
+			assert(next(w) == nil)
+			collectgarbage("restart")
+		end`); err != nil {
+		t.Fatal(err)
+	}
+}

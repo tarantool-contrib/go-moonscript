@@ -15,7 +15,7 @@ lua5.1-tests	db.lua	-	fail db.lua:232: assertion failed! [lua5.1: pass, luajit: 
 lua5.1-tests	errors.lua	-	fail errors.lua:12: assertion failed! [lua5.1: pass, luajit: fail]
 lua5.1-tests	events.lua	-	pass
 lua5.1-tests	files.lua	-	pass
-lua5.1-tests	gc.lua	-	fail gc.lua:107: assertion failed! [lua5.1: pass, luajit: pass]
+lua5.1-tests	gc.lua	-	pass
 lua5.1-tests	literals.lua	-	pass
 lua5.1-tests	locals.lua	-	pass
 lua5.1-tests	main.lua	-	skip: tests lua.c, the standalone interpreter (options, LUA_INIT, stdin), which our VM does not have

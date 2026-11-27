@@ -45,10 +45,10 @@ func TestSuites(t *testing.T) {
 	w := getWorkspace(t)
 	skips := loadSkips(t)
 	t.Run("group", func(t *testing.T) {
-		// not in parallel: it runs before the others, alone, because
-		// gc.lua's gcinfo() is the process's heap, which the other groups
-		// would change (gc.lua:107 then passes or fails by chance)
-		t.Run("lua5.1-tests", func(t *testing.T) { checkLedger(t, lua51Tests(t, w, skips)) })
+		// (each file runs in its own interpreter process, so the groups do
+		// not share a heap; and gcinfo() reads the heap exactly, so the
+		// timing of Go's collector does not change gc.lua's outcome)
+		t.Run("lua5.1-tests", func(t *testing.T) { t.Parallel(); checkLedger(t, lua51Tests(t, w, skips)) })
 		t.Run("harness", func(t *testing.T) {
 			t.Parallel()
 			res, jit := harnessTests(t, w, skips)

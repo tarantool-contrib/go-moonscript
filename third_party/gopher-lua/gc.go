@@ -43,12 +43,19 @@ package lua
 //
 // "count" is the growth of Go's heap since the state was created (its
 // lowest point since then, plus 20 Kbytes, about what a new Lua 5.1 state
-// takes): Go has one heap per process, so it counts the allocations of the
-// other goroutines too.
+// takes), less the collector's scratch kept between the cycles: Go has one
+// heap per process, so it counts the allocations of the other goroutines
+// too. The heap is read exactly there (runtime.ReadMemStats, which stops the
+// world for some microseconds): the cheap runtime/metrics figure, which the
+// checkpoints use, leaves out what was allocated from the spans that the
+// Ps have cached (up to a span per size class per P: Kbytes), which a
+// collection then counts, so a count taken before a cycle could miss more
+// than the cycle frees.
 
 import (
 	"cmp"
 	"math"
+	"math/bits"
 	"runtime"
 	"runtime/metrics"
 	"slices"
@@ -101,8 +108,9 @@ type gcState struct {
 	threads  []gcThread
 	nthreads int // len(threads) after the last pruning
 
-	entries []weakEntry // scratch of the weak table sweep
-	marker  gcMarker    // scratch of the marking
+	// the scratch of the weak table sweep and of the marking (scratchBytes)
+	entries []weakEntry
+	marker  gcMarker
 }
 
 // gcThread is a thread of the state: root is set for the threads made by
@@ -112,7 +120,8 @@ type gcThread struct {
 	root bool
 }
 
-// gcInit records the heap at the state's creation.
+// gcInit records the heap at the state's creation (with heap: exactHeap
+// would stop the world at each NewState).
 func (g *gcState) init() {
 	g.samples = []metrics.Sample{
 		{Name: "/memory/classes/heap/objects:bytes"},
@@ -120,27 +129,61 @@ func (g *gcState) init() {
 	}
 	g.floor = math.MaxInt64
 	_, g.cycles = g.heap()
-	g.estimate = g.count()
+	g.estimate = gcBaseBytes
 }
 
-// heap returns the bytes in Go's heap (live objects and those not swept
-// yet) and the number of Go's collection cycles.
+// heap returns about the bytes in Go's heap (live objects and those not
+// swept yet) without the collector's scratch, cheaply: without what was
+// allocated from the spans that the Ps have cached (the runtime counts it
+// when a span is given back, at the latest at the next collection); and
+// the number of Go's collection cycles.
 func (g *gcState) heap() (int64, uint64) {
 	if g.samples == nil {
 		g.init()
 	}
 	metrics.Read(g.samples)
-	h := int64(g.samples[0].Value.Uint64())
-	if h < g.floor {
-		g.floor = h
-	}
+	h := int64(g.samples[0].Value.Uint64()) - g.scratchBytes()
+	g.floor = min(g.floor, h)
 	return h, g.samples[1].Value.Uint64()
+}
+
+// exactHeap returns the bytes in Go's heap exactly, without the collector's
+// scratch: runtime.ReadMemStats gives the cached spans back first (it stops
+// the world: 2 to 30 microseconds).
+func (g *gcState) exactHeap() int64 {
+	if g.samples == nil {
+		g.init()
+	}
+	memStats.Lock()
+	runtime.ReadMemStats(&memStats.MemStats)
+	h := int64(memStats.HeapAlloc) - g.scratchBytes()
+	memStats.Unlock()
+	g.floor = min(g.floor, h)
+	return h
+}
+
+// memStats is the buffer of exactHeap (5 Kbytes), shared by the states:
+// ReadMemStats stops the world anyway.
+var memStats struct {
+	sync.Mutex
+	runtime.MemStats
+}
+
+// scratchBytes is the size of the collector's scratch kept between the
+// cycles: it grows in a cycle that needs more, and would otherwise count as
+// memory in use after that cycle. (The capacities are the sizes allocated:
+// append rounds them up to the allocation's size, and the marker's set has
+// a power of 2 of slots, at least 8 Kbytes, which is an allocation's size.)
+func (g *gcState) scratchBytes() int64 {
+	m := &g.marker
+	return int64(cap(g.entries))*int64(unsafe.Sizeof(weakEntry{})) +
+		int64(cap(m.seen))*int64(unsafe.Sizeof(uintptr(0))) +
+		int64(cap(m.stack))*int64(unsafe.Sizeof(LValue(nil)))
 }
 
 // count is collectgarbage("count") in bytes.
 func (g *gcState) count() int64 {
-	h, _ := g.heap()
-	return h - g.floor + gcBaseBytes
+	return g.exactHeap() - g.floor + gcBaseBytes
 }
 
 // gcCountBytes returns the bytes in use as collectgarbage("count") and
@@ -333,7 +376,9 @@ func (ls *LState) SetMemoryLimit(bytes int64) {
 	g.memLimit = bytes
 	var bound int64
 	if bytes > 0 {
-		g.heap() // the floor
+		if g.samples == nil {
+			g.init() // the floor
+		}
 		bound = g.floor + bytes
 	}
 	setTableLimit(ls.G, bound)
@@ -398,15 +443,10 @@ func (ls *LState) gcCycle(explicit bool) {
 	if len(g.weak) > 0 {
 		g.sweepWeak(m, dying, explicit)
 	} else if explicit {
+		m.trim()
 		runtime.GC()
 	}
-	if m != nil {
-		clear(m.stack[:cap(m.stack)]) // keeps no object alive
-		m.stack = m.stack[:0]
-		if len(m.seen) > 1<<20 {
-			m.seen = nil // not kept between the cycles of a big heap
-		}
-	}
+	m.trim() // (if no runtime.GC freed it, the next collection will)
 	if len(g.proxyMts) > 0 {
 		for k := range g.proxyMts {
 			if k.Value() == nil {
@@ -414,8 +454,10 @@ func (ls *LState) gcCycle(explicit bool) {
 			}
 		}
 	}
-	_, g.cycles = g.heap()
-	g.estimate = g.count()
+	// (after runtime.GC, which gave the cached spans back, heap is exact)
+	var h int64
+	h, g.cycles = g.heap()
+	g.estimate = h - g.floor + gcBaseBytes
 	g.stepWork, g.stepTotal = 0, 0
 	g.updateActive()
 }
@@ -481,10 +523,72 @@ func (ls *LState) gcClearStale() {
 /* finalizers: marking {{{ */
 
 // gcMarker marks the Lua objects reachable from the roots, as Lua 5.1's
-// collector does, to find the userdata to finalize.
+// collector does, to find the userdata to finalize. Its scratch is kept
+// between the cycles (see scratchBytes), unless it is big (trim).
 type gcMarker struct {
-	seen  map[uintptr]struct{} // the addresses of the marked objects, which live until the end of the cycle
+	// seen is a set of the addresses of the marked objects (which live
+	// until the end of the marking), open addressing with linear probing;
+	// 0 is a free slot; its size is a power of 2, at least twice n.
+	seen  []uintptr
+	n     int
+	shift uint8 // 64 - log2(len(seen))
 	stack []LValue
+}
+
+const (
+	gcMarkerMinSlots = 1024    // the set's first size: 8 Kbytes
+	gcMarkerMaxSlots = 1 << 21 // the largest set kept between the cycles: 16 Mbytes
+	gcMarkerMaxStack = 1 << 16 // the largest stack kept: 1 Mbyte
+)
+
+// reset empties the set for a cycle.
+func (m *gcMarker) reset() {
+	if m.seen == nil {
+		m.seen = make([]uintptr, gcMarkerMinSlots)
+		m.shift = uint8(64 - bits.TrailingZeros(gcMarkerMinSlots))
+	} else {
+		clear(m.seen)
+	}
+	m.n = 0
+}
+
+// trim drops the scratch of a big marking, at the end of the marking: before
+// runtime.GC, if the cycle runs it, which then frees it. (m may be nil.)
+func (m *gcMarker) trim() {
+	if m == nil {
+		return
+	}
+	if len(m.seen) > gcMarkerMaxSlots {
+		m.seen, m.n = nil, 0
+	}
+	if cap(m.stack) > gcMarkerMaxStack {
+		m.stack = nil
+	}
+}
+
+// slot returns the index of p's slot in the set, or of the free slot where
+// it goes.
+func (m *gcMarker) slot(p uintptr) int {
+	mask := len(m.seen) - 1
+	i := int((uint64(p) * 0x9e3779b97f4a7c15) >> m.shift)
+	for {
+		if q := m.seen[i]; q == p || q == 0 {
+			return i
+		}
+		i = (i + 1) & mask
+	}
+}
+
+// grow doubles the set.
+func (m *gcMarker) grow() {
+	old := m.seen
+	m.seen = make([]uintptr, 2*len(old))
+	m.shift--
+	for _, p := range old {
+		if p != 0 {
+			m.seen[m.slot(p)] = p
+		}
+	}
 }
 
 func (m *gcMarker) mark(v LValue) {
@@ -504,16 +608,19 @@ func (m *gcMarker) mark(v LValue) {
 	if p == nil {
 		return
 	}
-	if _, ok := m.seen[uintptr(p)]; ok {
+	i := m.slot(uintptr(p))
+	if m.seen[i] != 0 {
 		return
 	}
-	m.seen[uintptr(p)] = struct{}{}
+	m.seen[i] = uintptr(p)
+	if m.n++; 2*m.n > len(m.seen) {
+		m.grow()
+	}
 	m.stack = append(m.stack, v)
 }
 
 func (m *gcMarker) marked(v unsafe.Pointer) bool {
-	_, ok := m.seen[uintptr(v)]
-	return ok
+	return v != nil && m.seen[m.slot(uintptr(v))] != 0
 }
 
 // weakMode returns the weakness of a table whose metatable is mt (its
@@ -612,11 +719,7 @@ func (m *gcMarker) markThread(th *LState) {
 func (ls *LState) gcMark() *gcMarker {
 	g := &ls.G.gc
 	m := &g.marker
-	if m.seen == nil {
-		m.seen = make(map[uintptr]struct{}, 1024)
-	} else {
-		clear(m.seen) // (the map keeps its size: no garbage for the next cycles)
-	}
+	m.reset()
 	m.mark(ls.G.Registry)
 	m.mark(ls.G.Global)
 	for _, mt := range ls.G.builtinMts {
@@ -803,6 +906,7 @@ func (g *gcState) takeWeak(m *gcMarker) {
 func (g *gcState) sweepWeak(m *gcMarker, dying []*LUserData, explicit bool) {
 	g.takeWeak(m)
 	if len(g.entries) > 0 || explicit {
+		m.trim()
 		runtime.GC()
 	}
 	var fin map[*LUserData]struct{}
