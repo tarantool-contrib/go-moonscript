@@ -8,9 +8,6 @@ import (
 )
 
 func mainLoop(L *LState, baseframe *callFrame) {
-	var inst uint32
-	var cf *callFrame
-
 	if L.stack.IsEmpty() {
 		return
 	}
@@ -21,20 +18,24 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		return
 	}
 
+	// go-moonscript patch: the current frame, its function's code and
+	// constants and its registers' base are kept in locals, reloaded after
+	// an opcode that may change them (one done by its jumpTable function).
 	reg := L.reg
+	cf := L.currentFrame
+	code, consts := cf.Fn.Proto.Code, cf.Fn.Proto.Constants
+	lbase := cf.LocalBase
 	for {
-		cf = L.currentFrame
 		if L.hookMask&hookMaskTrace != 0 { // go-moonscript patch
 			traceExec(L, cf)
 		}
-		inst = cf.Fn.Proto.Code[cf.Pc]
+		inst := code[cf.Pc]
 		cf.Pc++
 		// go-moonscript patch: the common cases of the frequent opcodes are
 		// handled here, without the call through jumpTable; the others, and
 		// the other cases, go to the opcode's function.
 		switch int(inst >> 26) { //GETOPCODE
 		case OP_MOVE:
-			lbase := cf.LocalBase
 			A := int(inst>>18) & 0xff //GETA
 			B := int(inst & 0x1ff)    //GETB
 			v := reg.Get(lbase + B)
@@ -43,21 +44,20 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_LOADK:
 			A := int(inst>>18) & 0xff //GETA
 			Bx := int(inst & 0x3ffff) //GETBX
-			v := cf.Fn.Proto.Constants[Bx]
-			// +inline-call reg.Set cf.LocalBase+A v
+			v := consts[Bx]
+			// +inline-call reg.Set lbase+A v
 			continue
 		case OP_GETUPVAL:
 			A := int(inst>>18) & 0xff //GETA
 			B := int(inst & 0x1ff)    //GETB
 			v := cf.Fn.Upvalues[B].Value()
-			// +inline-call reg.Set cf.LocalBase+A v
+			// +inline-call reg.Set lbase+A v
 			continue
 		case OP_GETTABLE:
-			lbase := cf.LocalBase
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
 			if tb, ok := reg.Get(lbase + B).(*LTable); ok {
-				if k, isnum := L.rkValue(C).(LNumber); isnum {
+				if k, isnum := rk(reg, consts, lbase, C).(LNumber); isnum {
 					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) {
 						if v := tb.array[i-1]; v != LNil || tb.Metatable == LNil {
 							A := int(inst>>18) & 0xff //GETA
@@ -68,7 +68,6 @@ func mainLoop(L *LState, baseframe *callFrame) {
 				}
 			}
 		case OP_GETTABLEKS:
-			lbase := cf.LocalBase
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
 			if tb, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
@@ -81,14 +80,13 @@ func mainLoop(L *LState, baseframe *callFrame) {
 				}
 			}
 		case OP_SETTABLE:
-			lbase := cf.LocalBase
 			A := int(inst>>18) & 0xff //GETA
 			B := int(inst & 0x1ff)    //GETB
 			if tb, ok := reg.Get(lbase + A).(*LTable); ok {
-				if k, isnum := L.rkValue(B).(LNumber); isnum {
+				if k, isnum := rk(reg, consts, lbase, B).(LNumber); isnum {
 					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
 						C := int(inst>>9) & 0x1ff //GETC
-						tb.array[i-1] = L.rkValue(C)
+						tb.array[i-1] = rk(reg, consts, lbase, C)
 						continue
 					}
 				}
@@ -96,9 +94,9 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_ADD:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
-				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
-					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
+				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
+					RA := lbase + int(inst>>18)&0xff //GETA
 					v := v1 + v2
 					// +inline-call reg.SetNumber RA v
 					continue
@@ -107,9 +105,9 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_SUB:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
-				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
-					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
+				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
+					RA := lbase + int(inst>>18)&0xff //GETA
 					v := v1 - v2
 					// +inline-call reg.SetNumber RA v
 					continue
@@ -118,9 +116,9 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_MUL:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
-				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
-					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
+				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
+					RA := lbase + int(inst>>18)&0xff //GETA
 					v := v1 * v2
 					// +inline-call reg.SetNumber RA v
 					continue
@@ -129,9 +127,9 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_DIV:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
-				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
-					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
+				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
+					RA := lbase + int(inst>>18)&0xff //GETA
 					v := v1 / v2
 					// +inline-call reg.SetNumber RA v
 					continue
@@ -143,8 +141,8 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_EQ:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
-				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
+				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
 					if (v1 == v2) != (int(inst>>18)&0xff != 0) { //GETA
 						cf.Pc++
 					}
@@ -154,8 +152,8 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_LT:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
-				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
+				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
 					if (v1 < v2) != (int(inst>>18)&0xff != 0) { //GETA
 						cf.Pc++
 					}
@@ -165,8 +163,8 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_LE:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
-				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
+				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
 					if (v1 <= v2) != (int(inst>>18)&0xff != 0) { //GETA
 						cf.Pc++
 					}
@@ -176,12 +174,12 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		case OP_TEST:
 			A := int(inst>>18) & 0xff //GETA
 			C := int(inst>>9) & 0x1ff //GETC
-			if LVAsBool(reg.Get(cf.LocalBase+A)) == (C == 0) {
+			if LVAsBool(reg.Get(lbase+A)) == (C == 0) {
 				cf.Pc++
 			}
 			continue
 		case OP_FORLOOP:
-			RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+			RA := lbase + int(inst>>18)&0xff //GETA
 			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
 				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
 					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
@@ -202,7 +200,20 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
 			return
 		}
+		cf = L.currentFrame
+		code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
+		lbase = cf.LocalBase
 	}
+}
+
+// rk is RK(idx) of an instruction of a function with constants consts and
+// its registers from lbase (go-moonscript patch: rkValue with them in
+// mainLoop's locals).
+func rk(reg *registry, consts []LValue, lbase, idx int) LValue {
+	if idx&opBitRk != 0 {
+		return consts[idx&^opBitRk]
+	}
+	return reg.array[lbase+idx]
 }
 
 func mainLoopWithContext(L *LState, baseframe *callFrame) {
