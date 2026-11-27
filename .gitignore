@@ -3,3 +3,4 @@
 /moon
 *.test
 /coverage.out
+/.corpus/
