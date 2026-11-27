@@ -21,11 +21,14 @@ func TestStdoutChild(t *testing.T) {
 		t.Skip("run by TestStdoutBuffer")
 	}
 	L := NewState()
-	defer L.Close()
 	if err := L.DoString(code); err != nil {
 		msg, _, _ := strings.Cut(err.Error(), "\n")
 		_, _ = os.Stderr.WriteString("error: " + msg + "\n")
 	}
+	L.Close() // flushes the standard output
+	// exit before the testing package writes "PASS" (and, with -cover, the
+	// coverage line) to the output under test
+	os.Exit(0)
 }
 
 func TestStdoutBuffer(t *testing.T) {
@@ -61,8 +64,7 @@ func TestStdoutBuffer(t *testing.T) {
 			t.Errorf("%s: %v\n%s", c.code, err, output)
 			continue
 		}
-		got := strings.TrimSuffix(string(output), "PASS\n")
-		if got != c.output {
+		if got := string(output); got != c.output {
 			t.Errorf("%s: output %q, want %q", c.code, got, c.output)
 		}
 	}
