@@ -65,6 +65,9 @@ package lua
 // show lines of the tree. The tree is left as it is: the compiler works on
 // a copy with the lines set. FuncCallExpr.ArgsLine and ArgsEndLine and
 // TableExpr.PrevLine are 0 when unknown, as the compiler takes them.
+// The spans of the nodes (ast.Span, ast.Expr.Parens) are not read: a tree
+// compiles the same with them, without them (the zero Span) or with wrong
+// ones, and the checker doesn't ask for them.
 //
 // Compiling never modifies the tree (go-moonscript patch: Compile stored a
 // numeric for's default step and the folded operand of a unary minus in
@@ -856,12 +859,12 @@ func (f *lineFiller) expr(e ast.Expr) ast.Expr {
 		u := f.pos(&n)
 		n.Fields = make([]*ast.Field, len(ex.Fields))
 		for i, fd := range ex.Fields {
-			field := &ast.Field{}
+			field := *fd // its span too
 			if fd.Key != nil {
 				field.Key = f.expr(fd.Key)
 			}
 			field.Value = f.expr(fd.Value)
-			n.Fields[i] = field
+			n.Fields[i] = &field
 		}
 		f.done(&n, u)
 		return &n

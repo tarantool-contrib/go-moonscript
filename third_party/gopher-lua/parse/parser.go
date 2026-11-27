@@ -51,6 +51,46 @@ func ParseDialect(reader io.Reader, name string, dialect Dialect) (chunk []ast.S
 // ParseBytes parses a chunk of the dialect held in memory. A syntax error
 // is an *Error.
 func ParseBytes(src []byte, name string, dialect Dialect) (chunk []ast.Stmt, err error) {
+	chunk, _, _, err = parseSource(src, name, Options{Dialect: dialect})
+	return chunk, err
+}
+
+// Options are the options of ParseChunk. go-moonscript patch.
+type Options struct {
+	// Dialect is the language of the chunk.
+	Dialect Dialect
+	// Comments makes the parser keep the comments of the source in
+	// Chunk.Comments.
+	Comments bool
+	// Shebang skips a first line starting with "#" under Lua51 as
+	// luaL_loadfile does (lua5.1 running a file), keeping its line break:
+	// in Chunk.Header. LuaJIT's lexer always skips it, and a UTF-8 BOM
+	// before it, as lj_lex_setup does; under Lua51 without Shebang it is
+	// a syntax error, as for loadstring.
+	Shebang bool
+}
+
+// ParseChunk parses a chunk held in memory into its tree, with the
+// chunk's span, comments and lines (see package ast). The tree is the one
+// ParseBytes returns, in Chunk.Stmts. The chunk keeps src, without a copy,
+// to give the lines and columns of offsets (Chunk.Lines): src must not be
+// modified while the chunk is in use. A syntax error is an *Error.
+// go-moonscript patch.
+func ParseChunk(src []byte, name string, opts Options) (*ast.Chunk, error) {
+	stmts, block, ls, err := parseSource(src, name, opts)
+	if err != nil {
+		return nil, err
+	}
+	c := &ast.Chunk{Name: name, Stmts: stmts, StmtsSpan: block, Header: ls.header, Comments: ls.comments,
+		Lines: ast.NewLines(src)}
+	c.SetSpan(ast.Span{Start: 0, End: len(src)})
+	return c, nil
+}
+
+// parseSource parses a chunk: its statements, the span of its block and
+// the lexer that read it.
+func parseSource(src []byte, name string, opts Options) (chunk []ast.Stmt, block ast.Span, ls *lexer, err error) {
+	dialect := opts.Dialect
 	p := &parser{jit: dialect == LuaJIT}
 	sc := scratchPool.Get().(*scratch)
 	p.fsCache, p.bcstack, p.lnstack = sc.fsCache, sc.bcstack, sc.lnstack
@@ -61,10 +101,11 @@ func ParseBytes(src []byte, name string, dialect Dialect) (chunk []ast.Stmt, err
 			if !ok {
 				panic(e)
 			}
-			chunk, err = nil, pe
+			chunk, block, ls, err = nil, ast.Span{}, nil, pe
 		}
 	}()
-	p.ls = newLexer(src, name, dialect) // it may raise an error
+	p.ls = newLexer(src, name, dialect, opts.Shebang) // it may raise an error
+	p.ls.keepComments = opts.Comments
 	if !p.jit {
 		p.level = lua51BaseLevel
 	}
@@ -73,10 +114,10 @@ func ParseBytes(src []byte, name string, dialect Dialect) (chunk []ast.Stmt, err
 		p.fs.emit(p, insAD(bcFUNCV, 0, 0)) // the header's place
 	}
 	p.ls.nextToken()
-	chunk = p.chunk()
+	chunk, block = p.chunk()
 	p.check(tkEOS)
 	p.closeFunc()
-	return chunk, nil
+	return chunk, block, p.ls, nil
 }
 
 // scratch is the memory a parser passes on to the next chunks: the states
@@ -259,14 +300,26 @@ func (p *parser) isName() bool {
 	return p.ls.t.typ == tkName || p.ls.t.typ == tkGoto
 }
 
-// strCheckName is str_checkname / lex_str: the name and its line.
-func (p *parser) strCheckName() (string, int) {
+// strCheckName is str_checkname / lex_str: the name, its line and its
+// span.
+func (p *parser) strCheckName() (string, int, ast.Span) {
 	if !p.isName() {
 		p.errorExpected(tkName)
 	}
-	name, line := p.ls.t.sem, p.ls.t.line
+	t := &p.ls.t
+	name, line, span := t.sem, t.line, ast.Span{Start: t.start, End: t.end}
 	p.next()
-	return name, line
+	return name, line, span
+}
+
+// spanFrom is the span from start to the end of the last token read.
+func (p *parser) spanFrom(start int) ast.Span {
+	return ast.Span{Start: start, End: p.ls.prevEnd}
+}
+
+// tokenSpan is the span of the current token.
+func (p *parser) tokenSpan() ast.Span {
+	return ast.Span{Start: p.ls.t.start, End: p.ls.t.end}
 }
 
 func (p *parser) errorLimit(fs *funcState, limit int, what string) {
@@ -548,8 +601,11 @@ func blockFollow(tok int) bool {
 	return false
 }
 
-func (p *parser) chunk() []ast.Stmt {
+// chunk parses a block: its statements and its span, from its first token
+// to its last, or empty at the token after it.
+func (p *parser) chunk() ([]ast.Stmt, ast.Span) {
 	stmts := []ast.Stmt{}
+	start := p.ls.t.start
 	p.enterLevel()
 	for islast := false; !islast && !blockFollow(p.ls.t.typ); {
 		islast = p.statement(&stmts)
@@ -559,14 +615,14 @@ func (p *parser) chunk() []ast.Stmt {
 		}
 	}
 	p.leaveLevel()
-	return stmts
+	return stmts, ast.Span{Start: start, End: max(start, p.ls.prevEnd)}
 }
 
-func (p *parser) block() []ast.Stmt {
+func (p *parser) block() ([]ast.Stmt, ast.Span) {
 	p.enterBlock(false)
-	stmts := p.chunk()
+	stmts, span := p.chunk()
 	p.leaveBlock()
-	return stmts
+	return stmts, span
 }
 
 // cond is expr_cond under LuaJIT: the expression, and the jumps taken
@@ -597,14 +653,18 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 	fs := p.fs
 	line := ls.linenumber
 	tokLine := ls.t.line
-	add := func(s ast.Stmt) { *stmts = append(*stmts, s) }
+	start := ls.t.start
+	add := func(s ast.Stmt) {
+		s.SetSpan(p.spanFrom(start))
+		*stmts = append(*stmts, s)
+	}
 	switch ls.t.typ {
 	case tkIf:
 		add(p.ifStat(line))
 	case tkWhile:
 		p.next()
-		start := fs.pc
-		fs.lasttarget = start
+		loopStart := fs.pc
+		fs.lasttarget = loopStart
 		cond, condexit := p.cond()
 		p.enterBlock(true)
 		p.checkNext(tkDo)
@@ -612,9 +672,9 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 		if p.jit {
 			loop = fs.emit(p, insAD(bcLOOP, fs.nactvar(), 0))
 		}
-		body := p.block()
+		body, bodySpan := p.block()
 		if p.jit {
-			fs.jmpPatch(p, fs.jmp(p), start)
+			fs.jmpPatch(p, fs.jmp(p), loopStart)
 		}
 		endLine := ls.t.line
 		p.checkMatch(tkEnd, tkWhile, line)
@@ -623,16 +683,16 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 			fs.jmpToHere(p, condexit)
 			fs.jmpPatchIns(p, loop, fs.pc)
 		}
-		st := &ast.WhileStmt{Condition: cond, Stmts: body}
+		st := &ast.WhileStmt{Condition: cond, Stmts: body, StmtsSpan: bodySpan}
 		st.SetLine(tokLine)
 		st.SetLastLine(endLine)
 		add(st)
 	case tkDo:
 		p.next()
-		body := p.block()
+		body, bodySpan := p.block()
 		endLine := ls.t.line
 		p.checkMatch(tkEnd, tkDo, line)
-		st := &ast.DoBlockStmt{Stmts: body}
+		st := &ast.DoBlockStmt{Stmts: body, StmtsSpan: bodySpan}
 		st.SetLine(tokLine)
 		st.SetLastLine(endLine)
 		add(st)
@@ -648,7 +708,7 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 		if p.jit {
 			fs.emit(p, insAD(bcLOOP, fs.nactvar(), 0))
 		}
-		body := p.chunk()
+		body, bodySpan := p.chunk()
 		p.checkMatch(tkUntil, tkRepeat, line)
 		cond, condexit := p.cond() // in the scope
 		if !p.jit || !inner.upval {
@@ -664,7 +724,7 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 			fs.jmpPatchIns(p, loop, fs.pc)
 		}
 		p.leaveBlock()
-		st := &ast.RepeatStmt{Condition: cond, Stmts: body}
+		st := &ast.RepeatStmt{Condition: cond, Stmts: body, StmtsSpan: bodySpan}
 		st.SetLine(tokLine)
 		st.SetLastLine(cond.Line())
 		add(st)
@@ -673,7 +733,7 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 	case tkLocal:
 		p.next()
 		if p.testNext(tkFunction) {
-			name, _ := p.strCheckName()
+			name, _, nameSpan := p.strCheckName()
 			p.newLocalVar(name, 0)
 			var lv, b expDesc
 			if p.jit {
@@ -691,7 +751,8 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 			} else if p.r51 {
 				fs.rStoreVar(p, &lv, &b)
 			}
-			st := &ast.LocalAssignStmt{Names: []string{name}, Exprs: []ast.Expr{fn}, IsFunction: true}
+			st := &ast.LocalAssignStmt{Names: []string{name}, Exprs: []ast.Expr{fn}, IsFunction: true,
+				NameSpans: []ast.Span{nameSpan}}
 			st.SetLine(tokLine)
 			st.SetLastLine(fn.LastLine())
 			add(st)
@@ -723,14 +784,14 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 	case tkGoto:
 		if ls.lookahead() == tkName {
 			p.next()
-			name, _ := p.strCheckName()
+			name, _, nameSpan := p.strCheckName()
 			if l := p.golaFindLabel(name); l >= 0 { // a backward goto in the scope is a loop
 				fs.emit(p, insAJ(bcLOOP, uint32(fs.vstack[l].slot), -1))
 			}
 			p.fs.bl.hasGola = true
 			pc := fs.jmp(p)
 			p.golaNew(name, false, int(fs.lines[pc]), pc)
-			st := &ast.GotoStmt{Label: name}
+			st := &ast.GotoStmt{Label: name, LabelSpan: nameSpan}
 			st.SetLine(tokLine)
 			add(st)
 			break
@@ -809,7 +870,8 @@ func (p *parser) ifStat(line int) ast.Stmt {
 	p.next()
 	cond, flist := p.cond()
 	p.checkNext(tkThen)
-	top := &ast.IfStmt{Condition: cond, Then: p.block()}
+	top := &ast.IfStmt{Condition: cond}
+	top.Then, top.ThenSpan = p.block()
 	top.SetLine(ifLine)
 	cur := top
 	for ls.t.typ == tkElseif {
@@ -817,13 +879,15 @@ func (p *parser) ifStat(line int) ast.Stmt {
 			fs.jmpAppend(p, &escape, fs.jmp(p))
 			fs.jmpToHere(p, flist)
 		}
-		elseifLine := ls.t.line
+		elseifLine, elseifStart := ls.t.line, ls.t.start
 		p.next()
 		var cond ast.Expr
 		cond, flist = p.cond()
 		p.checkNext(tkThen)
-		st := &ast.IfStmt{Condition: cond, Then: p.block()}
+		st := &ast.IfStmt{Condition: cond}
+		st.Then, st.ThenSpan = p.block()
 		st.SetLine(elseifLine)
+		st.SetSpan(ast.Span{Start: elseifStart, End: elseifStart}) // ends below
 		cur.Else = []ast.Stmt{st}
 		cur = st
 	}
@@ -833,12 +897,19 @@ func (p *parser) ifStat(line int) ast.Stmt {
 			fs.jmpToHere(p, flist)
 		}
 		p.next()
-		cur.Else = p.block()
+		cur.Else, cur.ElseSpan = p.block()
 	} else if p.jit {
 		fs.jmpAppend(p, &escape, flist)
 	}
 	if p.jit {
 		fs.jmpToHere(p, escape)
+	}
+	// the elseifs end with the last token before the "end"
+	for s := top; s != cur; {
+		next := s.Else[0].(*ast.IfStmt)
+		next.SetSpan(p.spanFrom(next.Span().Start))
+		s.ElseSpan = next.Span()
+		s = next
 	}
 	top.SetLastLine(ls.t.line)
 	p.checkMatch(tkEnd, tkIf, line)
@@ -850,13 +921,13 @@ func (p *parser) forStat(line int) ast.Stmt {
 	forLine := ls.t.line
 	p.enterBlock(true)
 	p.next()
-	name, _ := p.strCheckName()
+	name, _, nameSpan := p.strCheckName()
 	var st ast.Stmt
 	switch ls.t.typ {
 	case '=':
-		st = p.forNum(name, line)
+		st = p.forNum(name, nameSpan)
 	case ',', tkIn:
-		st = p.forIter(name)
+		st = p.forIter(name, nameSpan)
 	default:
 		ls.syntaxError("'=' or 'in' expected")
 	}
@@ -881,7 +952,7 @@ func (p *parser) forExp() ast.Expr {
 }
 
 // forNum is fornum / parse_for_num: the loop instructions after the body.
-func (p *parser) forNum(name string, line int) ast.Stmt {
+func (p *parser) forNum(name string, nameSpan ast.Span) ast.Stmt {
 	fs := p.fs
 	base := fs.freereg
 	p.newLocalVar("(for index)", 0)
@@ -908,17 +979,18 @@ func (p *parser) forNum(name string, line int) ast.Stmt {
 	if p.jit {
 		loop = fs.emit(p, insAJ(bcFORI, base, -1))
 	}
-	stmts := p.forBody(1)
+	stmts, stmtsSpan := p.forBody(1)
 	if p.jit {
 		loopend := fs.emit(p, insAJ(bcFORL, base, -1))
 		fs.jmpPatchIns(p, loopend, loop+1)
 		fs.jmpPatchIns(p, loop, fs.pc)
 	}
-	return &ast.NumberForStmt{Name: name, Init: init, Limit: limit, Step: step, Stmts: stmts}
+	return &ast.NumberForStmt{Name: name, Init: init, Limit: limit, Step: step, Stmts: stmts,
+		NameSpan: nameSpan, StmtsSpan: stmtsSpan}
 }
 
 // forIter is forlist / parse_for_iter.
-func (p *parser) forIter(name string) ast.Stmt {
+func (p *parser) forIter(name string, nameSpan ast.Span) ast.Stmt {
 	fs := p.fs
 	base := fs.freereg + 3
 	exprpc := fs.pc
@@ -927,10 +999,12 @@ func (p *parser) forIter(name string) ast.Stmt {
 	p.newLocalVar("(for control)", 2)
 	p.newLocalVar(name, 3)
 	names := []string{name}
+	spans := []ast.Span{nameSpan}
 	for p.testNext(',') {
-		name, _ := p.strCheckName()
+		name, _, span := p.strCheckName()
 		p.newLocalVar(name, len(names)+3)
 		names = append(names, name)
+		spans = append(spans, span)
 	}
 	p.checkNext(tkIn)
 	var e expDesc
@@ -954,7 +1028,7 @@ func (p *parser) forIter(name string) ast.Stmt {
 		}
 		loop = fs.emit(p, insAJ(op, base, -1))
 	}
-	stmts := p.forBody(len(names))
+	stmts, stmtsSpan := p.forBody(len(names))
 	if p.jit {
 		fs.jmpPatchIns(p, loop, fs.pc)
 		op := bcITERC
@@ -965,7 +1039,7 @@ func (p *parser) forIter(name string) ast.Stmt {
 		loopend := fs.emit(p, insAJ(bcITERL, base, -1))
 		fs.jmpPatchIns(p, loopend, loop+1)
 	}
-	return &ast.GenericForStmt{Names: names, Exprs: exprs, Stmts: stmts}
+	return &ast.GenericForStmt{Names: names, Exprs: exprs, Stmts: stmts, NameSpans: spans, StmtsSpan: stmtsSpan}
 }
 
 // predictNext guesses from the first instruction of a generic for's
@@ -996,7 +1070,7 @@ func (p *parser) predictNext(pc uint32) bool {
 }
 
 // forBody is the scope of a for's variables and its block.
-func (p *parser) forBody(nvars int) []ast.Stmt {
+func (p *parser) forBody(nvars int) ([]ast.Stmt, ast.Span) {
 	p.enterBlock(false)
 	p.adjustLocalVars(nvars)
 	if p.jit {
@@ -1004,9 +1078,9 @@ func (p *parser) forBody(nvars int) []ast.Stmt {
 	} else if p.r51 {
 		p.fs.rReserve(p, uint32(nvars))
 	}
-	stmts := p.block()
+	stmts, span := p.block()
 	p.leaveBlock()
-	return stmts
+	return stmts, span
 }
 
 func (p *parser) funcStat(line int) ast.Stmt {
@@ -1015,27 +1089,32 @@ func (p *parser) funcStat(line int) ast.Stmt {
 	var v, b expDesc
 	p.next()
 	// funcname: NAME {'.' NAME} [':' NAME]
-	name, nameLine := p.strCheckName()
+	nameStart := ls.t.start
+	name, nameLine, nameSpan := p.strCheckName()
 	p.singleVar(fs, name, &v, true)
 	if p.r51 && v.k == vGlobal {
 		v.info = fs.rStringK(name)
 	}
 	var fn ast.Expr = &ast.IdentExpr{Value: name}
 	fn.SetLine(nameLine)
+	fn.SetSpan(nameSpan)
 	for ls.t.typ == '.' {
-		key, keyLine := p.field(&v)
+		key, keyLine, keySpan := p.field(&v)
 		k := &ast.StringExpr{Value: key}
 		k.SetLine(keyLine)
+		k.SetSpan(keySpan)
 		fn = &ast.AttrGetExpr{Object: fn, Key: k}
 		fn.SetLine(keyLine)
+		fn.SetSpan(p.spanFrom(nameStart))
 	}
 	funcname := &ast.FuncName{Func: fn}
 	needself := false
 	if ls.t.typ == ':' {
 		needself = true
-		method, _ := p.field(&v)
-		funcname = &ast.FuncName{Receiver: fn, Method: method}
+		method, _, methodSpan := p.field(&v)
+		funcname = &ast.FuncName{Receiver: fn, Method: method, MethodSpan: methodSpan}
 	}
+	funcname.SetSpan(p.spanFrom(nameStart))
 	body := p.body(&b, needself, line)
 	if p.jit {
 		fs.store(p, &v, &b)
@@ -1049,15 +1128,15 @@ func (p *parser) funcStat(line int) ast.Stmt {
 }
 
 // field parses '.' NAME or ':' NAME, an index of v under LuaJIT
-// (expr_field): the name and its line.
-func (p *parser) field(v *expDesc) (string, int) {
+// (expr_field): the name, its line and its span.
+func (p *parser) field(v *expDesc) (string, int, ast.Span) {
 	if p.jit {
 		p.fs.toAnyReg(p, v)
 	} else if p.r51 {
 		p.fs.rExp2AnyReg(p, v)
 	}
 	p.next()
-	name, line := p.strCheckName()
+	name, line, span := p.strCheckName()
 	if p.jit {
 		var k expDesc
 		k.init(vKStr, 0)
@@ -1068,15 +1147,17 @@ func (p *parser) field(v *expDesc) (string, int) {
 		k.init(vKStr, p.fs.rStringK(name))
 		p.fs.rIndexed(p, v, &k)
 	}
-	return name, line
+	return name, line, span
 }
 
 func (p *parser) localStat(line int) ast.Stmt {
 	var names []string
+	var spans []ast.Span
 	for {
-		name, _ := p.strCheckName()
+		name, _, span := p.strCheckName()
 		p.newLocalVar(name, len(names))
 		names = append(names, name)
+		spans = append(spans, span)
 		if !p.testNext(',') {
 			break
 		}
@@ -1094,7 +1175,7 @@ func (p *parser) localStat(line int) ast.Stmt {
 		p.rAdjustAssign(len(names), len(exprs), &e)
 	}
 	p.adjustLocalVars(len(names))
-	st := &ast.LocalAssignStmt{Names: names, Exprs: exprs}
+	st := &ast.LocalAssignStmt{Names: names, Exprs: exprs, NameSpans: spans}
 	st.SetLine(line)
 	return st
 }
@@ -1132,19 +1213,20 @@ func (p *parser) assignAdjust(nvars, nexps int, e *expDesc) {
 // labelStat parses LuaJIT's '::' NAME '::' and the labels right after it.
 func (p *parser) labelStat(stmts *[]ast.Stmt) {
 	ls := p.ls
-	line := ls.t.line
+	line, start := ls.t.line, ls.t.start
 	fs := p.fs
 	fs.lasttarget = fs.pc
 	fs.bl.hasGola = true
 	p.next()
-	name, _ := p.strCheckName()
+	name, _, nameSpan := p.strCheckName()
 	if p.golaFindLabel(name) >= 0 {
 		ls.lexError(fmt.Sprintf("duplicate label '%s'", name), 0)
 	}
 	idx := p.golaNew(name, true, 0, fs.pc)
 	p.checkNext(tkLabel)
-	st := &ast.LabelStmt{Name: name}
+	st := &ast.LabelStmt{Name: name, NameSpan: nameSpan}
 	st.SetLine(line)
+	st.SetSpan(p.spanFrom(start))
 	*stmts = append(*stmts, st)
 	if ls.t.typ == tkLabel {
 		p.enterLevel()
@@ -1290,7 +1372,7 @@ func (p *parser) body(e *expDesc, needself bool, line int) *ast.FunctionExpr {
 	pfs := p.fs
 	p.openFunc(line, false)
 	fs := p.fs
-	parenLine := ls.t.line
+	parenLine, start := ls.t.line, ls.t.start
 	p.checkNext('(')
 	if needself {
 		p.newLocalVar("self", 0)
@@ -1301,10 +1383,12 @@ func (p *parser) body(e *expDesc, needself bool, line int) *ast.FunctionExpr {
 		for {
 			switch {
 			case p.isName():
-				name, _ := p.strCheckName()
+				name, _, span := p.strCheckName()
 				p.newLocalVar(name, len(parlist.Names))
 				parlist.Names = append(parlist.Names, name)
+				parlist.NameSpans = append(parlist.NameSpans, span)
 			case ls.t.typ == tkDots:
+				parlist.VarargSpan = p.tokenSpan()
 				p.next()
 				if !p.jit { // LUA_COMPAT_VARARG: a local "arg"
 					p.newLocalVar("arg", len(parlist.Names))
@@ -1333,10 +1417,11 @@ func (p *parser) body(e *expDesc, needself bool, line int) *ast.FunctionExpr {
 		fs.rReserve(p, fs.nactvar())
 	}
 	p.checkNext(')')
+	parlist.SetSpan(p.spanFrom(start))
 	if p.jit {
 		fs.emit(p, insAD(bcFUNCF, 0, 0)) // the header's place
 	}
-	stmts := p.chunk()
+	stmts, stmtsSpan := p.chunk()
 	endLine := ls.t.line
 	if !p.jit {
 		p.checkMatch(tkEnd, tkFunction, line)
@@ -1361,9 +1446,10 @@ func (p *parser) body(e *expDesc, needself bool, line int) *ast.FunctionExpr {
 		}
 		p.next()
 	}
-	fn := &ast.FunctionExpr{ParList: parlist, Stmts: stmts}
+	fn := &ast.FunctionExpr{ParList: parlist, Stmts: stmts, StmtsSpan: stmtsSpan}
 	fn.SetLine(parenLine)
 	fn.SetLastLine(endLine)
+	fn.SetSpan(p.spanFrom(start))
 	return fn
 }
 
@@ -1399,6 +1485,7 @@ func (p *parser) funcArgs(e *expDesc) (args []ast.Expr, line, endLine int) {
 	case tkString:
 		s := &ast.StringExpr{Value: ls.t.sem}
 		s.SetLine(ls.t.line)
+		s.SetSpan(p.tokenSpan())
 		if p.jit {
 			a.init(vKStr, 0)
 			a.sval = ls.t.sem
@@ -1446,6 +1533,7 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 	var e ast.Expr
 	var kind int
 	var kv expDesc // a key, declared out of the loop so that it does not escape
+	start := ls.t.start
 	switch {
 	case ls.t.typ == '(':
 		where := ls.linenumber
@@ -1454,6 +1542,10 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 		var k int
 		e, k = p.expr(v)
 		p.checkMatch(')', '(', where)
+		ps := e.Parens()
+		ps.Count++
+		ps.Span = p.spanFrom(start)
+		e.SetParens(ps)
 		if p.jit {
 			fs.discharge(p, v)
 		} else if p.r51 {
@@ -1469,13 +1561,14 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 		}
 		kind = kindParen
 	case p.isName():
-		name, line := p.strCheckName()
+		name, line, span := p.strCheckName()
 		p.singleVar(fs, name, v, true)
 		if p.r51 && v.k == vGlobal {
 			v.info = fs.rStringK(name)
 		}
 		e = &ast.IdentExpr{Value: name}
 		e.SetLine(line)
+		e.SetSpan(span)
 		kind = kindVar
 	default:
 		ls.syntaxError("unexpected symbol")
@@ -1483,11 +1576,13 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 	for {
 		switch ls.t.typ {
 		case '.':
-			name, line := p.field(v)
+			name, line, span := p.field(v)
 			key := &ast.StringExpr{Value: name}
 			key.SetLine(line)
+			key.SetSpan(span)
 			a := &ast.AttrGetExpr{Object: e, Key: key}
 			a.SetLine(e.Line())
+			a.SetSpan(p.spanFrom(start))
 			e, kind = a, kindVar
 		case '[':
 			if p.jit {
@@ -1503,10 +1598,11 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 			}
 			a := &ast.AttrGetExpr{Object: e, Key: key}
 			a.SetLine(e.Line())
+			a.SetSpan(p.spanFrom(start))
 			e, kind = a, kindVar
 		case ':':
 			p.next()
-			method, _ := p.strCheckName()
+			method, _, methodSpan := p.strCheckName()
 			if p.jit {
 				fs.method(p, v, method)
 			} else if p.r51 {
@@ -1514,7 +1610,9 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 			}
 			args, line, endLine := p.funcArgs(v)
 			c := &ast.FuncCallExpr{Method: method, Receiver: e, Args: args, ArgsLine: line, ArgsEndLine: endLine}
+			c.SetMethodSpan(methodSpan)
 			c.SetLine(e.Line())
+			c.SetSpan(p.spanFrom(start))
 			e, kind = c, kindCall
 		case '(', tkString, '{':
 			if p.jit {
@@ -1526,6 +1624,7 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 			args, line, endLine := p.funcArgs(v)
 			c := &ast.FuncCallExpr{Func: e, Args: args, ArgsLine: line, ArgsEndLine: endLine}
 			c.SetLine(e.Line())
+			c.SetSpan(p.spanFrom(start))
 			e, kind = c, kindCall
 		default:
 			return e, kind
@@ -1595,17 +1694,17 @@ func (p *parser) simpleExp(v *expDesc) (ast.Expr, int) {
 	case '{':
 		return p.constructor(v), kindOther
 	case tkFunction:
-		line := ls.t.line
+		line, start := ls.t.line, ls.t.start
 		p.next()
-		body := p.body(v, false, ls.linenumber)
-		fn := &ast.FunctionExpr{ParList: body.ParList, Stmts: body.Stmts}
-		fn.SetLine(line)
-		fn.SetLastLine(body.LastLine())
+		fn := p.body(v, false, ls.linenumber)
+		fn.SetLine(line) // its last line is the body's
+		fn.SetSpan(p.spanFrom(start))
 		return fn, kindOther
 	default:
 		return p.primaryExp(v)
 	}
 	e.SetLine(ls.t.line)
+	e.SetSpan(p.tokenSpan())
 	p.next()
 	return e, kindOther
 }
@@ -1628,7 +1727,7 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 	ls := p.ls
 	fs := p.fs
 	where := ls.linenumber
-	line, prevLine := ls.t.line, ls.prevLine
+	line, prevLine, start := ls.t.line, ls.prevLine, ls.t.start
 	if prevLine == 0 {
 		prevLine = line
 	}
@@ -1651,6 +1750,7 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 	var key, val expDesc
 	for ls.t.typ != '}' {
 		var k ast.Expr
+		fieldStart := ls.t.start
 		c.vcall = false
 		if p.r51 {
 			p.rCloseListField(&c, v)
@@ -1667,9 +1767,10 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 				fs.rExp2RK(p, &key)
 			}
 		case p.isName() && ls.lookahead() == '=':
-			name, nameLine := p.strCheckName()
+			name, nameLine, nameSpan := p.strCheckName()
 			s := &ast.StringExpr{Value: name}
 			s.SetLine(nameLine)
+			s.SetSpan(nameSpan)
 			k = s
 			key.init(vKStr, 0)
 			key.sval = name
@@ -1687,7 +1788,9 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 			c.vcall = true
 		}
 		value, _ := p.expr(&val)
-		fields = append(fields, &ast.Field{Key: k, Value: value})
+		field := &ast.Field{Key: k, Value: value}
+		field.SetSpan(p.spanFrom(fieldStart))
+		fields = append(fields, field)
 		if p.jit {
 			p.tableItem(&c, v, &key, &val)
 			fs.freereg = c.freg
@@ -1714,6 +1817,7 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 	t := &ast.TableExpr{Fields: fields, PrevLine: prevLine}
 	t.SetLine(line)
 	t.SetLastLine(endLine)
+	t.SetSpan(p.spanFrom(start))
 	return t
 }
 
@@ -1794,6 +1898,7 @@ func (p *parser) subExpr(v *expDesc, limit int) (ast.Expr, int, int) {
 	p.enterLevel()
 	var e ast.Expr
 	kind := kindOther
+	start := ls.t.start
 	switch ls.t.typ {
 	case tkNot, '-', '#':
 		op := ls.t.typ
@@ -1811,6 +1916,7 @@ func (p *parser) subExpr(v *expDesc, limit int) (ast.Expr, int, int) {
 			e = &ast.UnaryLenOpExpr{Expr: operand}
 			bc = bcLEN
 		}
+		e.SetSpan(p.spanFrom(start))
 		if p.jit {
 			p.fs.unop(p, bc, v)
 		} else if p.r51 {
@@ -1851,6 +1957,7 @@ func (p *parser) subExpr(v *expDesc, limit int) (ast.Expr, int, int) {
 			e = &ast.RelationalOpExpr{Lhs: e, Operator: b.op, Rhs: rhs}
 		}
 		e.SetLine(line)
+		e.SetSpan(p.spanFrom(start))
 		kind = kindOther
 		op = nextop
 	}
@@ -1886,6 +1993,16 @@ func isInlineDumpNode(rv reflect.Value) bool {
 	}
 }
 
+// isPositionField: the dump leaves out the positions of the nodes, and
+// the unexported fields (go-moonscript patch).
+func isPositionField(t reflect.Type) bool {
+	switch t {
+	case reflect.TypeOf(ast.SpanBase{}), reflect.TypeOf(ast.Span{}), reflect.TypeOf([]ast.Span{}):
+		return true
+	}
+	return false
+}
+
 func dump(node interface{}, level int, s string) string {
 	rt := reflect.TypeOf(node)
 	if fmt.Sprint(rt) == "<nil>" {
@@ -1907,7 +2024,7 @@ func dump(node interface{}, level int, s string) string {
 		tt := rt.Elem()
 		indicies := []int{}
 		for i := 0; i < tt.NumField(); i++ {
-			if strings.Index(tt.Field(i).Name, "Base") > -1 {
+			if strings.Index(tt.Field(i).Name, "Base") > -1 || !tt.Field(i).IsExported() || isPositionField(tt.Field(i).Type) {
 				continue
 			}
 			indicies = append(indicies, i)

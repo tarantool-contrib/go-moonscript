@@ -86,7 +86,7 @@ func Lua51Overflow(src []byte, name string) (perr *Error) {
 			}
 		}
 	}()
-	p.ls = newLexer(src, name, Lua51)
+	p.ls = newLexer(src, name, Lua51, false)
 	p.openFunc(0, true)
 	p.ls.nextToken()
 	p.chunk()

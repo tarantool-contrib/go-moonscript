@@ -7,6 +7,7 @@ package parse
 // gopher-lua's scanner.
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -114,11 +115,13 @@ var reserved = func() map[string]int {
 }()
 
 // token is a token, its semantic value (a name, the value of a string, the
-// text of a number) and the line it starts on.
+// text of a number), the line it starts on and its span, src[start:end].
 type token struct {
 	typ   int
 	sem   string
 	line  int
+	start int
+	end   int
 	cdata bool    // a LuaJIT FFI numeral (1LL, 1ULL, 1i), sem its text
 	num   float64 // a LuaJIT numeral's value
 }
@@ -135,9 +138,16 @@ type lexer struct {
 	t          token // the current token
 	ahead      token // the look-ahead token, typ tkEOS if none
 	prevLine   int   // the line of the token before t
+	// go-moonscript patch: the end of the token before t, the comments
+	// read if keepComments, the bytes skipped before the first token
+	prevEnd      int
+	keepComments bool
+	comments     []ast.Comment
+	header       ast.Span
 }
 
-func newLexer(src []byte, source string, dialect Dialect) *lexer {
+// newLexer returns a lexer of src; shebang is Options.Shebang.
+func newLexer(src []byte, source string, dialect Dialect, shebang bool) *lexer {
 	ls := &lexer{src: src, linenumber: 1, lastline: 1, source: source, dialect: dialect}
 	ls.ahead.typ = tkEOS
 	ls.next()
@@ -147,26 +157,48 @@ func newLexer(src []byte, source string, dialect Dialect) *lexer {
 			ls.pos += 2
 			ls.next()
 			header = true
+			ls.header.End = ls.offset()
 		}
 		if ls.current == '#' {
-			for {
-				ls.next()
-				if ls.current == EOF {
-					return ls
-				}
-				if ls.currIsNewline() {
-					break
-				}
+			if !ls.skipLine() {
+				return ls
 			}
-			ls.inclinenumber()
 			header = true
 		}
 		// bytecode after a header is refused, the chunk name not echoed
 		if header && ls.current == 0x1b {
 			ls.runError("cannot load malformed bytecode")
 		}
+	} else if shebang && ls.current == '#' { // luaL_loadfile's skipcomment
+		ls.skipLine()
 	}
 	return ls
+}
+
+// skipLine skips the line of a header, without its line break; it reports
+// whether one ends it.
+func (ls *lexer) skipLine() bool {
+	for {
+		ls.next()
+		if ls.current == EOF {
+			ls.header.End = len(ls.src)
+			return false
+		}
+		if ls.currIsNewline() {
+			break
+		}
+	}
+	ls.header.End = ls.offset()
+	ls.inclinenumber()
+	return true
+}
+
+// offset is the offset of the current character, len(src) at the end.
+func (ls *lexer) offset() int {
+	if ls.current == EOF {
+		return len(ls.src)
+	}
+	return ls.pos - 1
 }
 
 /* character classes: the C locale's (Lua 5.1), lj_char's (LuaJIT) */
@@ -624,6 +656,7 @@ func (ls *lexer) llex(tok *token) int {
 	jit := ls.dialect == LuaJIT
 	for {
 		tok.line = ls.linenumber
+		tok.start = ls.offset()
 		switch c := ls.current; c {
 		case '\n', '\r':
 			ls.inclinenumber()
@@ -641,11 +674,17 @@ func (ls *lexer) llex(tok *token) int {
 				if sep >= 0 {
 					ls.readLongString(false, sep)
 					ls.buff = ls.buff[:0]
+					if ls.keepComments {
+						ls.addComment(tok.start, sep)
+					}
 					continue
 				}
 			}
 			for !ls.currIsNewline() && ls.current != EOF {
 				ls.next()
+			}
+			if ls.keepComments {
+				ls.addComment(tok.start, -1)
 			}
 			continue
 		case '[':
@@ -725,6 +764,9 @@ func (ls *lexer) llex(tok *token) int {
 		switch {
 		case isSpace(c):
 			ls.next()
+			for isSpace(ls.current) && !ls.currIsNewline() { // go-moonscript patch: a run at once
+				ls.next()
+			}
 			continue
 		case isDigit(c):
 			if jit {
@@ -755,12 +797,14 @@ func (ls *lexer) llex(tok *token) int {
 func (ls *lexer) nextToken() {
 	ls.lastline = ls.linenumber
 	ls.prevLine = ls.t.line
+	ls.prevEnd = ls.t.end
 	if ls.ahead.typ != tkEOS {
 		ls.t = ls.ahead
 		ls.ahead.typ = tkEOS
 	} else {
 		ls.t.sem = ""
 		ls.t.typ = ls.llex(&ls.t)
+		ls.t.end = ls.offset()
 	}
 }
 
@@ -768,5 +812,48 @@ func (ls *lexer) nextToken() {
 func (ls *lexer) lookahead() int {
 	ls.ahead.sem = ""
 	ls.ahead.typ = ls.llex(&ls.ahead)
+	ls.ahead.end = ls.offset()
 	return ls.ahead.typ
+}
+
+// addComment adds the comment from start to the current character: a
+// long one of level sep, or a short one if sep < 0. go-moonscript patch.
+func (ls *lexer) addComment(start, sep int) {
+	end := ls.offset()
+	c := ast.Comment{Span: ast.Span{Start: start, End: end}, Long: sep >= 0}
+	if sep < 0 {
+		c.Text = string(ls.src[start+2 : end])
+	} else {
+		c.Text = longText(ls.src[start+2+sep+2 : end-sep-2])
+	}
+	ls.comments = append(ls.comments, c)
+}
+
+// longText is the text between the brackets of a long string or comment as
+// read_long_string reads it: without a first line break, and with each
+// line break ("\n", "\r", "\r\n", "\n\r") as "\n".
+func longText(b []byte) string {
+	if len(b) > 0 && (b[0] == '\n' || b[0] == '\r') {
+		if len(b) > 1 && (b[1] == '\n' || b[1] == '\r') && b[1] != b[0] {
+			b = b[2:]
+		} else {
+			b = b[1:]
+		}
+	}
+	if bytes.IndexByte(b, '\r') < 0 {
+		return string(b)
+	}
+	out := make([]byte, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c != '\n' && c != '\r' {
+			out = append(out, c)
+			continue
+		}
+		out = append(out, '\n')
+		if i+1 < len(b) && (b[i+1] == '\n' || b[i+1] == '\r') && b[i+1] != c {
+			i++
+		}
+	}
+	return string(out)
 }
