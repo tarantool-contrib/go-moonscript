@@ -25,6 +25,7 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		return
 	}
 
+	reg := L.reg
 	for {
 		cf = L.currentFrame
 		if L.hookMask&hookMaskTrace != 0 { // go-moonscript patch
@@ -32,6 +33,414 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		}
 		inst = cf.Fn.Proto.Code[cf.Pc]
 		cf.Pc++
+		// go-moonscript patch: the common cases of the frequent opcodes are
+		// handled here, without the call through jumpTable; the others, and
+		// the other cases, go to the opcode's function.
+		switch int(inst >> 26) { //GETOPCODE
+		case OP_MOVE:
+			lbase := cf.LocalBase
+			A := int(inst>>18) & 0xff //GETA
+			B := int(inst & 0x1ff)    //GETB
+			v := reg.Get(lbase + B)
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+			{
+				rg := reg
+				regi := lbase + A
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = vali
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			continue
+		case OP_LOADK:
+			A := int(inst>>18) & 0xff //GETA
+			Bx := int(inst & 0x3ffff) //GETBX
+			v := cf.Fn.Proto.Constants[Bx]
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+			{
+				rg := reg
+				regi := cf.LocalBase + A
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = vali
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			continue
+		case OP_GETUPVAL:
+			A := int(inst>>18) & 0xff //GETA
+			B := int(inst & 0x1ff)    //GETB
+			v := cf.Fn.Upvalues[B].Value()
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+			{
+				rg := reg
+				regi := cf.LocalBase + A
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = vali
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			continue
+		case OP_GETTABLE:
+			lbase := cf.LocalBase
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if tb, ok := reg.Get(lbase + B).(*LTable); ok {
+				if k, isnum := L.rkValue(C).(LNumber); isnum {
+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) {
+						if v := tb.array[i-1]; v != LNil || tb.Metatable == LNil {
+							A := int(inst>>18) & 0xff //GETA
+							// this section is inlined by go-inline
+							// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+							{
+								rg := reg
+								regi := lbase + A
+								vali := v
+								newSize := regi + 1
+								// this section is inlined by go-inline
+								// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+								{
+									requiredSize := newSize
+									if requiredSize > cap(rg.array) {
+										rg.resize(requiredSize)
+									}
+								}
+								rg.array[regi] = vali
+								if regi >= rg.top {
+									rg.top = regi + 1
+								}
+							}
+							continue
+						}
+					}
+				}
+			}
+		case OP_GETTABLEKS:
+			lbase := cf.LocalBase
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if tb, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
+				proto := cf.Fn.Proto
+				k := C & ^opBitRk
+				if v := tb.hash.getStringH(proto.stringConstants[k], proto.strConstHash(k)); v != LNil || tb.Metatable == LNil {
+					A := int(inst>>18) & 0xff //GETA
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+					{
+						rg := reg
+						regi := lbase + A
+						vali := v
+						newSize := regi + 1
+						// this section is inlined by go-inline
+						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+						{
+							requiredSize := newSize
+							if requiredSize > cap(rg.array) {
+								rg.resize(requiredSize)
+							}
+						}
+						rg.array[regi] = vali
+						if regi >= rg.top {
+							rg.top = regi + 1
+						}
+					}
+					continue
+				}
+			}
+		case OP_SETTABLE:
+			lbase := cf.LocalBase
+			A := int(inst>>18) & 0xff //GETA
+			B := int(inst & 0x1ff)    //GETB
+			if tb, ok := reg.Get(lbase + A).(*LTable); ok {
+				if k, isnum := L.rkValue(B).(LNumber); isnum {
+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
+						C := int(inst>>9) & 0x1ff //GETC
+						tb.array[i-1] = L.rkValue(C)
+						continue
+					}
+				}
+			}
+		case OP_ADD:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+					v := v1 + v2
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+					{
+						rg := reg
+						regi := RA
+						vali := v
+						newSize := regi + 1
+						// this section is inlined by go-inline
+						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+						{
+							requiredSize := newSize
+							if requiredSize > cap(rg.array) {
+								rg.resize(requiredSize)
+							}
+						}
+						rg.array[regi] = rg.alloc.LNumber2I(vali)
+						if regi >= rg.top {
+							rg.top = regi + 1
+						}
+					}
+					continue
+				}
+			}
+		case OP_SUB:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+					v := v1 - v2
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+					{
+						rg := reg
+						regi := RA
+						vali := v
+						newSize := regi + 1
+						// this section is inlined by go-inline
+						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+						{
+							requiredSize := newSize
+							if requiredSize > cap(rg.array) {
+								rg.resize(requiredSize)
+							}
+						}
+						rg.array[regi] = rg.alloc.LNumber2I(vali)
+						if regi >= rg.top {
+							rg.top = regi + 1
+						}
+					}
+					continue
+				}
+			}
+		case OP_MUL:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+					v := v1 * v2
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+					{
+						rg := reg
+						regi := RA
+						vali := v
+						newSize := regi + 1
+						// this section is inlined by go-inline
+						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+						{
+							requiredSize := newSize
+							if requiredSize > cap(rg.array) {
+								rg.resize(requiredSize)
+							}
+						}
+						rg.array[regi] = rg.alloc.LNumber2I(vali)
+						if regi >= rg.top {
+							rg.top = regi + 1
+						}
+					}
+					continue
+				}
+			}
+		case OP_DIV:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+					v := v1 / v2
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
+					{
+						rg := reg
+						regi := RA
+						vali := v
+						newSize := regi + 1
+						// this section is inlined by go-inline
+						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+						{
+							requiredSize := newSize
+							if requiredSize > cap(rg.array) {
+								rg.resize(requiredSize)
+							}
+						}
+						rg.array[regi] = rg.alloc.LNumber2I(vali)
+						if regi >= rg.top {
+							rg.top = regi + 1
+						}
+					}
+					continue
+				}
+			}
+		case OP_JMP:
+			cf.Pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
+			continue
+		case OP_EQ:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					if (v1 == v2) != (int(inst>>18)&0xff != 0) { //GETA
+						cf.Pc++
+					}
+					continue
+				}
+			}
+		case OP_LT:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					if (v1 < v2) != (int(inst>>18)&0xff != 0) { //GETA
+						cf.Pc++
+					}
+					continue
+				}
+			}
+		case OP_LE:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					if (v1 <= v2) != (int(inst>>18)&0xff != 0) { //GETA
+						cf.Pc++
+					}
+					continue
+				}
+			}
+		case OP_TEST:
+			A := int(inst>>18) & 0xff //GETA
+			C := int(inst>>9) & 0x1ff //GETC
+			if LVAsBool(reg.Get(cf.LocalBase+A)) == (C == 0) {
+				cf.Pc++
+			}
+			continue
+		case OP_FORLOOP:
+			RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
+				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
+					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
+						init += step
+						v := reg.alloc.LNumber2I(init) // one box for both registers
+						// this section is inlined by go-inline
+						// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+						{
+							rg := reg
+							regi := RA
+							vali := v
+							newSize := regi + 1
+							// this section is inlined by go-inline
+							// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+							{
+								requiredSize := newSize
+								if requiredSize > cap(rg.array) {
+									rg.resize(requiredSize)
+								}
+							}
+							rg.array[regi] = vali
+							if regi >= rg.top {
+								rg.top = regi + 1
+							}
+						}
+						if (step > 0 && init <= limit) || (step <= 0 && init >= limit) {
+							cf.Pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
+							// this section is inlined by go-inline
+							// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+							{
+								rg := reg
+								regi := RA + 3
+								vali := v
+								newSize := regi + 1
+								// this section is inlined by go-inline
+								// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+								{
+									requiredSize := newSize
+									if requiredSize > cap(rg.array) {
+										rg.resize(requiredSize)
+									}
+								}
+								rg.array[regi] = vali
+								if regi >= rg.top {
+									rg.top = regi + 1
+								}
+							}
+						} else {
+							// this section is inlined by go-inline
+							// source function is 'func (rg *registry) SetTop(topi int) ' in '_state.go'
+							{
+								rg := reg
+								topi := RA + 1
+								// this section is inlined by go-inline
+								// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+								{
+									requiredSize := topi
+									if requiredSize > cap(rg.array) {
+										rg.resize(requiredSize)
+									}
+								}
+								oldtopi := rg.top
+								rg.top = topi
+								for i := oldtopi; i < rg.top; i++ {
+									rg.array[i] = LNil
+								}
+								// values beyond top don't need to be valid LValues, so setting them to nil is fine
+								// setting them to nil rather than LNil lets us invoke the golang memclr opto
+								if rg.top < oldtopi {
+									nilRange := rg.array[rg.top:oldtopi]
+									for i := range nilRange {
+										nilRange[i] = nil
+									}
+								}
+								//for i := rg.top; i < oldtop; i++ {
+								//	rg.array[i] = LNil
+								//}
+							}
+						}
+						continue
+					}
+				}
+			}
+		}
 		if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
 			return
 		}

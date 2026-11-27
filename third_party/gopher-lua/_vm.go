@@ -21,6 +21,7 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		return
 	}
 
+	reg := L.reg
 	for {
 		cf = L.currentFrame
 		if L.hookMask&hookMaskTrace != 0 { // go-moonscript patch
@@ -28,6 +29,176 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		}
 		inst = cf.Fn.Proto.Code[cf.Pc]
 		cf.Pc++
+		// go-moonscript patch: the common cases of the frequent opcodes are
+		// handled here, without the call through jumpTable; the others, and
+		// the other cases, go to the opcode's function.
+		switch int(inst >> 26) { //GETOPCODE
+		case OP_MOVE:
+			lbase := cf.LocalBase
+			A := int(inst>>18) & 0xff //GETA
+			B := int(inst & 0x1ff)    //GETB
+			v := reg.Get(lbase + B)
+			// +inline-call reg.Set lbase+A v
+			continue
+		case OP_LOADK:
+			A := int(inst>>18) & 0xff //GETA
+			Bx := int(inst & 0x3ffff) //GETBX
+			v := cf.Fn.Proto.Constants[Bx]
+			// +inline-call reg.Set cf.LocalBase+A v
+			continue
+		case OP_GETUPVAL:
+			A := int(inst>>18) & 0xff //GETA
+			B := int(inst & 0x1ff)    //GETB
+			v := cf.Fn.Upvalues[B].Value()
+			// +inline-call reg.Set cf.LocalBase+A v
+			continue
+		case OP_GETTABLE:
+			lbase := cf.LocalBase
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if tb, ok := reg.Get(lbase + B).(*LTable); ok {
+				if k, isnum := L.rkValue(C).(LNumber); isnum {
+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) {
+						if v := tb.array[i-1]; v != LNil || tb.Metatable == LNil {
+							A := int(inst>>18) & 0xff //GETA
+							// +inline-call reg.Set lbase+A v
+							continue
+						}
+					}
+				}
+			}
+		case OP_GETTABLEKS:
+			lbase := cf.LocalBase
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if tb, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
+				proto := cf.Fn.Proto
+				k := C & ^opBitRk
+				if v := tb.hash.getStringH(proto.stringConstants[k], proto.strConstHash(k)); v != LNil || tb.Metatable == LNil {
+					A := int(inst>>18) & 0xff //GETA
+					// +inline-call reg.Set lbase+A v
+					continue
+				}
+			}
+		case OP_SETTABLE:
+			lbase := cf.LocalBase
+			A := int(inst>>18) & 0xff //GETA
+			B := int(inst & 0x1ff)    //GETB
+			if tb, ok := reg.Get(lbase + A).(*LTable); ok {
+				if k, isnum := L.rkValue(B).(LNumber); isnum {
+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
+						C := int(inst>>9) & 0x1ff //GETC
+						tb.array[i-1] = L.rkValue(C)
+						continue
+					}
+				}
+			}
+		case OP_ADD:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+					v := v1 + v2
+					// +inline-call reg.SetNumber RA v
+					continue
+				}
+			}
+		case OP_SUB:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+					v := v1 - v2
+					// +inline-call reg.SetNumber RA v
+					continue
+				}
+			}
+		case OP_MUL:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+					v := v1 * v2
+					// +inline-call reg.SetNumber RA v
+					continue
+				}
+			}
+		case OP_DIV:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+					v := v1 / v2
+					// +inline-call reg.SetNumber RA v
+					continue
+				}
+			}
+		case OP_JMP:
+			cf.Pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
+			continue
+		case OP_EQ:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					if (v1 == v2) != (int(inst>>18)&0xff != 0) { //GETA
+						cf.Pc++
+					}
+					continue
+				}
+			}
+		case OP_LT:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					if (v1 < v2) != (int(inst>>18)&0xff != 0) { //GETA
+						cf.Pc++
+					}
+					continue
+				}
+			}
+		case OP_LE:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			if v1, ok1 := L.rkValue(B).(LNumber); ok1 {
+				if v2, ok2 := L.rkValue(C).(LNumber); ok2 {
+					if (v1 <= v2) != (int(inst>>18)&0xff != 0) { //GETA
+						cf.Pc++
+					}
+					continue
+				}
+			}
+		case OP_TEST:
+			A := int(inst>>18) & 0xff //GETA
+			C := int(inst>>9) & 0x1ff //GETC
+			if LVAsBool(reg.Get(cf.LocalBase+A)) == (C == 0) {
+				cf.Pc++
+			}
+			continue
+		case OP_FORLOOP:
+			RA := cf.LocalBase + int(inst>>18)&0xff //GETA
+			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
+				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
+					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
+						init += step
+						v := reg.alloc.LNumber2I(init) // one box for both registers
+						// +inline-call reg.Set RA v
+						if (step > 0 && init <= limit) || (step <= 0 && init >= limit) {
+							cf.Pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
+							// +inline-call reg.Set RA+3 v
+						} else {
+							// +inline-call reg.SetTop RA+1
+						}
+						continue
+					}
+				}
+			}
+		}
 		if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
 			return
 		}
