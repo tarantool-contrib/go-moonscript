@@ -183,6 +183,64 @@ out(ok, x)`, "2\t5\nfalse\t99"},
 	}
 }
 
+// TestLoadFileHeader checks loadfile, dofile and require of files whose
+// "#" first line is followed by bytecode, as lua5.1 and luajit load them:
+// Lua 5.1's luaL_loadfile skips the line and loads the bytecode, LuaJIT's
+// lexer skips it and refuses bytecode after it (also in loadstring).
+func TestLoadFileHeader(t *testing.T) {
+	code := `
+local dir = ...
+local function write(name, text)
+  local f = assert(io.open(dir .. "/" .. name .. ".lua", "wb"))
+  f:write(text)
+  f:close()
+  return dir .. "/" .. name .. ".lua"
+end
+local dump = write("dump", "#!lua\n" .. string.dump(function() return "dumped" end))
+local text = write("text", "#!lua\nreturn 'text'")
+package.path = dir .. "/?.lua"
+local function msg(f, ...)
+  local ok, r = pcall(f, ...)
+  return ok and tostring(r) or (string.gsub(r, (string.gsub(dir, "%p", "%%%0")), "DIR"))
+end
+out(msg(function() return assert(loadfile(dump))() end), msg(dofile, dump), msg(require, "dump"))
+out(msg(function() return assert(loadfile(text))() end), msg(dofile, text), msg(require, "text"))
+out(loadstring("#!lua\n\27LJ", "=input"))`
+	for _, c := range []struct {
+		dialect lua.Dialect
+		want    string
+	}{
+		{lua.DialectLua51, "dumped\tdumped\tdumped\ntext\ttext\ttext\nnil\tinput:1: unexpected symbol near '#'"},
+		{lua.DialectLuaJIT, "test:16: cannot load malformed bytecode\tcannot load malformed bytecode\t" +
+			"error loading module 'dump' from file 'DIR/dump.lua':\n\tcannot load malformed bytecode\n" +
+			"text\ttext\ttext\nnil\tcannot load malformed bytecode"},
+	} {
+		L := NewState(StateOptions(c.dialect))
+		var out []string
+		L.SetGlobal("out", L.NewFunction(func(L *lua.LState) int {
+			var parts []string
+			for i := 1; i <= L.GetTop(); i++ {
+				parts = append(parts, L.ToStringMeta(L.Get(i)).String())
+			}
+			out = append(out, strings.Join(parts, "\t"))
+			return 0
+		}))
+		fn, err := LoadLua(L, code, "=test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		L.Push(fn)
+		L.Push(lua.LString(t.TempDir()))
+		if err := L.PCall(1, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+		L.Close()
+		if got := strings.Join(out, "\n"); got != c.want {
+			t.Errorf("dialect %v: got\n%s\nwant\n%s", c.dialect, got, c.want)
+		}
+	}
+}
+
 func TestGoAPI(t *testing.T) {
 	L := NewState()
 	defer L.Close()

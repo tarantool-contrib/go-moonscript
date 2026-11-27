@@ -132,7 +132,7 @@ func jitLoadFile(L *lua.LState) int {
 		}
 		code, chunkname = string(data), "=stdin"
 	} else {
-		text, err := readChunkFile(path)
+		text, err := readChunkFile(L, path)
 		if err != nil {
 			L.Push(lua.LNil)
 			L.Push(lua.LString(err.Error()))

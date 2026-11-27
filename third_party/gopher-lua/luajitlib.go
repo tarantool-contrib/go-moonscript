@@ -222,8 +222,13 @@ func JITBytecodeError(chunkname string) string {
 
 // JITLoadModeError is LuaJIT's check of the mode argument of load and
 // loadfile: the message for a chunk the mode does not allow, "" if it is
-// allowed (hasMode false: no mode given, anything goes).
+// allowed (hasMode false: no mode given, anything goes). Bytecode after a
+// "#" line or a UTF-8 BOM is refused before the mode is looked at
+// (lj_lex_setup), whatever the mode; the parser refuses it too.
 func JITLoadModeError(code, mode string, hasMode bool) string {
+	if hasMode && jitHeaderBytecode(code) {
+		return "cannot load malformed bytecode"
+	}
 	kind := byte('t')
 	if JITIsBinaryChunk(code) {
 		kind = 'b'
@@ -232,6 +237,25 @@ func JITLoadModeError(code, mode string, hasMode bool) string {
 		return "attempt to load chunk with wrong mode"
 	}
 	return ""
+}
+
+// jitHeaderBytecode reports whether code starts with a UTF-8 BOM or a "#"
+// line, or both, and bytecode after them, as lj_lex_setup reads them.
+func jitHeaderBytecode(code string) bool {
+	rest := strings.TrimPrefix(code, "\xef\xbb\xbf")
+	if strings.HasPrefix(rest, "#") {
+		i := strings.IndexAny(rest, "\n\r")
+		if i < 0 {
+			return false
+		}
+		rest = rest[i:]
+		if len(rest) > 1 && rest[1] != rest[0] && (rest[1] == '\n' || rest[1] == '\r') {
+			rest = rest[2:] // "\r\n" or "\n\r"
+		} else {
+			rest = rest[1:]
+		}
+	}
+	return len(rest) < len(code) && JITIsBinaryChunk(rest)
 }
 
 // jitLoadFile is LuaJIT 2.1's loadfile(filename [, mode [, env]]).
@@ -260,14 +284,9 @@ func jitLoadFile(L *LState) int {
 		L.Push(LString("cannot open " + chunkname + ": " + msg))
 		return 2
 	}
+	// go-moonscript patch: the parser skips a first "#" line (lj_lex_setup;
+	// luaL_loadfilex reads the file as it is), and refuses bytecode after it
 	src := string(code)
-	if strings.HasPrefix(src, "#") { // the first line is skipped, as luaL_loadfile does
-		if i := strings.IndexByte(src, '\n'); i >= 0 {
-			src = src[i:]
-		} else {
-			src = ""
-		}
-	}
 	if msg := JITLoadModeError(src, mode, hasMode); msg != "" {
 		L.Push(LNil)
 		L.Push(LString(msg))

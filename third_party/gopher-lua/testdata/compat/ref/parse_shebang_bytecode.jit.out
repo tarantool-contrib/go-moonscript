@@ -1,0 +1,35 @@
+shebang bytecode	cannot load malformed bytecode
+shebang Lua bytecode	cannot load malformed bytecode
+bom bytecode	cannot load malformed bytecode
+bom shebang bytecode	cannot load malformed bytecode
+shebang only	ok
+shebang code	ok	1
+bom code	ok	2
+bytecode in the line	ok
+cr	cannot load malformed bytecode
+crlf	cannot load malformed bytecode
+blank line	3: unexpected symbol near 'char(27)'
+file name	cannot load malformed bytecode
+line numbers	2: unexpected symbol near '<eof>'
+load b	nil	cannot load malformed bytecode
+load t	nil	cannot load malformed bytecode
+load bt	nil	cannot load malformed bytecode
+load b text	nil	attempt to load chunk with wrong mode
+loadfile dump	cannot load malformed bytecode
+loadfile b dump	cannot load malformed bytecode
+dofile dump	false	cannot load malformed bytecode
+loadfile bytecode	cannot load malformed bytecode
+loadfile b bytecode	cannot load malformed bytecode
+dofile bytecode	false	cannot load malformed bytecode
+loadfile text	text
+loadfile b text	attempt to load chunk with wrong mode
+dofile text	true	text
+loadfile bom	bom
+loadfile b bom	attempt to load chunk with wrong mode
+dofile bom	true	bom
+loadfile two lines	FILE:2: unexpected symbol near '#'
+loadfile b two lines	attempt to load chunk with wrong mode
+dofile two lines	false	FILE:2: unexpected symbol near '#'
+loadfile crlf	crlf
+loadfile b crlf	attempt to load chunk with wrong mode
+dofile crlf	true	crlf

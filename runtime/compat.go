@@ -176,8 +176,9 @@ func strerror(err error) string {
 
 // readChunkFile is luaL_loadfile's reading part: the file text with a first
 // line starting with '#' blanked (its newline kept, so lines don't shift;
-// removed before a binary chunk).
-func readChunkFile(path string) (string, error) {
+// removed before a binary chunk). Under LuaJIT the text is the file's: the
+// parser skips the line itself and refuses bytecode after it.
+func readChunkFile(L *lua.LState, path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		what := "open"
@@ -188,7 +189,7 @@ func readChunkFile(path string) (string, error) {
 		return "", fmt.Errorf("cannot %s %s: %s", what, path, strerror(err))
 	}
 	text := string(data)
-	if strings.HasPrefix(text, "#") {
+	if strings.HasPrefix(text, "#") && L.Dialect() != lua.DialectLuaJIT {
 		if i := strings.IndexByte(text, '\n'); i >= 0 {
 			text = text[i:]
 		} else {
@@ -210,7 +211,7 @@ func loadFile(L *lua.LState, path string) (*lua.LFunction, error) {
 		}
 		return loadLua(L, string(data), "=stdin")
 	}
-	text, err := readChunkFile(path)
+	text, err := readChunkFile(L, path)
 	if err != nil {
 		return nil, err
 	}

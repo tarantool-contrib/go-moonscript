@@ -420,7 +420,9 @@ func (ls *LState) LoadFile(path string) (*LFunction, error) {
 	if err != nil && err != io.EOF {
 		return nil, newApiErrorE(ApiErrorFile, err)
 	}
-	if c == byte('#') {
+	// go-moonscript patch: LuaJIT's parser skips the "#" line itself (and
+	// refuses bytecode after it)
+	if c == byte('#') && ls.Dialect() != DialectLuaJIT {
 		// Unix exec. file?
 		// skip first line
 		_, err, _ = readBufioLine(reader)

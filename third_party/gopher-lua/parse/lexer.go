@@ -43,7 +43,8 @@ type Error struct {
 
 // NoLine is the line of an error without a position (Error gives the
 // message alone): Lua 5.1's luaG_runerror in the parser, which adds none
-// as the loader is a C function.
+// as the loader is a C function, and LuaJIT's error for bytecode after a
+// "#" line or a BOM.
 const NoLine = 0
 
 // Error formats the error as Lua does, with the chunk name verbatim:
@@ -140,9 +141,11 @@ func newLexer(src []byte, source string, dialect Dialect) *lexer {
 	ls.ahead.typ = tkEOS
 	ls.next()
 	if dialect == LuaJIT { // lj_lex_setup skips a UTF-8 BOM and a "#" line
+		header := false
 		if ls.current == 0xef && len(ls.src) >= ls.pos+2 && ls.src[ls.pos] == 0xbb && ls.src[ls.pos+1] == 0xbf {
 			ls.pos += 2
 			ls.next()
+			header = true
 		}
 		if ls.current == '#' {
 			for {
@@ -155,6 +158,11 @@ func newLexer(src []byte, source string, dialect Dialect) *lexer {
 				}
 			}
 			ls.inclinenumber()
+			header = true
+		}
+		// bytecode after a header is refused, the chunk name not echoed
+		if header && ls.current == 0x1b {
+			ls.runError("cannot load malformed bytecode")
 		}
 	}
 	return ls
