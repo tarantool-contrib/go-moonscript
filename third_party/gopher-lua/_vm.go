@@ -73,17 +73,48 @@ func mainLoop(L *LState, baseframe *callFrame) {
 					}
 				}
 			}
+		case OP_GETGLOBAL:
+			Bx := int(inst & 0x3ffff) //GETBX
+			proto, env := cf.Fn.Proto, cf.Fn.Env
+			key, h := proto.stringConstants[Bx], proto.strConstHash(Bx)
+			v := env.hash.getStringH(key, h)
+			if v == LNil && env.Metatable != LNil {
+				v = L.getFieldStringKMiss(env, consts[Bx], key, h, true)
+			}
+			A := int(inst>>18) & 0xff //GETA
+			// +inline-call reg.Set lbase+A v
+			continue
 		case OP_GETTABLEKS:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if tb, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
+			if obj, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
 				proto := cf.Fn.Proto
 				k := C & ^opBitRk
-				if v := tb.hash.getStringH(proto.stringConstants[k], proto.strConstHash(k)); v != LNil || tb.Metatable == LNil {
-					A := int(inst>>18) & 0xff //GETA
-					// +inline-call reg.Set lbase+A v
-					continue
+				key, h := proto.stringConstants[k], proto.strConstHash(k)
+				v := obj.hash.getStringH(key, h)
+				if v == LNil && obj.Metatable != LNil {
+					v = L.getFieldStringKMiss(obj, consts[k], key, h, true)
 				}
+				A := int(inst>>18) & 0xff //GETA
+				// +inline-call reg.Set lbase+A v
+				continue
+			}
+		case OP_SELF:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			selfobj := reg.Get(lbase + B)
+			if obj, ok := selfobj.(*LTable); ok && C&opBitRk != 0 {
+				proto := cf.Fn.Proto
+				k := C & ^opBitRk
+				key, h := proto.stringConstants[k], proto.strConstHash(k)
+				v := obj.hash.getStringH(key, h)
+				if v == LNil && obj.Metatable != LNil {
+					v = L.getFieldStringKMiss(selfobj, consts[k], key, h, true)
+				}
+				RA := lbase + int(inst>>18)&0xff //GETA
+				// +inline-call reg.Set RA v
+				// +inline-call reg.Set RA+1 selfobj
+				continue
 			}
 		case OP_SETTABLE:
 			A := int(inst>>18) & 0xff //GETA

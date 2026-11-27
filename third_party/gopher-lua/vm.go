@@ -153,36 +153,124 @@ func mainLoop(L *LState, baseframe *callFrame) {
 					}
 				}
 			}
+		case OP_GETGLOBAL:
+			Bx := int(inst & 0x3ffff) //GETBX
+			proto, env := cf.Fn.Proto, cf.Fn.Env
+			key, h := proto.stringConstants[Bx], proto.strConstHash(Bx)
+			v := env.hash.getStringH(key, h)
+			if v == LNil && env.Metatable != LNil {
+				v = L.getFieldStringKMiss(env, consts[Bx], key, h, true)
+			}
+			A := int(inst>>18) & 0xff //GETA
+			// this section is inlined by go-inline
+			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+			{
+				rg := reg
+				regi := lbase + A
+				vali := v
+				newSize := regi + 1
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+				{
+					requiredSize := newSize
+					if requiredSize > cap(rg.array) {
+						rg.resize(requiredSize)
+					}
+				}
+				rg.array[regi] = vali
+				if regi >= rg.top {
+					rg.top = regi + 1
+				}
+			}
+			continue
 		case OP_GETTABLEKS:
 			B := int(inst & 0x1ff)    //GETB
 			C := int(inst>>9) & 0x1ff //GETC
-			if tb, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
+			if obj, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
 				proto := cf.Fn.Proto
 				k := C & ^opBitRk
-				if v := tb.hash.getStringH(proto.stringConstants[k], proto.strConstHash(k)); v != LNil || tb.Metatable == LNil {
-					A := int(inst>>18) & 0xff //GETA
+				key, h := proto.stringConstants[k], proto.strConstHash(k)
+				v := obj.hash.getStringH(key, h)
+				if v == LNil && obj.Metatable != LNil {
+					v = L.getFieldStringKMiss(obj, consts[k], key, h, true)
+				}
+				A := int(inst>>18) & 0xff //GETA
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+				{
+					rg := reg
+					regi := lbase + A
+					vali := v
+					newSize := regi + 1
 					// this section is inlined by go-inline
-					// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
 					{
-						rg := reg
-						regi := lbase + A
-						vali := v
-						newSize := regi + 1
-						// this section is inlined by go-inline
-						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
-						{
-							requiredSize := newSize
-							if requiredSize > cap(rg.array) {
-								rg.resize(requiredSize)
-							}
-						}
-						rg.array[regi] = vali
-						if regi >= rg.top {
-							rg.top = regi + 1
+						requiredSize := newSize
+						if requiredSize > cap(rg.array) {
+							rg.resize(requiredSize)
 						}
 					}
-					continue
+					rg.array[regi] = vali
+					if regi >= rg.top {
+						rg.top = regi + 1
+					}
 				}
+				continue
+			}
+		case OP_SELF:
+			B := int(inst & 0x1ff)    //GETB
+			C := int(inst>>9) & 0x1ff //GETC
+			selfobj := reg.Get(lbase + B)
+			if obj, ok := selfobj.(*LTable); ok && C&opBitRk != 0 {
+				proto := cf.Fn.Proto
+				k := C & ^opBitRk
+				key, h := proto.stringConstants[k], proto.strConstHash(k)
+				v := obj.hash.getStringH(key, h)
+				if v == LNil && obj.Metatable != LNil {
+					v = L.getFieldStringKMiss(selfobj, consts[k], key, h, true)
+				}
+				RA := lbase + int(inst>>18)&0xff //GETA
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+				{
+					rg := reg
+					regi := RA
+					vali := v
+					newSize := regi + 1
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+					{
+						requiredSize := newSize
+						if requiredSize > cap(rg.array) {
+							rg.resize(requiredSize)
+						}
+					}
+					rg.array[regi] = vali
+					if regi >= rg.top {
+						rg.top = regi + 1
+					}
+				}
+				// this section is inlined by go-inline
+				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
+				{
+					rg := reg
+					regi := RA + 1
+					vali := selfobj
+					newSize := regi + 1
+					// this section is inlined by go-inline
+					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+					{
+						requiredSize := newSize
+						if requiredSize > cap(rg.array) {
+							rg.resize(requiredSize)
+						}
+					}
+					rg.array[regi] = vali
+					if regi >= rg.top {
+						rg.top = regi + 1
+					}
+				}
+				continue
 			}
 		case OP_SETTABLE:
 			A := int(inst>>18) & 0xff //GETA
