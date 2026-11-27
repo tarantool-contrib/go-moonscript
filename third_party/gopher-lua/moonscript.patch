@@ -565,6 +565,51 @@ that change.
       sandbox.FreezeLibraries freezes the state's library tables and the
       string and file metatables (the globals and package stay writable).
 
+  - Loading a syntax tree (go-moonscript):
+    - compileast.go (new): lua.CompileAST(chunk, chunkname, dialect) and
+      LState.LoadAST(chunk, chunkname) compile and load a tree of package
+      ast that other code built or transformed, as LoadChunk does source
+      (Lua chunk names, LoadChunk's ids; errors an ApiErrorSyntax whose
+      Cause is the *CompileError); a parsed chunk's tree gives LoadChunk's
+      function (the same dump). After yuin/gopher-lua#275 (xushiwei,
+      LoadAst), which compiled the tree unchecked; #402 (SeigeC,
+      CompileWithParNames) not taken: a "local a, b = ..." first does it
+      (ExampleCompileAST).
+    - compileast.go: a tree is checked before it is compiled (astCheck):
+      nil and unknown nodes, operators, numerals, empty lists, call
+      statements and calls, assignment targets and function names, "..."
+      outside a vararg function, break outside a loop, 200 locals and 60
+      upvalues per function (lua5.1's messages), 32767 local records
+      (DialectLua51), the compiler's nesting limit (cycles), goto, labels
+      and cdata numerals only under DialectLuaJIT, negative lines: a
+      *CompileError at the node's line. Only source loading has the
+      parsers' messages near a token, their 200 syntax levels and the
+      models of lua5.1's registers and LuaJIT's code generator.
+    - compileast.go: a node without a line takes the line of the node
+      before it in source order (1 at the start), without a last line the
+      last line of its subtree, on a copy of the tree (lineFiller).
+    - compile.go: compiling leaves the tree as it is (a numeric for's
+      default step and the folded operand of a unary minus were stored in
+      it); compileDialect: no implicit "arg" under DialectLuaJIT whatever
+      ParList.NoArg (LState.Load uses it); a goto into a local's scope
+      names the first local it jumps into, as LuaJIT (an index panic in a
+      block without locals); the cdata numeral function takes "".
+    - compile.go, found by FuzzCompileAST, from source too: an assignment
+      to one local with extra values evaluates them all first (i = 5,
+      f(i)); "..." for a local's register is loaded into a free one and
+      moved (VARARG cleared the registers above it: a nil-pointer panic);
+      backward jumps and FORPREP/FORLOOP over more than sBx instructions
+      are lua5.1's "control structure too long" at the jump's line (they
+      jumped out of the code; "too long to jump." at line 0 before); more
+      than 262143 closures in a function "constant table overflow".
+    - Tests: compileast_fix_test.go (round trip of the test scripts in
+      both dialects, compat scripts through LoadAST, errors, limits,
+      lines, the tree unchanged), compileast_fuzz_fix_test.go
+      (FuzzCompileAST, TestCompileASTMutations), compileast_example_test.go,
+      compile_fix_test.go TestCompileLongJumps, compat
+      compile_assign_extra.lua (lua5.1 ref); internal/luasuites/load_test.go
+      (round trip of the archives, BenchmarkLoadArchives): go-moonscript
+
   Performance, numbers (go-moonscript):
     - LNumber2I builds the interface value in a local, without a scratch
       LValue (a write barrier per boxed number) or reflect.SliceHeader;
@@ -1560,7 +1605,7 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		return nil, newApiErrorE(ApiErrorSyntax, err)
 +	}
-+	proto, err := Compile(chunk, parseName)
++	proto, err := compileDialect(chunk, parseName, ls.Dialect()) // go-moonscript patch
 +	// go-moonscript patch: lua5.1 finds that a function needs too many
 +	// registers while parsing, and reports it near the token it is at; the
 +	// parser's model of its registers tells, if the compiler needed many
@@ -4588,7 +4633,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/compat_test.go
 +++ b/compat_test.go
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,91 @@
 +package lua
 +
 +// go-moonscript patch: Lua 5.1 compatibility tests of the fixes ported from
@@ -4635,6 +4680,14 @@ regenerates the diff below; this header is edited by hand.
 +// global tostring as Lua 5.1's print does.
 +func runCompatScript(t *testing.T, script string) string {
 +	t.Helper()
++	return runCompatScriptWith(t, script, func(L *LState, code []byte, chunkname string) (*LFunction, error) {
++		return L.LoadChunk(strings.NewReader(string(code)), chunkname)
++	})
++}
++
++// runCompatScriptWith is runCompatScript, the script loaded by load.
++func runCompatScriptWith(t *testing.T, script string, load func(L *LState, code []byte, chunkname string) (*LFunction, error)) string {
++	t.Helper()
 +	dialect := DialectLua51
 +	if strings.HasSuffix(script, ".jit.lua") {
 +		dialect = DialectLuaJIT
@@ -4662,7 +4715,7 @@ regenerates the diff below; this header is edited by hand.
 +		out.WriteByte('\n')
 +		return 0
 +	}))
-+	fn, err := L.LoadChunk(strings.NewReader(string(code)), "@"+filepath.Base(script))
++	fn, err := load(L, code, "@"+filepath.Base(script))
 +	if err != nil {
 +		t.Fatal(err)
 +	}
@@ -4713,7 +4766,7 @@ regenerates the diff below; this header is edited by hand.
 +func cdataNumeral(L *LState) int {
 +	s := L.CheckString(1)
 +	kind := "64-bit integer"
-+	if s[len(s)-1]|0x20 == 'i' {
++	if s != "" && s[len(s)-1]|0x20 == 'i' {
 +		kind = "complex number"
 +	}
 +	L.RaiseError("%s literal '%s' needs the FFI, which is not supported", kind, s)
@@ -4812,7 +4865,7 @@ regenerates the diff below; this header is edited by hand.
  	if pos != nil {
  		bl.LineStart = pos.Line()
  		bl.LastLine = pos.LastLine()
-@@ -410,6 +475,43 @@
+@@ -410,6 +475,46 @@
  	labelPc         map[int]int
  	gotosCount      int
  	unresolvedGotos map[int]*gotoLabelDesc
@@ -4837,6 +4890,9 @@ regenerates the diff below; this header is edited by hand.
 +
 +type compileState struct {
 +	depth int // statements and expressions being compiled
++	// go-moonscript patch: no vararg function has Lua 5.1's implicit local
++	// "arg", whatever its ParList.NoArg (DialectLuaJIT, see compileDialect)
++	noArg bool
 +	// what constFold returned for an operator expression, so that a chain is
 +	// folded once, not once per level (that was quadratic)
 +	folded map[ast.Expr]ast.Expr
@@ -4856,7 +4912,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func newFuncContext(sourcename string, parent *funcContext) *funcContext {
-@@ -424,6 +526,14 @@
+@@ -424,6 +529,14 @@
  		labelPc:         map[int]int{},
  		gotosCount:      0,
  		unresolvedGotos: map[int]*gotoLabelDesc{},
@@ -4871,7 +4927,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	fc.Blocks = []*codeBlock{fc.Block}
  	return fc
-@@ -435,7 +545,8 @@
+@@ -435,7 +548,8 @@
  		if !ok {
  			continue
  		}
@@ -4881,7 +4937,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  }
  
-@@ -446,7 +557,7 @@
+@@ -446,7 +560,7 @@
  
  func (fc *funcContext) AddNamedLabel(label *gotoLabelDesc) {
  	if old := fc.Block.AddLabel(label); old != nil {
@@ -4890,17 +4946,44 @@ regenerates the diff below; this header is edited by hand.
  	}
  	fc.SetLabelPc(label.Id, label.Pc)
  }
-@@ -458,7 +569,8 @@
+@@ -457,13 +571,34 @@
+ 
  func (fc *funcContext) ResolveGoto(from, to *gotoLabelDesc, index int) {
  	if from.NumActiveLocalVars < to.NumActiveLocalVars {
- 		varName := fc.Block.LocalVars.Names()[len(fc.Block.LocalVars.Names())-1]
+-		varName := fc.Block.LocalVars.Names()[len(fc.Block.LocalVars.Names())-1]
 -		raiseCompileError(fc, to.Line+1, "<goto %s> at line %d jumps into the scope of local '%s'", to.Name, from.Line, varName)
-+		// go-moonscript patch: LuaJIT's message
++		// go-moonscript patch: LuaJIT's message, with the first local the
++		// goto jumps into the scope of, as LuaJIT names it (it took the
++		// block's last local, and failed in a block without any)
++		varName := fc.activeLocalName(from.NumActiveLocalVars)
 +		raiseCompileError(fc, from.Line, "<goto %s> jumps into the scope of local '%s'", to.Name, varName)
  	}
  	fc.Code.SetSbx(from.Pc, to.Id)
  	delete(fc.unresolvedGotos, index)
-@@ -513,21 +625,181 @@
+ }
+ 
++// activeLocalName is the name of the local variable with index n among
++// the active ones of the function, "?" if there is none. go-moonscript
++// patch.
++func (fc *funcContext) activeLocalName(n int) string {
++	var blocks []*codeBlock
++	for b := fc.Block; b != nil; b = b.Parent {
++		blocks = append(blocks, b)
++	}
++	for i := len(blocks) - 1; i >= 0; i-- {
++		names := blocks[i].LocalVars.Names()
++		if n < len(names) {
++			return names[n]
++		}
++		n -= len(names)
++	}
++	return "?"
++}
++
+ func (fc *funcContext) FindLabel(block *codeBlock, gotoLabel *gotoLabelDesc, i int) bool {
+ 	target := block.GetLabel(gotoLabel.Name)
+ 	if target != nil {
+@@ -513,21 +648,181 @@
  
  func (fc *funcContext) SetLabelPc(label int, pc int) {
  	fc.labelPc[label] = pc
@@ -5087,7 +5170,7 @@ regenerates the diff below; this header is edited by hand.
  	if v > opMaxArgBx {
  		raiseCompileError(fc, fc.Proto.LineDefined, "too many constants")
  	}
-@@ -543,6 +815,7 @@
+@@ -543,6 +838,7 @@
  
  func (fc *funcContext) RegisterLocalVar(name string) int {
  	ret := fc.Block.LocalVars.Register(name)
@@ -5095,7 +5178,7 @@ regenerates the diff below; this header is edited by hand.
  	fc.Proto.DbgLocals = append(fc.Proto.DbgLocals, &DbgLocalInfo{Name: name, StartPc: fc.Code.LastPC() + 1})
  	fc.SetRegTop(fc.RegTop() + 1)
  	return ret
-@@ -585,8 +858,8 @@
+@@ -585,8 +881,8 @@
  }
  
  func (fc *funcContext) LeaveBlock() int {
@@ -5105,7 +5188,7 @@ regenerates the diff below; this header is edited by hand.
  
  	if fc.Block.Parent != nil {
  		fc.ResolveCurrentBlockGotosWithParentBlock()
-@@ -596,15 +869,36 @@
+@@ -596,15 +892,36 @@
  	return closed
  }
  
@@ -5145,7 +5228,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	fc.regTop = top
  }
-@@ -652,6 +946,9 @@
+@@ -652,6 +969,9 @@
  } // }}}
  
  func compileStmt(context *funcContext, stmt ast.Stmt, isLastStmt bool) { // {{{
@@ -5155,7 +5238,7 @@ regenerates the diff below; this header is edited by hand.
  	switch st := stmt.(type) {
  	case *ast.AssignStmt:
  		compileAssignStmt(context, st)
-@@ -660,7 +957,7 @@
+@@ -660,7 +980,7 @@
  	case *ast.FuncCallStmt:
  		compileFuncCallExpr(context, context.RegTop(), st.Expr.(*ast.FuncCallExpr), ecnone(-1))
  	case *ast.DoBlockStmt:
@@ -5164,7 +5247,7 @@ regenerates the diff below; this header is edited by hand.
  		compileChunk(context, st.Stmts, false)
  		context.LeaveBlock()
  	case *ast.WhileStmt:
-@@ -689,7 +986,8 @@
+@@ -689,7 +1009,8 @@
  func compileAssignStmtLeft(context *funcContext, stmt *ast.AssignStmt) (int, []*assigncontext) { // {{{
  	reg := context.RegTop()
  	acs := make([]*assigncontext, 0, len(stmt.Lhs))
@@ -5174,7 +5257,7 @@ regenerates the diff below; this header is edited by hand.
  		switch st := lhs.(type) {
  		case *ast.IdentExpr:
  			identtype := getIdentRefType(context, context, st)
-@@ -702,12 +1000,47 @@
+@@ -702,12 +1023,47 @@
  			case ecLocal:
  				ec.reg = context.FindLocalVar(st.Value)
  			}
@@ -5227,7 +5310,7 @@ regenerates the diff below; this header is edited by hand.
  			if _, ok := st.Key.(*ast.StringExpr); ok {
  				ac.keyks = true
  			}
-@@ -720,6 +1053,33 @@
+@@ -720,6 +1076,33 @@
  	return reg, acs
  } // }}}
  
@@ -5261,7 +5344,7 @@ regenerates the diff below; this header is edited by hand.
  func compileAssignStmtRight(context *funcContext, stmt *ast.AssignStmt, reg int, acs []*assigncontext) (int, []*assigncontext) { // {{{
  	lennames := len(stmt.Lhs)
  	lenexprs := len(stmt.Rhs)
-@@ -728,6 +1088,15 @@
+@@ -728,6 +1111,17 @@
  	for namesassigned < lennames {
  		ac := acs[namesassigned]
  		ec := ac.ec
@@ -5269,15 +5352,17 @@ regenerates the diff below; this header is edited by hand.
 +		// as many values as targets is stored first, before anything else
 +		// is (and after the other values are evaluated), as in luac
 +		last := namesassigned == lennames-1 && lenexprs == lennames
-+		if lennames > 1 && ec.ctype == ecLocal && !last {
++		if (lennames > 1 || lenexprs > lennames) && ec.ctype == ecLocal && !last {
 +			// go-moonscript patch (yuin/gopher-lua#560): a, b = b, a needs the
-+			// value in a temporary, as later expressions may read the local
++			// value in a temporary, as later expressions may read the local;
++			// so does i = 5, f(i), whose extra values are evaluated before i
++			// is assigned
 +			ec = ecnone(0)
 +		}
  		var expr ast.Expr = nil
  		if namesassigned >= lenexprs {
  			expr = &ast.NilExpr{}
-@@ -751,11 +1120,26 @@
+@@ -751,11 +1145,26 @@
  		if expr == nil {
  			expr = stmt.Rhs[namesassigned]
  		}
@@ -5305,7 +5390,7 @@ regenerates the diff below; this header is edited by hand.
  			} else {
  				ac.valuerk = idx
  				reg += reginc
-@@ -781,40 +1165,74 @@
+@@ -781,40 +1190,74 @@
  } // }}}
  
  func compileAssignStmt(context *funcContext, stmt *ast.AssignStmt) { // {{{
@@ -5387,7 +5472,7 @@ regenerates the diff below; this header is edited by hand.
  	lenexprs := len(exprs)
  	namesassigned := 0
  	ec := &expcontext{}
-@@ -838,7 +1256,7 @@
+@@ -838,7 +1281,7 @@
  	// extra left names
  	if lennames > namesassigned {
  		restleft := lennames - namesassigned - 1
@@ -5396,7 +5481,7 @@ regenerates the diff below; this header is edited by hand.
  		reg += restleft
  	}
  
-@@ -855,15 +1273,17 @@
+@@ -855,15 +1298,17 @@
  
  func compileLocalAssignStmt(context *funcContext, stmt *ast.LocalAssignStmt) { // {{{
  	reg := context.RegTop()
@@ -5417,7 +5502,7 @@ regenerates the diff below; this header is edited by hand.
  	for _, name := range stmt.Names {
  		context.RegisterLocalVar(name)
  	}
-@@ -880,7 +1300,7 @@
+@@ -880,7 +1325,7 @@
  		switch ex := stmt.Exprs[0].(type) {
  		case *ast.IdentExpr:
  			if idx := context.FindLocalVar(ex.Value); idx > -1 {
@@ -5426,7 +5511,7 @@ regenerates the diff below; this header is edited by hand.
  				return
  			}
  		case *ast.FuncCallExpr:
-@@ -890,7 +1310,7 @@
+@@ -890,7 +1335,7 @@
  				reg += compileExpr(context, reg, ex, ecnone(-2))
  				code.SetOpCode(code.LastPC(), OP_TAILCALL)
  			}
@@ -5435,7 +5520,7 @@ regenerates the diff below; this header is edited by hand.
  			return
  		}
  	}
-@@ -907,29 +1327,46 @@
+@@ -907,29 +1352,46 @@
  	if lastisvaarg {
  		count = 0
  	}
@@ -5495,7 +5580,7 @@ regenerates the diff below; this header is edited by hand.
  	// TODO folding constants?
  	code := context.Code
  	flip := 0
-@@ -950,6 +1387,16 @@
+@@ -950,6 +1412,16 @@
  			return
  		}
  	case *ast.UnaryNotOpExpr:
@@ -5512,7 +5597,7 @@ regenerates the diff below; this header is edited by hand.
  		compileBranchCondition(context, reg, ex.Expr, elselabel, thenlabel, !hasnextcond)
  		return
  	case *ast.LogicalOpExpr:
-@@ -973,8 +1420,8 @@
+@@ -973,8 +1445,8 @@
  
  	a := reg
  	compileExprWithMVPropagation(context, expr, &reg, &a)
@@ -5523,7 +5608,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileWhileStmt(context *funcContext, stmt *ast.WhileStmt) { // {{{
-@@ -985,10 +1432,12 @@
+@@ -985,10 +1457,12 @@
  	context.SetLabelPc(condlabel, context.Code.LastPC())
  	compileBranchCondition(context, context.RegTop(), stmt.Condition, thenlabel, elselabel, false)
  	context.SetLabelPc(thenlabel, context.Code.LastPC())
@@ -5538,7 +5623,7 @@ regenerates the diff below; this header is edited by hand.
  	context.LeaveBlock()
  	context.SetLabelPc(elselabel, context.Code.LastPC())
  } // }}}
-@@ -1008,11 +1457,12 @@
+@@ -1008,11 +1482,12 @@
  	n := context.LeaveBlock()
  
  	if n > -1 {
@@ -5554,7 +5639,7 @@ regenerates the diff below; this header is edited by hand.
  		context.SetLabelPc(label, context.Code.LastPC())
  	}
  
-@@ -1043,7 +1493,7 @@
+@@ -1043,7 +1518,7 @@
  		astmt := &ast.AssignStmt{Lhs: []ast.Expr{stmt.Name.Func}, Rhs: []ast.Expr{stmt.Func}}
  		astmt.SetLine(sline(stmt.Func))
  		astmt.SetLastLine(eline(stmt.Func))
@@ -5563,7 +5648,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  } // }}}
  
-@@ -1052,27 +1502,36 @@
+@@ -1052,27 +1527,39 @@
  	endlabel := context.NewLabel()
  	ec := &expcontext{}
  
@@ -5587,14 +5672,20 @@ regenerates the diff below; this header is edited by hand.
  
 -	reg = context.RegTop()
 -	rstep := context.RegisterLocalVar("(for step)")
+-	if stmt.Step == nil {
+-		stmt.Step = &ast.NumberExpr{Value: "1"}
+-		stmt.Step.SetLine(sline(stmt.Init))
 +	rstep := rindex + 2
- 	if stmt.Step == nil {
- 		stmt.Step = &ast.NumberExpr{Value: "1"}
- 		stmt.Step.SetLine(sline(stmt.Init))
++	step := stmt.Step
++	if step == nil {
++		// go-moonscript patch: a default step of its own, the tree is left
++		// as it is (it was stored in stmt.Step)
++		step = &ast.NumberExpr{Value: "1"}
++		step.SetLine(sline(stmt.Init))
  	}
  	ecupdate(ec, ecLocal, rstep, 0)
 -	compileExpr(context, reg, stmt.Step, ec)
-+	compileExpr(context, rstep, stmt.Step, ec)
++	compileExpr(context, rstep, step, ec)
  
 -	code.AddASbx(OP_FORPREP, rindex, 0, sline(stmt))
 +	firstdbg := len(context.Proto.DbgLocals)
@@ -5604,22 +5695,28 @@ regenerates the diff below; this header is edited by hand.
 +
 +	// go-moonscript patch: luac emits FORPREP after "do", see above
 +	prepline := exprLastLine(stmt.Limit)
-+	if l := exprLastLine(stmt.Step); l > prepline {
++	if l := exprLastLine(step); l > prepline {
 +		prepline = l
 +	}
 +	code.AddASbx(OP_FORPREP, rindex, 0, prepline)
  
  	context.RegisterLocalVar(stmt.Name)
  
-@@ -1083,6 +1542,7 @@
+@@ -1082,7 +1569,13 @@
+ 	context.LeaveBlock()
  
  	flpc := code.LastPC()
++	if flpc-bodypc > opMaxArgSbx {
++		// go-moonscript patch: FORPREP and FORLOOP jump over the body (a
++		// longer one was a jump out of the code, a Go panic)
++		raiseCompileError(context, eline(stmt), "control structure too long")
++	}
  	code.AddASbx(OP_FORLOOP, rindex, bodypc-(flpc+1), sline(stmt))
 +	context.endLoopScope(firstdbg, 3) // go-moonscript patch
  
  	context.SetLabelPc(endlabel, code.LastPC())
  	code.SetSbx(bodypc, flpc-bodypc)
-@@ -1096,14 +1556,21 @@
+@@ -1096,14 +1589,21 @@
  	fllabel := context.NewLabel()
  	nnames := len(stmt.Names)
  
@@ -5645,7 +5742,7 @@ regenerates the diff below; this header is edited by hand.
  
  	for _, name := range stmt.Names {
  		context.RegisterLocalVar(name)
-@@ -1115,8 +1582,12 @@
+@@ -1115,8 +1615,12 @@
  	context.LeaveBlock()
  
  	context.SetLabelPc(fllabel, code.LastPC())
@@ -5660,7 +5757,7 @@ regenerates the diff below; this header is edited by hand.
  
  	context.SetLabelPc(endlabel, code.LastPC())
  } // }}}
-@@ -1140,6 +1611,8 @@
+@@ -1140,6 +1644,8 @@
  } // }}}
  
  func compileExpr(context *funcContext, reg int, expr ast.Expr, ec *expcontext) int { // {{{
@@ -5669,7 +5766,7 @@ regenerates the diff below; this header is edited by hand.
  	code := context.Code
  	sreg := savereg(ec, reg)
  	sused := 1
-@@ -1158,11 +1631,22 @@
+@@ -1158,11 +1664,22 @@
  		}
  		code.AddABx(OP_LOADK, sreg, context.ConstIndex(num), sline(ex))
  		return sused
@@ -5693,9 +5790,32 @@ regenerates the diff below; this header is edited by hand.
  		return sused
  	case *ast.FalseExpr:
  		code.AddABC(OP_LOADBOOL, sreg, 0, 0, sline(ex))
-@@ -1228,18 +1712,21 @@
+@@ -1186,6 +1703,16 @@
+ 			raiseCompileError(context, sline(ex), "cannot use '...' outside a vararg function")
+ 		}
+ 		context.Proto.IsVarArg &= ^VarArgNeedsArg
++		if sreg < reg {
++			// go-moonscript patch: a value for a local's register, as in
++			// x = (...), is loaded into a free one and moved: the VM's
++			// VARARG sets the top of the stack after the values it loads,
++			// which cleared the registers above the local (a crash when
++			// they were read)
++			code.AddABC(OP_VARARG, reg, 2+ec.varargopt, 0, sline(ex))
++			code.AddABC(OP_MOVE, sreg, reg, 0, sline(ex))
++			return 0
++		}
+ 		code.AddABC(OP_VARARG, sreg, 2+ec.varargopt, 0, sline(ex))
+ 		if context.RegTop() > (sreg+2+ec.varargopt) || ec.varargopt < -1 {
+ 			return 0
+@@ -1227,19 +1754,27 @@
+ 		childcontext := newFuncContext(context.Proto.SourceName, context)
  		compileFunctionExpr(childcontext, ex, ec)
  		protono := len(context.Proto.FunctionPrototypes)
++		if protono > opMaxArgBx {
++			// go-moonscript patch: CLOSURE addresses this many prototypes
++			// (Lua 5.1's pushclosure limit and message)
++			raiseCompileError(context, sline(ex), "constant table overflow")
++		}
  		context.Proto.FunctionPrototypes = append(context.Proto.FunctionPrototypes, childcontext.Proto)
 -		code.AddABx(OP_CLOSURE, sreg, protono, sline(ex))
 +		// go-moonscript patch: luac creates the closure after the body, on
@@ -5718,7 +5838,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  		}
  		return sused
-@@ -1259,7 +1746,28 @@
+@@ -1259,7 +1794,28 @@
  	}
  } // }}}
  
@@ -5747,7 +5867,7 @@ regenerates the diff below; this header is edited by hand.
  	compileExprWithPropagation(context, expr, reg, save, context.Code.PropagateKMV)
  } // }}}
  
-@@ -1267,11 +1775,36 @@
+@@ -1267,11 +1823,36 @@
  	compileExprWithPropagation(context, expr, reg, save, context.Code.PropagateMV)
  } // }}}
  
@@ -5787,16 +5907,20 @@ regenerates the diff below; this header is edited by hand.
  		if lisconst && risconst {
  			switch expr.Operator {
  			case "+":
-@@ -1293,7 +1826,7 @@
+@@ -1293,8 +1874,10 @@
  			return expr
  		}
  	case *ast.UnaryMinusOpExpr:
 -		expr.Expr = constFold(expr.Expr)
-+		expr.Expr = fc.constFoldAt(expr.Expr, depth+1)
- 		if value, ok := lnumberValue(expr.Expr); ok {
+-		if value, ok := lnumberValue(expr.Expr); ok {
++		// go-moonscript patch: the operand is not replaced by its folded
++		// value (the tree is left as it is): it is either a constant, or
++		// the operand itself
++		if value, ok := lnumberValue(fc.constFoldAt(expr.Expr, depth+1)); ok {
  			return &constLValueExpr{Value: LNumber(-value)}
  		}
-@@ -1307,6 +1840,7 @@
+ 		return expr
+@@ -1307,6 +1890,7 @@
  func compileFunctionExpr(context *funcContext, funcexpr *ast.FunctionExpr, ec *expcontext) { // {{{
  	context.Proto.LineDefined = sline(funcexpr)
  	context.Proto.LastLineDefined = eline(funcexpr)
@@ -5804,13 +5928,13 @@ regenerates the diff below; this header is edited by hand.
  	if len(funcexpr.ParList.Names) > maxRegisters {
  		raiseCompileError(context, context.Proto.LineDefined, "register overflow")
  	}
-@@ -1319,23 +1853,41 @@
+@@ -1319,23 +1903,41 @@
  		context.RegisterLocalVar(name)
  	}
  	if funcexpr.ParList.HasVargs {
 -		if CompatVarArg {
 +		// go-moonscript patch: LuaJIT has no implicit arg (ParList.NoArg)
-+		if CompatVarArg && !funcexpr.ParList.NoArg {
++		if CompatVarArg && !funcexpr.ParList.NoArg && (!context.state.noArg || context.Parent == nil) {
  			context.Proto.IsVarArg = VarArgHasArg | VarArgNeedsArg
  			if context.Parent != nil {
  				context.RegisterLocalVar("arg")
@@ -5849,7 +5973,7 @@ regenerates the diff below; this header is edited by hand.
  	context.Proto.NumUpvalues = uint8(len(context.Proto.DbgUpvalues))
  	for _, clv := range context.Proto.Constants {
  		sv := ""
-@@ -1343,6 +1895,7 @@
+@@ -1343,6 +1945,7 @@
  			sv = string(slv)
  		}
  		context.Proto.stringConstants = append(context.Proto.stringConstants, sv)
@@ -5857,7 +5981,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	patchCode(context)
  } // }}}
-@@ -1357,12 +1910,19 @@
+@@ -1357,12 +1960,19 @@
  	*/
  	tablereg := reg
  	reg++
@@ -5878,7 +6002,7 @@ regenerates the diff below; this header is edited by hand.
  	for i, field := range ex.Fields {
  		islast := i == len(ex.Fields)-1
  		if field.Key == nil {
-@@ -1370,10 +1930,15 @@
+@@ -1370,10 +1980,15 @@
  				reg += compileExpr(context, reg, field.Value, ecnone(-2))
  				lastvararg = true
  			} else {
@@ -5895,7 +6019,7 @@ regenerates the diff below; this header is edited by hand.
  			regorg := reg
  			b := reg
  			compileExprWithKMVPropagation(context, field.Key, &reg, &b)
-@@ -1383,43 +1948,61 @@
+@@ -1383,43 +1998,61 @@
  			if _, ok := field.Key.(*ast.StringExpr); ok {
  				opcode = OP_SETTABLEKS
  			}
@@ -5975,7 +6099,7 @@ regenerates the diff below; this header is edited by hand.
  	if ex, ok := exp.(*constLValueExpr); ok {
  		exp.SetLine(sline(expr))
  		compileExpr(context, reg, ex, ec)
-@@ -1477,7 +2060,7 @@
+@@ -1477,7 +2110,7 @@
  	var operandexpr ast.Expr
  	switch ex := expr.(type) {
  	case *ast.UnaryMinusOpExpr:
@@ -5984,7 +6108,7 @@ regenerates the diff below; this header is edited by hand.
  		if lvexpr, ok := exp.(*constLValueExpr); ok {
  			exp.SetLine(sline(expr))
  			compileExpr(context, reg, lvexpr, ec)
-@@ -1510,6 +2093,8 @@
+@@ -1510,6 +2143,8 @@
  } // }}}
  
  func compileRelationalOpExprAux(context *funcContext, reg int, expr *ast.RelationalOpExpr, flip int, label int) { // {{{
@@ -5993,7 +6117,7 @@ regenerates the diff below; this header is edited by hand.
  	code := context.Code
  	b := reg
  	compileExprWithKMVPropagation(context, expr.Lhs, &reg, &b)
-@@ -1517,19 +2102,19 @@
+@@ -1517,19 +2152,19 @@
  	compileExprWithKMVPropagation(context, expr.Rhs, &reg, &c)
  	switch expr.Operator {
  	case "<":
@@ -6020,7 +6144,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileRelationalOpExpr(context *funcContext, reg int, expr *ast.RelationalOpExpr, ec *expcontext) { // {{{
-@@ -1537,9 +2122,9 @@
+@@ -1537,9 +2172,9 @@
  	code := context.Code
  	jumplabel := context.NewLabel()
  	compileRelationalOpExprAux(context, reg, expr, 1, jumplabel)
@@ -6032,7 +6156,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileLogicalOpExpr(context *funcContext, reg int, expr *ast.LogicalOpExpr, ec *expcontext) { // {{{
-@@ -1574,6 +2159,8 @@
+@@ -1574,6 +2209,8 @@
  } // }}}
  
  func compileLogicalOpExprAux(context *funcContext, reg int, expr ast.Expr, ec *expcontext, thenlabel, elselabel int, hasnextcond bool, lb *lblabels) { // {{{
@@ -6041,7 +6165,7 @@ regenerates the diff below; this header is edited by hand.
  	// TODO folding constants?
  	code := context.Code
  	flip := 0
-@@ -1657,24 +2244,27 @@
+@@ -1657,24 +2294,27 @@
  		if sreg == b {
  			op = OP_TEST
  		}
@@ -6075,7 +6199,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileFuncCallExpr(context *funcContext, reg int, expr *ast.FuncCallExpr, ec *expcontext) int { // {{{
-@@ -1705,10 +2295,16 @@
+@@ -1705,10 +2345,16 @@
  		name = string(expr.Method)
  	}
  
@@ -6092,7 +6216,7 @@ regenerates the diff below; this header is edited by hand.
  		} else {
  			reg += compileExpr(context, reg, ar, ecnone(0))
  		}
-@@ -1717,11 +2313,17 @@
+@@ -1717,11 +2363,17 @@
  	if islastvararg {
  		b = 0
  	}
@@ -6112,7 +6236,7 @@ regenerates the diff below; this header is edited by hand.
  		return 1
  	}
  	if context.RegTop() > (funcreg+2+ec.varargopt) || ec.varargopt < -1 {
-@@ -1768,6 +2370,39 @@
+@@ -1768,6 +2420,39 @@
  	return "?"
  } // }}}
  
@@ -6152,7 +6276,7 @@ regenerates the diff below; this header is edited by hand.
  func patchCode(context *funcContext) { // {{{
  	maxreg := 1
  	if np := int(context.Proto.NumParameters); np > 1 {
-@@ -1775,17 +2410,34 @@
+@@ -1775,17 +2460,34 @@
  	}
  	moven := 0
  	code := context.Code.List()
@@ -6188,7 +6312,21 @@ regenerates the diff below; this header is edited by hand.
  			/* nothing to do */
  		case OP_CALL:
  			if reg := opGetArgA(inst) + opGetArgC(inst) - 2; reg > maxreg {
-@@ -1816,6 +2468,11 @@
+@@ -1808,14 +2510,23 @@
+ 			count := 0 // avoiding infinite loops
+ 			for jmp := inst; opGetOpCode(jmp) == OP_JMP && count < 5; jmp = context.Code.At(pc + distance + 1) {
+ 				d := context.GetLabelPc(opGetArgSbx(jmp)) - pc
+-				if d > opMaxArgSbx {
++				// go-moonscript patch: backward jumps too (a long repeat body
++				// was a jump out of the code, a Go panic), Lua 5.1's message
++				// at the jump's line (it was "too long to jump." at the
++				// function's first line)
++				if d > opMaxArgSbx || d < -opMaxArgSbx {
+ 					if distance == 0 {
+-						raiseCompileError(context, context.Proto.LineDefined, "too long to jump.")
++						raiseCompileError(context, lines[pc], "control structure too long")
+ 					}
+ 					break
  				}
  				distance = d
  				count++
@@ -6200,7 +6338,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			if distance == 0 {
  				context.Code.SetOpCode(pc, OP_NOP)
-@@ -1827,6 +2484,9 @@
+@@ -1827,6 +2538,9 @@
  				maxreg = reg
  			}
  		}
@@ -6210,7 +6348,7 @@ regenerates the diff below; this header is edited by hand.
  
  		// bulk move optimization(reducing op dipatch costs)
  		if curop == OP_MOVE {
-@@ -1838,10 +2498,17 @@
+@@ -1838,15 +2552,35 @@
  			}
  			moven = 0
  		}
@@ -6230,6 +6368,32 @@ regenerates the diff below; this header is edited by hand.
  	}
  	context.Proto.NumUsedRegisters = uint8(maxreg)
  } // }}}
+ 
++// Compile compiles the syntax tree of a chunk, as the parser builds it
++// (parse.Parse), into the prototype of its main function, whose name in
++// error messages and tracebacks is name. go-moonscript patch: it trusts the
++// tree; CompileAST checks a tree built or transformed by other code, and
++// compiles it for a dialect (compileast.go).
+ func Compile(chunk []ast.Stmt, name string) (proto *FunctionProto, err error) { // {{{
++	return compileDialect(chunk, name, DialectLua51)
++} // }}}
++
++// compileDialect is Compile for a dialect: under DialectLuaJIT, a vararg
++// function has no implicit local "arg" (LuaJIT's parser marks them with
++// ParList.NoArg, a tree built for LuaJIT needn't; the main function has
++// none in either dialect). go-moonscript patch.
++func compileDialect(chunk []ast.Stmt, name string, dialect Dialect) (proto *FunctionProto, err error) { // {{{
+ 	defer func() {
+ 		if rcv := recover(); rcv != nil {
+ 			if _, ok := rcv.(*CompileError); ok {
+@@ -1864,6 +2598,7 @@
+ 		funcexpr.SetLastLine(eline(chunk[len(chunk)-1]) + 1)
+ 	}
+ 	context := newFuncContext(name, nil)
++	context.state.noArg = dialect == DialectLuaJIT
+ 	compileFunctionExpr(context, funcexpr, ecnone(0))
+ 	proto = context.Proto
+ 	return
 --- a/compile_cdata_fix_test.go
 +++ b/compile_cdata_fix_test.go
 @@ -0,0 +1,112 @@
@@ -6347,7 +6511,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/compile_fix_test.go
 +++ b/compile_fix_test.go
-@@ -0,0 +1,171 @@
+@@ -0,0 +1,195 @@
 +package lua
 +
 +// go-moonscript patch: tests of the compiler fixes ported from yuin/gopher-lua
@@ -6360,6 +6524,30 @@ regenerates the diff below; this header is edited by hand.
 +
 +	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
 +)
++
++// TestCompileLongJumps: a jump over more instructions than an instruction
++// can address is lua5.1's "control structure too long", for the loops
++// that jump back (repeat, a numeric for's FORPREP and FORLOOP) too: their
++// jumps went out of the code (a Go panic in the VM). go-moonscript patch;
++// found by FuzzCompileAST. Under DialectLuaJIT the parser's model of
++// LuaJIT's code generator finds them first (parse_limits_on_luajit.jit.lua).
++func TestCompileLongJumps(t *testing.T) {
++	body := strings.Repeat("x = 1\n", 70000) // 140000 instructions
++	cases := []struct{ src, want string }{
++		{"for i = 1, 2 do\n" + body + "end", "src:70002: control structure too long"},
++		{"local n = 0 repeat\n" + body + "n = n + 1 until n > 1", "src:70002: control structure too long"},
++		{"while x do\n" + body + "end", "src:1: control structure too long"}, // the condition's jump
++		{"for k in pairs({}) do\n" + body + "end", "src:1: control structure too long"},
++	}
++	for _, c := range cases {
++		L := NewState(Options{SkipOpenLibs: true})
++		_, err := L.LoadChunk(strings.NewReader(c.src), "=src")
++		if err == nil || err.Error() != c.want {
++			t.Errorf("%.20q: %v, want %s", c.src, err, c.want)
++		}
++		L.Close()
++	}
++}
 +
 +// From yuin/gopher-lua#556 (kimjooyoon), with Lua 5.1's limits: the parser
 +// allows 200 local variables per function (LUAI_MAXVARS), and fewer than
@@ -6578,6 +6766,2115 @@ regenerates the diff below; this header is edited by hand.
 +	if err := L.DoString("local t, k = {}, 1 t[k], t[k], t, k = 'a', 'b', 'c', 'd' assert(type(t) == 'string' and k == 'd')"); err != nil {
 +		t.Error(err)
 +	}
++}
+--- a/compileast.go
++++ b/compileast.go
+@@ -0,0 +1,931 @@
++package lua
++
++// go-moonscript patch: compiling a syntax tree that other code built or
++// transformed (a bundler, a static analyser, a compiler to Lua), instead of
++// printing Lua source and loading it again: CompileAST and LState.LoadAST.
++//
++// A tree from the parser (parse.ParseBytes) is what LoadChunk compiles, and
++// LoadAST compiles it to the same function: the same bytecode, lines,
++// locals and chunk name (when LoadChunk loads the source: it also has the
++// checks of source loading below). Any tree is checked first (astCheck),
++// for what the parser guarantees and the compiler relies on, so that a
++// wrong tree is an error, a *CompileError at the node's line, rather than
++// a crash of the compiler or of the VM:
++//
++//   - nodes: no nil statement, expression, field, parameter list or function
++//     name where the compiler needs one (a nil pointer of a node type is
++//     nil too), no node of an unknown type, the operators of the grammar,
++//     numerals that convert to numbers, the lists the grammar never leaves
++//     empty (the targets and values of an assignment, the names of a local
++//     declaration and of a generic for, the expressions of a generic for),
++//     a call statement holds a call, a call has a function or a receiver,
++//     not both, assignment targets and function statement names are names
++//     or indexings, lines are not negative;
++//   - scopes: "..." only in a vararg function, break only in a loop;
++//   - limits: 200 local variables and 60 upvalues per function (Lua 5.1's
++//     LUAI_MAXVARS and LUAI_MAXUPVALUES, LuaJIT's LJ_MAX_LOCVAR and
++//     LJ_MAX_UPVAL, with their messages), Lua 5.1's 32767 local variable
++//     records per function, and the compiler's nesting limit
++//     (maxCompileDepth, which also stops a tree with a cycle);
++//   - dialect: goto statements, labels and LuaJIT's cdata numerals
++//     (ast.CdataNumberExpr) only under DialectLuaJIT; under DialectLuaJIT no
++//     function has the implicit local "arg" (ParList.NoArg needn't be set).
++//
++// The compiler checks the rest as it does for source: undefined and
++// duplicate labels and gotos into the scope of a local (LuaJIT's messages),
++// its register limit (256, what its instructions address: "function or
++// expression too complex"), its limits of constants, closures and jumps
++// ("control structure too long").
++//
++// Only source loading (LoadChunk, Load) has: the exact error messages and
++// positions of lua5.1 and luajit for a chunk they reject, with the token
++// near which they stop; the 200 levels of syntax nesting of their parsers
++// (LUAI_MAXCCALLS, LJ_MAX_XLEVEL, counted over the parser's recursion, which
++// a tree doesn't show), their limit of variables in an assignment; under
++// DialectLua51 the model of lcode.c's register allocation
++// (parse.Lua51Overflow: lua5.1's "function or expression too complex" at
++// 250 registers, MAXSTACK), under DialectLuaJIT the model of LuaJIT's code
++// generator (parse/jitcode.go: LJ_MAX_SLOTS, LJ_MAX_VSTACK, the limits of
++// constants and jumps of LuaJIT's bytecode). Both models run in the parser,
++// over the expression descriptors of its recursion; running them over a
++// tree would take a second driver of the code generators (future work). A
++// tree is limited by the compiler's limits, which keep its code within what
++// the VM runs.
++//
++// Lines: a node's Line is where it starts, LastLine where it ends (0: on
++// its Line), as the parser sets them. A tree built by other code may leave
++// them 0: such a node is on the line of the node before it in source order
++// (its parent, or the subtree before it: the line of the last token before
++// it), and if its LastLine is 0 too, it ends on the last line of its
++// subtree; a node before any line is on line 1, as the first token of a
++// chunk is. So an unpositioned tree
++// compiles as if its source were on one line, and a node inserted into a
++// parsed tree takes the line of the code around it: error messages,
++// debug.getinfo (currentline, linedefined, lastlinedefined) and tracebacks
++// show lines of the tree. The tree is left as it is: the compiler works on
++// a copy with the lines set. FuncCallExpr.ArgsLine and ArgsEndLine and
++// TableExpr.PrevLine are 0 when unknown, as the compiler takes them.
++//
++// Compiling never modifies the tree (go-moonscript patch: Compile stored a
++// numeric for's default step and the folded operand of a unary minus in
++// it), so a tree can be compiled again, from several goroutines, and kept.
++
++import (
++	"fmt"
++	"strings"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++)
++
++// The limits of local variables and upvalues per function, which both
++// dialects have (LUAI_MAXVARS, LUAI_MAXUPVALUES; LJ_MAX_LOCVAR, LJ_MAX_UPVAL),
++// and of Lua 5.1's local variable records per function (SHRT_MAX).
++const (
++	astMaxVars     = 200
++	astMaxUpvalues = 60
++	astMaxLocVars  = 32767
++)
++
++// CompileAST compiles the syntax tree of a chunk into the prototype of its
++// main function, for the dialect, as LoadChunk(reader, chunkname) compiles
++// the tree the parser builds from reader under that dialect. chunkname is a
++// Lua chunk name, as LoadChunk's: "@" + a file name, "=" + a name shown as
++// it is, or the source text of a string chunk.
++//
++// The tree is checked first (see compileast.go): a tree the compiler cannot
++// compile is a *CompileError at the line of the node, "<chunk id>:<line>:
++// <message>". The tree is not modified; lines a node lacks (0) are taken
++// from the node before it.
++//
++// To compile a chunk with named parameters (gopher-lua's PR #402), prepend
++// `local a, b = ...` (an ast.LocalAssignStmt of an ast.Comma3Expr): the
++// main function is vararg, and its first locals are where parameters
++// would be.
++func CompileAST(chunk []ast.Stmt, chunkname string, dialect Dialect) (proto *FunctionProto, err error) {
++	if dialect != DialectLua51 && dialect != DialectLuaJIT {
++		return nil, fmt.Errorf("lua: unknown dialect %v", dialect)
++	}
++	name, parseName := ChunkID(chunkname, dialect), syntaxChunkID(chunkname, dialect)
++	defer func() {
++		// the checker should leave the compiler nothing to fail on; if it
++		// does, an error rather than a crash of the caller
++		if rcv := recover(); rcv != nil {
++			if ce, ok := rcv.(*CompileError); ok {
++				proto, err = nil, ce
++				return
++			}
++			proto, err = nil, &CompileError{Message: fmt.Sprintf("internal compiler error: %v", rcv), source: parseName}
++		}
++	}()
++	c := &astCheck{dialect: dialect, source: parseName, line: 1}
++	c.chunk(chunk)
++	if c.unlined {
++		chunk = (&lineFiller{line: 1}).stmts(chunk)
++	}
++	proto, err = compileDialect(chunk, parseName, dialect)
++	if err != nil {
++		return nil, err
++	}
++	setSource(proto, name, chunkname)
++	return proto, nil
++}
++
++// LoadAST loads the syntax tree of a chunk as LoadChunk loads source: it
++// compiles it for the state's dialect (CompileAST), into a function of the
++// state's current environment. chunkname is a Lua chunk name, as
++// LoadChunk's. An error is an *ApiError of type ApiErrorSyntax, its Cause
++// the *CompileError, as LoadChunk's.
++func (ls *LState) LoadAST(chunk []ast.Stmt, chunkname string) (*LFunction, error) {
++	proto, err := CompileAST(chunk, chunkname, ls.Dialect())
++	if err != nil {
++		return nil, newApiErrorE(ApiErrorSyntax, err)
++	}
++	return newLFunctionL(proto, ls.currentEnv(), 0), nil
++}
++
++/* the checker {{{ */
++
++// astCheck checks a syntax tree for CompileAST, walking it in source order
++// and resolving its names as the parser does (singlevar).
++type astCheck struct {
++	dialect Dialect
++	source  string // the chunk's id in error messages
++	line    int    // the line of the node being checked (lineFiller's)
++	unlined bool   // a node has no line
++	depth   int
++	fs      *checkFunc
++	nextID  int
++}
++
++// checkFunc is a function being checked: its active local variables (by
++// id), the blocks they are declared in and its upvalues (the ids of the
++// variables of enclosing functions it references).
++type checkFunc struct {
++	parent  *checkFunc
++	line    int // linedefined, 0 for the main function
++	vararg  bool
++	actvar  []checkVar
++	blocks  []checkBlock
++	upvals  []int
++	nlocvar int // the local variables declared (Lua 5.1's records)
++}
++
++type checkVar struct {
++	name string
++	id   int
++}
++
++type checkBlock struct {
++	nactvar int
++	loop    bool
++}
++
++func (c *astCheck) fail(format string, args ...any) {
++	panic(&CompileError{Line: c.line, Message: fmt.Sprintf(format, args...), source: c.source})
++}
++
++// at takes the node's lines: its Line is the current line, if it has one.
++func (c *astCheck) at(n ast.PositionHolder) {
++	line, last := n.Line(), n.LastLine()
++	if line < 0 || last < 0 {
++		c.fail("invalid line %d", min(line, last))
++	}
++	if line == 0 {
++		c.unlined = true
++	} else {
++		c.line = line
++	}
++}
++
++func (c *astCheck) enter() {
++	c.depth++
++	if c.depth > maxCompileDepth {
++		c.fail("chunk has too many syntax levels")
++	}
++}
++
++func (c *astCheck) leave() { c.depth-- }
++
++// nodeType is a node's type for messages: "FuncCallExpr" for an
++// *ast.FuncCallExpr, the Go type otherwise.
++func nodeType(n any) string {
++	s := fmt.Sprintf("%T", n)
++	if t, ok := strings.CutPrefix(s, "*ast."); ok {
++		return t
++	}
++	return s
++}
++
++// knownNode reports whether n is a node of a type of package ast, and
++// whether it is a nil pointer of one.
++func knownNode(n ast.PositionHolder) (known, isNil bool) {
++	switch n := n.(type) {
++	case *ast.AssignStmt:
++		return true, n == nil
++	case *ast.LocalAssignStmt:
++		return true, n == nil
++	case *ast.FuncCallStmt:
++		return true, n == nil
++	case *ast.DoBlockStmt:
++		return true, n == nil
++	case *ast.WhileStmt:
++		return true, n == nil
++	case *ast.RepeatStmt:
++		return true, n == nil
++	case *ast.IfStmt:
++		return true, n == nil
++	case *ast.NumberForStmt:
++		return true, n == nil
++	case *ast.GenericForStmt:
++		return true, n == nil
++	case *ast.FuncDefStmt:
++		return true, n == nil
++	case *ast.ReturnStmt:
++		return true, n == nil
++	case *ast.BreakStmt:
++		return true, n == nil
++	case *ast.LabelStmt:
++		return true, n == nil
++	case *ast.GotoStmt:
++		return true, n == nil
++	case *ast.TrueExpr:
++		return true, n == nil
++	case *ast.FalseExpr:
++		return true, n == nil
++	case *ast.NilExpr:
++		return true, n == nil
++	case *ast.NumberExpr:
++		return true, n == nil
++	case *ast.StringExpr:
++		return true, n == nil
++	case *ast.CdataNumberExpr:
++		return true, n == nil
++	case *ast.Comma3Expr:
++		return true, n == nil
++	case *ast.IdentExpr:
++		return true, n == nil
++	case *ast.AttrGetExpr:
++		return true, n == nil
++	case *ast.TableExpr:
++		return true, n == nil
++	case *ast.FuncCallExpr:
++		return true, n == nil
++	case *ast.LogicalOpExpr:
++		return true, n == nil
++	case *ast.RelationalOpExpr:
++		return true, n == nil
++	case *ast.StringConcatOpExpr:
++		return true, n == nil
++	case *ast.ArithmeticOpExpr:
++		return true, n == nil
++	case *ast.UnaryMinusOpExpr:
++		return true, n == nil
++	case *ast.UnaryNotOpExpr:
++		return true, n == nil
++	case *ast.UnaryLenOpExpr:
++		return true, n == nil
++	case *ast.FunctionExpr:
++		return true, n == nil
++	}
++	return false, false
++}
++
++// chunk checks the main function.
++func (c *astCheck) chunk(chunk []ast.Stmt) {
++	c.fs = &checkFunc{vararg: true}
++	c.enterBlock(false)
++	c.stmts(chunk)
++	c.leaveBlock()
++	c.fs = nil
++}
++
++func (c *astCheck) enterBlock(loop bool) {
++	fs := c.fs
++	fs.blocks = append(fs.blocks, checkBlock{nactvar: len(fs.actvar), loop: loop})
++}
++
++func (c *astCheck) leaveBlock() {
++	fs := c.fs
++	fs.actvar = fs.actvar[:fs.blocks[len(fs.blocks)-1].nactvar]
++	fs.blocks = fs.blocks[:len(fs.blocks)-1]
++}
++
++// limit fails with Lua's message for a function with more than limit what.
++func (c *astCheck) limit(fs *checkFunc, limit int, what string) {
++	if fs.line == 0 {
++		c.fail("main function has more than %d %s", limit, what)
++	}
++	c.fail("function at line %d has more than %d %s", fs.line, limit, what)
++}
++
++// declare checks the declaration of n local variables, which activate
++// makes active; extra are declared with them but active already ("self").
++func (c *astCheck) declare(n int) {
++	fs := c.fs
++	if len(fs.actvar)+n > astMaxVars {
++		c.limit(fs, astMaxVars, "local variables")
++	}
++	if c.dialect == DialectLua51 {
++		if fs.nlocvar+n > astMaxLocVars {
++			c.fail("too many local variables")
++		}
++		fs.nlocvar += n
++	}
++}
++
++func (c *astCheck) activate(names ...string) {
++	fs := c.fs
++	for _, name := range names {
++		c.nextID++
++		fs.actvar = append(fs.actvar, checkVar{name, c.nextID})
++	}
++}
++
++// resolve resolves a name in fs, making it an upvalue of the functions
++// between its declaration and fs (singlevaraux): the id of its variable,
++// false for a global.
++func (c *astCheck) resolve(fs *checkFunc, name string) (int, bool) {
++	if fs == nil {
++		return 0, false
++	}
++	for i := len(fs.actvar) - 1; i >= 0; i-- {
++		if fs.actvar[i].name == name {
++			return fs.actvar[i].id, true
++		}
++	}
++	id, ok := c.resolve(fs.parent, name)
++	if !ok {
++		return 0, false
++	}
++	for _, u := range fs.upvals {
++		if u == id {
++			return id, true
++		}
++	}
++	if len(fs.upvals)+1 > astMaxUpvalues {
++		c.limit(fs, astMaxUpvalues, "upvalues")
++	}
++	fs.upvals = append(fs.upvals, id)
++	return id, true
++}
++
++func (c *astCheck) block(stmts []ast.Stmt, loop bool) {
++	c.enterBlock(loop)
++	c.stmts(stmts)
++	c.leaveBlock()
++}
++
++func (c *astCheck) stmts(stmts []ast.Stmt) {
++	for _, s := range stmts {
++		c.stmt(s)
++	}
++}
++
++func (c *astCheck) stmt(s ast.Stmt) {
++	if s == nil {
++		c.fail("nil statement")
++	}
++	if known, isNil := knownNode(s); isNil {
++		c.fail("nil %s", nodeType(s))
++	} else if !known {
++		c.fail("unknown statement type %s", nodeType(s))
++	}
++	c.at(s)
++	c.enter()
++	defer c.leave()
++	switch st := s.(type) {
++	case *ast.AssignStmt:
++		if len(st.Lhs) == 0 {
++			c.fail("assignment without targets")
++		}
++		if len(st.Rhs) == 0 {
++			c.fail("assignment without values")
++		}
++		for _, e := range st.Lhs {
++			c.target(e)
++		}
++		c.exprs(st.Rhs, "value")
++	case *ast.LocalAssignStmt:
++		if len(st.Names) == 0 {
++			c.fail("local declaration without names")
++		}
++		c.declare(len(st.Names))
++		if st.IsFunction && len(st.Names) == 1 && len(st.Exprs) == 1 {
++			if _, ok := st.Exprs[0].(*ast.FunctionExpr); ok { // local function f
++				c.activate(st.Names...)
++				c.expr(st.Exprs[0], "value")
++				return
++			}
++		}
++		c.exprs(st.Exprs, "value")
++		c.activate(st.Names...)
++	case *ast.FuncCallStmt:
++		call, ok := st.Expr.(*ast.FuncCallExpr)
++		if !ok {
++			c.fail("call statement without a call (%s)", nodeType(st.Expr))
++		}
++		c.expr(call, "call")
++	case *ast.DoBlockStmt:
++		c.block(st.Stmts, false)
++	case *ast.WhileStmt:
++		c.expr(st.Condition, "condition")
++		c.block(st.Stmts, true)
++	case *ast.RepeatStmt:
++		c.enterBlock(true)
++		c.stmts(st.Stmts)
++		c.expr(st.Condition, "condition") // in the scope of the body
++		c.leaveBlock()
++	case *ast.IfStmt:
++		// an elseif chain is a loop, as in the compiler (compileIfStmt)
++		for {
++			c.expr(st.Condition, "condition")
++			c.block(st.Then, false)
++			if len(st.Else) == 1 {
++				if elseif, ok := st.Else[0].(*ast.IfStmt); ok && elseif != nil {
++					st = elseif
++					c.at(st)
++					continue
++				}
++			}
++			c.block(st.Else, false)
++			break
++		}
++	case *ast.NumberForStmt:
++		c.expr(st.Init, "initial value")
++		c.expr(st.Limit, "limit")
++		if st.Step != nil {
++			c.expr(st.Step, "step")
++		}
++		c.enterBlock(true)
++		c.declare(4)
++		c.activate("(for index)", "(for limit)", "(for step)")
++		c.enterBlock(false)
++		c.activate(st.Name)
++		c.block(st.Stmts, false)
++		c.leaveBlock()
++		c.leaveBlock()
++	case *ast.GenericForStmt:
++		if len(st.Names) == 0 {
++			c.fail("for statement without names")
++		}
++		if len(st.Exprs) == 0 {
++			c.fail("for statement without expressions")
++		}
++		c.enterBlock(true)
++		c.declare(3 + len(st.Names))
++		c.exprs(st.Exprs, "expression")
++		c.activate("(for generator)", "(for state)", "(for control)")
++		c.enterBlock(false)
++		c.activate(st.Names...)
++		c.block(st.Stmts, false)
++		c.leaveBlock()
++		c.leaveBlock()
++	case *ast.FuncDefStmt:
++		if st.Name == nil {
++			c.fail("function statement without a name")
++		}
++		if st.Func == nil {
++			c.fail("function statement without a function")
++		}
++		switch {
++		case st.Name.Func != nil && st.Name.Receiver != nil:
++			c.fail("function name with both a target and a receiver")
++		case st.Name.Func != nil:
++			c.target(st.Name.Func)
++		default:
++			c.expr(st.Name.Receiver, "receiver")
++		}
++		c.expr0(st.Func, st.Name.Func == nil)
++	case *ast.ReturnStmt:
++		c.exprs(st.Exprs, "value")
++	case *ast.BreakStmt:
++		blocks := c.fs.blocks
++		i := len(blocks) - 1
++		for i >= 0 && !blocks[i].loop {
++			i--
++		}
++		if i < 0 {
++			c.fail("no loop to break")
++		}
++	case *ast.LabelStmt:
++		if c.dialect != DialectLuaJIT {
++			c.fail("labels need DialectLuaJIT")
++		}
++	case *ast.GotoStmt:
++		if c.dialect != DialectLuaJIT {
++			c.fail("goto needs DialectLuaJIT")
++		}
++	}
++}
++
++// target checks an assignment target: a name or an indexing.
++func (c *astCheck) target(e ast.Expr) {
++	switch e.(type) {
++	case *ast.IdentExpr, *ast.AttrGetExpr:
++		c.expr(e, "target")
++	case nil:
++		c.fail("nil target")
++	default:
++		c.fail("cannot assign to %s", nodeType(e))
++	}
++}
++
++func (c *astCheck) exprs(exprs []ast.Expr, what string) {
++	for _, e := range exprs {
++		c.expr(e, what)
++	}
++}
++
++func (c *astCheck) expr(e ast.Expr, what string) {
++	if e == nil {
++		c.fail("nil %s", what)
++	}
++	c.expr0(e, false)
++}
++
++// expr0 checks an expression; needself declares a function's "self".
++func (c *astCheck) expr0(e ast.Expr, needself bool) {
++	if known, isNil := knownNode(e); isNil {
++		c.fail("nil %s", nodeType(e))
++	} else if !known {
++		c.fail("unknown expression type %s", nodeType(e))
++	}
++	c.at(e)
++	c.enter()
++	defer c.leave()
++	switch ex := e.(type) {
++	case *ast.TrueExpr, *ast.FalseExpr, *ast.NilExpr, *ast.StringExpr:
++	case *ast.NumberExpr:
++		if _, err := parseNumber(ex.Value); err != nil {
++			c.fail("malformed number '%s'", ex.Value)
++		}
++	case *ast.CdataNumberExpr:
++		if c.dialect != DialectLuaJIT {
++			c.fail("cdata numeral '%s' needs DialectLuaJIT", ex.Value)
++		}
++		if ex.Value == "" {
++			c.fail("malformed number ''")
++		}
++	case *ast.Comma3Expr:
++		if !c.fs.vararg {
++			c.fail("cannot use '...' outside a vararg function")
++		}
++	case *ast.IdentExpr:
++		c.resolve(c.fs, ex.Value)
++	case *ast.AttrGetExpr:
++		c.expr(ex.Object, "indexed value")
++		c.expr(ex.Key, "key")
++	case *ast.TableExpr:
++		for _, f := range ex.Fields {
++			if f == nil {
++				c.fail("nil table field")
++			}
++			if f.Key != nil {
++				c.expr(f.Key, "key")
++			}
++			c.expr(f.Value, "value")
++		}
++	case *ast.FuncCallExpr:
++		switch {
++		case ex.Func != nil && ex.Receiver != nil:
++			c.fail("call with both a function and a receiver")
++		case ex.Func != nil:
++			c.expr(ex.Func, "function")
++		case ex.Receiver != nil:
++			c.expr(ex.Receiver, "receiver")
++		default:
++			c.fail("call without a function")
++		}
++		c.exprs(ex.Args, "argument")
++	case *ast.LogicalOpExpr:
++		if ex.Operator != "and" && ex.Operator != "or" {
++			c.fail("unknown logical operator '%s'", ex.Operator)
++		}
++		c.expr(ex.Lhs, "operand")
++		c.expr(ex.Rhs, "operand")
++	case *ast.RelationalOpExpr:
++		switch ex.Operator {
++		case "==", "~=", "<", "<=", ">", ">=":
++		default:
++			c.fail("unknown relational operator '%s'", ex.Operator)
++		}
++		c.expr(ex.Lhs, "operand")
++		c.expr(ex.Rhs, "operand")
++	case *ast.ArithmeticOpExpr:
++		switch ex.Operator {
++		case "+", "-", "*", "/", "%", "^":
++		default:
++			c.fail("unknown arithmetic operator '%s'", ex.Operator)
++		}
++		c.expr(ex.Lhs, "operand")
++		c.expr(ex.Rhs, "operand")
++	case *ast.StringConcatOpExpr:
++		c.expr(ex.Lhs, "operand")
++		c.expr(ex.Rhs, "operand")
++	case *ast.UnaryMinusOpExpr:
++		c.expr(ex.Expr, "operand")
++	case *ast.UnaryNotOpExpr:
++		c.expr(ex.Expr, "operand")
++	case *ast.UnaryLenOpExpr:
++		c.expr(ex.Expr, "operand")
++	case *ast.FunctionExpr:
++		c.function(ex, needself)
++	default:
++		c.fail("%s is not an expression", nodeType(e))
++	}
++}
++
++// function checks a function and its body, as a function of its own.
++func (c *astCheck) function(fn *ast.FunctionExpr, needself bool) {
++	pl := fn.ParList
++	if pl == nil {
++		c.fail("function without a parameter list")
++	}
++	fs := &checkFunc{parent: c.fs, line: c.line, vararg: pl.HasVargs}
++	c.fs = fs
++	c.enterBlock(false)
++	if needself {
++		c.declare(1)
++		c.activate("self")
++	}
++	n := len(pl.Names)
++	arg := pl.HasVargs && c.dialect == DialectLua51 && CompatVarArg && !pl.NoArg
++	if arg {
++		n++
++	}
++	c.declare(n)
++	c.activate(pl.Names...)
++	if arg {
++		c.activate("arg")
++	}
++	c.stmts(fn.Stmts)
++	c.leaveBlock()
++	c.fs = fs.parent
++}
++
++/* }}} */
++
++/* the lines of an unpositioned tree {{{ */
++
++// lineFiller copies a tree, giving a node that has no line (0) the line of
++// the node before it in source order, and if it has no last line either,
++// the last line of its subtree (line is the current line, the line of the
++// last node copied).
++type lineFiller struct {
++	line int
++}
++
++// pos sets the lines of the copy of a node before its children are
++// copied; done, with what pos returned, after them.
++func (f *lineFiller) pos(n ast.PositionHolder) bool {
++	if l := n.Line(); l > 0 {
++		f.line = l
++		return false
++	}
++	n.SetLine(f.line)
++	return true
++}
++
++func (f *lineFiller) done(n ast.PositionHolder, unlined bool) {
++	if unlined && n.LastLine() == 0 && f.line > n.Line() {
++		n.SetLastLine(f.line)
++	}
++}
++
++func (f *lineFiller) stmts(stmts []ast.Stmt) []ast.Stmt {
++	if stmts == nil {
++		return nil
++	}
++	out := make([]ast.Stmt, len(stmts))
++	for i, s := range stmts {
++		out[i] = f.stmt(s)
++	}
++	return out
++}
++
++func (f *lineFiller) exprs(exprs []ast.Expr) []ast.Expr {
++	if exprs == nil {
++		return nil
++	}
++	out := make([]ast.Expr, len(exprs))
++	for i, e := range exprs {
++		out[i] = f.expr(e)
++	}
++	return out
++}
++
++func (f *lineFiller) stmt(s ast.Stmt) ast.Stmt {
++	switch st := s.(type) {
++	case *ast.AssignStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Lhs, n.Rhs = f.exprs(st.Lhs), f.exprs(st.Rhs)
++		f.done(&n, u)
++		return &n
++	case *ast.LocalAssignStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Exprs = f.exprs(st.Exprs)
++		f.done(&n, u)
++		return &n
++	case *ast.FuncCallStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Expr = f.expr(st.Expr)
++		f.done(&n, u)
++		return &n
++	case *ast.DoBlockStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Stmts = f.stmts(st.Stmts)
++		f.done(&n, u)
++		return &n
++	case *ast.WhileStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Condition, n.Stmts = f.expr(st.Condition), f.stmts(st.Stmts)
++		f.done(&n, u)
++		return &n
++	case *ast.RepeatStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Stmts = f.stmts(st.Stmts)
++		n.Condition = f.expr(st.Condition)
++		f.done(&n, u)
++		return &n
++	case *ast.IfStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Condition, n.Then = f.expr(st.Condition), f.stmts(st.Then)
++		n.Else = f.stmts(st.Else)
++		f.done(&n, u)
++		return &n
++	case *ast.NumberForStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Init, n.Limit = f.expr(st.Init), f.expr(st.Limit)
++		if st.Step != nil {
++			n.Step = f.expr(st.Step)
++		}
++		n.Stmts = f.stmts(st.Stmts)
++		f.done(&n, u)
++		return &n
++	case *ast.GenericForStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Exprs, n.Stmts = f.exprs(st.Exprs), f.stmts(st.Stmts)
++		f.done(&n, u)
++		return &n
++	case *ast.FuncDefStmt:
++		n := *st
++		u := f.pos(&n)
++		name := *st.Name
++		if name.Func != nil {
++			name.Func = f.expr(name.Func)
++		} else {
++			name.Receiver = f.expr(name.Receiver)
++		}
++		n.Name = &name
++		n.Func = f.expr(st.Func).(*ast.FunctionExpr)
++		f.done(&n, u)
++		return &n
++	case *ast.ReturnStmt:
++		n := *st
++		u := f.pos(&n)
++		n.Exprs = f.exprs(st.Exprs)
++		f.done(&n, u)
++		return &n
++	case *ast.BreakStmt:
++		n := *st
++		f.pos(&n)
++		return &n
++	case *ast.LabelStmt:
++		n := *st
++		f.pos(&n)
++		return &n
++	case *ast.GotoStmt:
++		n := *st
++		f.pos(&n)
++		return &n
++	}
++	panic(fmt.Sprintf("lineFiller: statement %T", s)) // checked by astCheck
++}
++
++func (f *lineFiller) expr(e ast.Expr) ast.Expr {
++	switch ex := e.(type) {
++	case *ast.TrueExpr:
++		n := *ex
++		f.pos(&n)
++		return &n
++	case *ast.FalseExpr:
++		n := *ex
++		f.pos(&n)
++		return &n
++	case *ast.NilExpr:
++		n := *ex
++		f.pos(&n)
++		return &n
++	case *ast.NumberExpr:
++		n := *ex
++		f.pos(&n)
++		return &n
++	case *ast.StringExpr:
++		n := *ex
++		f.pos(&n)
++		return &n
++	case *ast.CdataNumberExpr:
++		n := *ex
++		f.pos(&n)
++		return &n
++	case *ast.Comma3Expr:
++		n := *ex
++		f.pos(&n)
++		return &n
++	case *ast.IdentExpr:
++		n := *ex
++		f.pos(&n)
++		return &n
++	case *ast.AttrGetExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Object, n.Key = f.expr(ex.Object), f.expr(ex.Key)
++		f.done(&n, u)
++		return &n
++	case *ast.TableExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Fields = make([]*ast.Field, len(ex.Fields))
++		for i, fd := range ex.Fields {
++			field := &ast.Field{}
++			if fd.Key != nil {
++				field.Key = f.expr(fd.Key)
++			}
++			field.Value = f.expr(fd.Value)
++			n.Fields[i] = field
++		}
++		f.done(&n, u)
++		return &n
++	case *ast.FuncCallExpr:
++		n := *ex
++		u := f.pos(&n)
++		if ex.Func != nil {
++			n.Func = f.expr(ex.Func)
++		} else {
++			n.Receiver = f.expr(ex.Receiver)
++		}
++		n.Args = f.exprs(ex.Args)
++		f.done(&n, u)
++		return &n
++	case *ast.LogicalOpExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Lhs, n.Rhs = f.expr(ex.Lhs), f.expr(ex.Rhs)
++		f.done(&n, u)
++		return &n
++	case *ast.RelationalOpExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Lhs, n.Rhs = f.expr(ex.Lhs), f.expr(ex.Rhs)
++		f.done(&n, u)
++		return &n
++	case *ast.StringConcatOpExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Lhs, n.Rhs = f.expr(ex.Lhs), f.expr(ex.Rhs)
++		f.done(&n, u)
++		return &n
++	case *ast.ArithmeticOpExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Lhs, n.Rhs = f.expr(ex.Lhs), f.expr(ex.Rhs)
++		f.done(&n, u)
++		return &n
++	case *ast.UnaryMinusOpExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Expr = f.expr(ex.Expr)
++		f.done(&n, u)
++		return &n
++	case *ast.UnaryNotOpExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Expr = f.expr(ex.Expr)
++		f.done(&n, u)
++		return &n
++	case *ast.UnaryLenOpExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Expr = f.expr(ex.Expr)
++		f.done(&n, u)
++		return &n
++	case *ast.FunctionExpr:
++		n := *ex
++		u := f.pos(&n)
++		n.Stmts = f.stmts(ex.Stmts)
++		f.done(&n, u)
++		return &n
++	}
++	panic(fmt.Sprintf("lineFiller: expression %T", e)) // checked by astCheck
++}
++
++/* }}} */
+--- a/compileast_example_test.go
++++ b/compileast_example_test.go
+@@ -0,0 +1,113 @@
++package lua_test
++
++// go-moonscript patch: examples of CompileAST and LState.LoadAST
++// (compileast.go).
++
++import (
++	"fmt"
++	"reflect"
++
++	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// renameVariable renames the variable old to new everywhere in a tree: the
++// names of package ast's IdentExpr nodes, which hold the names of
++// variables (old must not be the name of a local of the chunk, for a
++// global's renaming).
++func renameVariable(node any, old, new string) {
++	v := reflect.ValueOf(node)
++	switch v.Kind() {
++	case reflect.Slice:
++		for i := range v.Len() {
++			renameVariable(v.Index(i).Interface(), old, new)
++		}
++	case reflect.Pointer:
++		if v.IsNil() {
++			return
++		}
++		if id, ok := node.(*ast.IdentExpr); ok {
++			if id.Value == old {
++				id.Value = new
++			}
++			return
++		}
++		if s := v.Elem(); s.Kind() == reflect.Struct {
++			for i := range s.NumField() {
++				if f := s.Field(i); f.CanInterface() {
++					renameVariable(f.Interface(), old, new)
++				}
++			}
++		}
++	}
++}
++
++// A chunk is parsed, its tree transformed (the global "say" renamed "log"),
++// and the tree loaded and run, without printing it back to Lua source.
++// The error of the call shows the line of the source.
++func ExampleLState_LoadAST() {
++	src := `local greeting = "hello, " .. name
++say(greeting)
++say(greeting:upper())
++local ok, err = pcall(function()
++  return greeting.missing.field
++end)
++say(err)`
++	chunk, err := parse.ParseBytes([]byte(src), "greet.lua", parse.Lua51)
++	if err != nil {
++		panic(err)
++	}
++	renameVariable(chunk, "say", "log")
++
++	L := lua.NewState()
++	defer L.Close()
++	L.SetGlobal("name", lua.LString("world"))
++	L.SetGlobal("log", L.NewFunction(func(L *lua.LState) int {
++		fmt.Println(L.CheckString(1))
++		return 0
++	}))
++	fn, err := L.LoadAST(chunk, "@greet.lua")
++	if err != nil {
++		panic(err)
++	}
++	L.Push(fn)
++	if err := L.PCall(0, 0, nil); err != nil {
++		panic(err)
++	}
++	// Output:
++	// hello, world
++	// HELLO, WORLD
++	// greet.lua:5: attempt to index field 'missing' (a nil value)
++}
++
++// A chunk built by hand, without lines (it compiles as if on one line),
++// that takes two parameters: gopher-lua's PR #402 (CompileWithParNames) is
++// a "local a, b = ..." first, since the main function is vararg.
++func ExampleCompileAST() {
++	chunk := []ast.Stmt{
++		&ast.LocalAssignStmt{Names: []string{"a", "b"}, Exprs: []ast.Expr{&ast.Comma3Expr{}}},
++		&ast.ReturnStmt{Exprs: []ast.Expr{&ast.ArithmeticOpExpr{
++			Operator: "*", Lhs: &ast.IdentExpr{Value: "a"}, Rhs: &ast.IdentExpr{Value: "b"},
++		}}},
++	}
++	proto, err := lua.CompileAST(chunk, "=product", lua.DialectLua51)
++	if err != nil {
++		panic(err)
++	}
++	L := lua.NewState()
++	defer L.Close()
++	L.Push(L.NewFunctionFromProto(proto))
++	L.Push(lua.LNumber(6))
++	L.Push(lua.LNumber(7))
++	L.Call(2, 1)
++	fmt.Println(L.Get(-1))
++
++	// a tree the compiler cannot compile is an error at its line
++	chunk = append(chunk, &ast.BreakStmt{})
++	_, err = lua.CompileAST(chunk, "=product", lua.DialectLua51)
++	fmt.Println(err)
++	// Output:
++	// 42
++	// product:1: no loop to break
++}
+--- a/compileast_fix_test.go
++++ b/compileast_fix_test.go
+@@ -0,0 +1,589 @@
++package lua
++
++// go-moonscript patch: CompileAST and LState.LoadAST (compileast.go): a
++// parsed tree loads as its source does (the same dump), a tree built by
++// hand is checked (errors at its nodes' lines), lines a tree lacks, the
++// tree left as it is. The fuzz test is in compileast_fuzz_fix_test.go,
++// the luasuites sources' round trip in internal/luasuites.
++
++import (
++	"bytes"
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"reflect"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// parseDialect is the parser's dialect of a state's.
++func parseDialect(d Dialect) parse.Dialect {
++	if d == DialectLuaJIT {
++		return parse.LuaJIT
++	}
++	return parse.Lua51
++}
++
++// loadASTFromSource parses code as LoadChunk does and loads the tree with
++// LoadAST.
++func loadASTFromSource(L *LState, code []byte, chunkname string) (*LFunction, error) {
++	d := L.Dialect()
++	chunk, err := parse.ParseBytes(code, syntaxChunkID(chunkname, d), parseDialect(d))
++	if err != nil {
++		return nil, err
++	}
++	return L.LoadAST(chunk, chunkname)
++}
++
++// roundTripFiles are the Lua sources of the round trip: the compat and
++// dialect scripts and the other test scripts.
++func roundTripFiles(t *testing.T) []string {
++	t.Helper()
++	var files []string
++	for _, pat := range []string{"testdata/*.lua", "testdata/compat/*.lua", "testdata/compat/files/*.lua", "testdata/dialect/*.lua"} {
++		m, err := filepath.Glob(pat)
++		if err != nil {
++			t.Fatal(err)
++		}
++		files = append(files, m...)
++	}
++	if len(files) < 100 {
++		t.Fatalf("only %d files", len(files))
++	}
++	return files
++}
++
++// checkRoundTrip loads src with LoadChunk and its parsed tree with LoadAST
++// under the dialect, and fails unless they give the same dump, or both an
++// error. It reports whether the source loaded.
++func checkRoundTrip(t *testing.T, src []byte, chunkname string, d Dialect) bool {
++	t.Helper()
++	L := NewState(Options{Dialect: d, SkipOpenLibs: true})
++	defer L.Close()
++	fnSrc, errSrc := L.LoadChunk(bytes.NewReader(src), chunkname)
++	chunk, perr := parse.ParseBytes(src, syntaxChunkID(chunkname, d), parseDialect(d))
++	if perr != nil {
++		if errSrc == nil {
++			t.Errorf("%s (%v): loads, but does not parse: %v", chunkname, d, perr)
++		}
++		return false
++	}
++	// a parsed tree has every line
++	c := &astCheck{dialect: d, source: chunkname, line: 1}
++	c.chunk(chunk)
++	if c.unlined {
++		t.Errorf("%s (%v): a parsed node has no line", chunkname, d)
++	}
++	fnAST, errAST := L.LoadAST(chunk, chunkname)
++	switch {
++	case errSrc != nil && errAST != nil:
++		return false
++	case errSrc != nil:
++		// a check of source loading only: the model of lua5.1's registers
++		var ae *ApiError
++		var pe *parse.Error
++		if !errors.As(errSrc, &ae) || !errors.As(ae.Cause, &pe) || d != DialectLua51 ||
++			pe.Message != "function or expression too complex" {
++			t.Errorf("%s (%v): LoadChunk fails (%v), LoadAST does not", chunkname, d, errSrc)
++		}
++		return false
++	case errAST != nil:
++		t.Errorf("%s (%v): LoadAST fails: %v", chunkname, d, errAST)
++		return false
++	}
++	dumpSrc, err1 := DumpFunction(fnSrc)
++	dumpAST, err2 := DumpFunction(fnAST)
++	if err1 != nil || err2 != nil {
++		t.Fatal(err1, err2)
++	}
++	if !bytes.Equal(dumpSrc, dumpAST) {
++		t.Errorf("%s (%v): LoadAST's dump differs from LoadChunk's", chunkname, d)
++	}
++	return true
++}
++
++func TestCompileASTRoundTrip(t *testing.T) {
++	loaded := 0
++	for _, file := range roundTripFiles(t) {
++		src, err := os.ReadFile(file)
++		if err != nil {
++			t.Fatal(err)
++		}
++		for _, d := range []Dialect{DialectLua51, DialectLuaJIT} {
++			if checkRoundTrip(t, src, "@"+filepath.Base(file), d) {
++				loaded++
++			}
++		}
++	}
++	// and as a string chunk, whose chunk name is the source
++	src := []byte("local t = {...}\nreturn #t, function(...) return arg end")
++	for _, d := range []Dialect{DialectLua51, DialectLuaJIT} {
++		if checkRoundTrip(t, src, string(src), d) {
++			loaded++
++		}
++	}
++	t.Logf("%d loads compared", loaded)
++}
++
++// TestCompileASTSourceOnly: what only source loading checks. A call with
++// 252 arguments needs more registers than lua5.1 has (MAXSTACK 250, the
++// parser's model of its registers), fewer than the compiler's limit (256):
++// LoadChunk rejects it with lua5.1's message, LoadAST compiles its tree.
++// Under DialectLuaJIT the parser's model of LuaJIT's slots rejects the
++// source.
++func TestCompileASTSourceOnly(t *testing.T) {
++	src := []byte("f(" + strings.TrimSuffix(strings.Repeat("1,", 252), ",") + ")")
++	L := NewState(Options{SkipOpenLibs: true})
++	defer L.Close()
++	if _, err := L.LoadChunk(bytes.NewReader(src), "=src"); err == nil || err.Error() != "src:1: function or expression too complex near '1'" {
++		t.Errorf("LoadChunk: %v", err)
++	}
++	if _, err := loadASTFromSource(L, src, "=src"); err != nil {
++		t.Errorf("LoadAST: %v", err)
++	}
++	checkRoundTrip(t, src, "=src", DialectLua51)
++	if _, err := parse.ParseBytes(src, "src", parse.LuaJIT); err == nil {
++		t.Error("parsed under LuaJIT")
++	}
++}
++
++// TestCompatAST runs the compat scripts loaded with LoadAST: their output
++// is the reference's, as with LoadChunk (TestCompat).
++func TestCompatAST(t *testing.T) {
++	scripts, err := filepath.Glob("testdata/compat/*.lua")
++	if err != nil {
++		t.Fatal(err)
++	}
++	for _, script := range scripts {
++		name := strings.TrimSuffix(filepath.Base(script), ".lua")
++		t.Run(name, func(t *testing.T) {
++			want, err := os.ReadFile(filepath.Join("testdata/compat/ref", name+".out"))
++			if err != nil {
++				t.Fatal(err)
++			}
++			if got := runCompatScriptWith(t, script, loadASTFromSource); got != string(want) {
++				t.Errorf("output differs from the reference's:\n--- got\n%s\n--- want\n%s", got, want)
++			}
++		})
++	}
++}
++
++/* building trees */
++
++func at[T ast.PositionHolder](n T, line int) T {
++	n.SetLine(line)
++	return n
++}
++
++func ident(name string) *ast.IdentExpr { return &ast.IdentExpr{Value: name} }
++
++func num(v string) *ast.NumberExpr { return &ast.NumberExpr{Value: v} }
++
++func str(v string) *ast.StringExpr { return &ast.StringExpr{Value: v} }
++
++func call(fn ast.Expr, args ...ast.Expr) *ast.FuncCallExpr {
++	return &ast.FuncCallExpr{Func: fn, Args: args}
++}
++
++func callStmt(fn ast.Expr, args ...ast.Expr) *ast.FuncCallStmt {
++	return &ast.FuncCallStmt{Expr: call(fn, args...)}
++}
++
++func function(names []string, vararg bool, body ...ast.Stmt) *ast.FunctionExpr {
++	return &ast.FunctionExpr{ParList: &ast.ParList{Names: names, HasVargs: vararg}, Stmts: body}
++}
++
++func local(names []string, exprs ...ast.Expr) *ast.LocalAssignStmt {
++	return &ast.LocalAssignStmt{Names: names, Exprs: exprs}
++}
++
++func ret(exprs ...ast.Expr) *ast.ReturnStmt { return &ast.ReturnStmt{Exprs: exprs} }
++
++// unknownStmt and unknownExpr are nodes of types the compiler doesn't know.
++type unknownStmt struct{ ast.StmtBase }
++
++type unknownExpr struct{ ast.ExprBase }
++
++// nested is n levels of "not" around e.
++func nested(n int, e ast.Expr) ast.Expr {
++	for range n {
++		e = &ast.UnaryNotOpExpr{Expr: e}
++	}
++	return e
++}
++
++// manyLocals declares n locals, one statement each.
++func manyLocals(n int) []ast.Stmt {
++	var stmts []ast.Stmt
++	for i := range n {
++		stmts = append(stmts, local([]string{fmt.Sprintf("v%d", i)}))
++	}
++	return stmts
++}
++
++// manyUpvalues is a function at line 9 referencing n locals of the main
++// function.
++func manyUpvalues(n int) []ast.Stmt {
++	stmts := manyLocals(n)
++	var args []ast.Expr
++	for i := range n {
++		args = append(args, ident(fmt.Sprintf("v%d", i)))
++	}
++	return append(stmts, ret(at(function(nil, false, callStmt(ident("f"), args...)), 9)))
++}
++
++func TestCompileASTErrors(t *testing.T) {
++	cyclic := &ast.DoBlockStmt{}
++	cyclic.Stmts = []ast.Stmt{cyclic}
++	var nilCall *ast.FuncCallExpr
++	var nilIf *ast.IfStmt
++	cases := []struct {
++		name    string
++		dialect Dialect
++		chunk   []ast.Stmt
++		want    string // the error, "" for none
++	}{
++		{"nil statement", DialectLua51, []ast.Stmt{nil}, "x:1: nil statement"},
++		{"typed nil statement", DialectLua51, []ast.Stmt{at(callStmt(ident("f")), 3), nilIf}, "x:3: nil IfStmt"},
++		{"unknown statement", DialectLua51, []ast.Stmt{&unknownStmt{}}, "x:1: unknown statement type *lua.unknownStmt"},
++		{"unknown expression", DialectLua51, []ast.Stmt{ret(&unknownExpr{})}, "x:1: unknown expression type *lua.unknownExpr"},
++		{"nil value", DialectLua51, []ast.Stmt{at(ret(nil), 4)}, "x:4: nil value"},
++		{"nil condition", DialectLua51, []ast.Stmt{&ast.WhileStmt{}}, "x:1: nil condition"},
++		{"nil operand", DialectLua51, []ast.Stmt{ret(at(&ast.ArithmeticOpExpr{Operator: "+", Lhs: num("1")}, 2))}, "x:2: nil operand"},
++		{"nil field", DialectLua51, []ast.Stmt{ret(&ast.TableExpr{Fields: []*ast.Field{nil}})}, "x:1: nil table field"},
++		{"nil field value", DialectLua51, []ast.Stmt{ret(&ast.TableExpr{Fields: []*ast.Field{{Key: str("k")}}})}, "x:1: nil value"},
++		{"typed nil call", DialectLua51, []ast.Stmt{&ast.FuncCallStmt{Expr: nilCall}}, "x:1: nil FuncCallExpr"},
++		{"nil parameter list", DialectLua51, []ast.Stmt{ret(&ast.FunctionExpr{})}, "x:1: function without a parameter list"},
++		{"nil function name", DialectLua51, []ast.Stmt{&ast.FuncDefStmt{Func: function(nil, false)}}, "x:1: function statement without a name"},
++		{"nil function", DialectLua51, []ast.Stmt{&ast.FuncDefStmt{Name: &ast.FuncName{Func: ident("f")}}}, "x:1: function statement without a function"},
++		{"both name and receiver", DialectLua51, []ast.Stmt{&ast.FuncDefStmt{Name: &ast.FuncName{Func: ident("f"), Receiver: ident("t"), Method: "m"}, Func: function(nil, false)}},
++			"x:1: function name with both a target and a receiver"},
++		{"function name not assignable", DialectLua51, []ast.Stmt{&ast.FuncDefStmt{Name: &ast.FuncName{Func: str("f")}, Func: function(nil, false)}},
++			"x:1: cannot assign to StringExpr"},
++		{"bad arithmetic operator", DialectLua51, []ast.Stmt{ret(&ast.ArithmeticOpExpr{Operator: "//", Lhs: num("1"), Rhs: num("2")})}, "x:1: unknown arithmetic operator '//'"},
++		{"bad relational operator", DialectLua51, []ast.Stmt{ret(&ast.RelationalOpExpr{Operator: "!=", Lhs: num("1"), Rhs: num("2")})}, "x:1: unknown relational operator '!='"},
++		{"bad logical operator", DialectLua51, []ast.Stmt{ret(&ast.LogicalOpExpr{Operator: "xor", Lhs: num("1"), Rhs: num("2")})}, "x:1: unknown logical operator 'xor'"},
++		{"assign to a call", DialectLua51, []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{call(ident("f"))}, Rhs: []ast.Expr{num("1")}}}, "x:1: cannot assign to FuncCallExpr"},
++		{"assign to a constant", DialectLua51, []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{num("1")}, Rhs: []ast.Expr{num("1")}}}, "x:1: cannot assign to NumberExpr"},
++		{"assign without values", DialectLua51, []ast.Stmt{&ast.AssignStmt{Lhs: []ast.Expr{ident("a")}}}, "x:1: assignment without values"},
++		{"assign without targets", DialectLua51, []ast.Stmt{&ast.AssignStmt{Rhs: []ast.Expr{num("1")}}}, "x:1: assignment without targets"},
++		{"local without names", DialectLua51, []ast.Stmt{local(nil, num("1"))}, "x:1: local declaration without names"},
++		{"for without names", DialectLua51, []ast.Stmt{&ast.GenericForStmt{Exprs: []ast.Expr{ident("t")}}}, "x:1: for statement without names"},
++		{"for without expressions", DialectLua51, []ast.Stmt{&ast.GenericForStmt{Names: []string{"k"}}}, "x:1: for statement without expressions"},
++		{"numeric for without limit", DialectLua51, []ast.Stmt{&ast.NumberForStmt{Name: "i", Init: num("1")}}, "x:1: nil limit"},
++		{"call statement of a name", DialectLua51, []ast.Stmt{&ast.FuncCallStmt{Expr: ident("f")}}, "x:1: call statement without a call (IdentExpr)"},
++		{"call without function", DialectLua51, []ast.Stmt{&ast.FuncCallStmt{Expr: &ast.FuncCallExpr{}}}, "x:1: call without a function"},
++		{"call with both", DialectLua51, []ast.Stmt{&ast.FuncCallStmt{Expr: &ast.FuncCallExpr{Func: ident("f"), Receiver: ident("o"), Method: "m"}}},
++			"x:1: call with both a function and a receiver"},
++		{"malformed number", DialectLua51, []ast.Stmt{ret(at(num("1x"), 7))}, "x:7: malformed number '1x'"},
++		{"cdata numeral under Lua51", DialectLua51, []ast.Stmt{ret(&ast.CdataNumberExpr{Value: "1LL"})}, "x:1: cdata numeral '1LL' needs DialectLuaJIT"},
++		{"cdata numeral under LuaJIT", DialectLuaJIT, []ast.Stmt{ret(&ast.CdataNumberExpr{Value: "1LL"})}, ""},
++		{"empty cdata numeral", DialectLuaJIT, []ast.Stmt{ret(&ast.CdataNumberExpr{})}, "x:1: malformed number ''"},
++		{"goto under Lua51", DialectLua51, []ast.Stmt{at(&ast.GotoStmt{Label: "l"}, 2)}, "x:2: goto needs DialectLuaJIT"},
++		{"label under Lua51", DialectLua51, []ast.Stmt{&ast.LabelStmt{Name: "l"}}, "x:1: labels need DialectLuaJIT"},
++		{"goto", DialectLuaJIT, []ast.Stmt{&ast.GotoStmt{Label: "l"}, &ast.LabelStmt{Name: "l"}}, ""},
++		{"undefined label", DialectLuaJIT, []ast.Stmt{at(&ast.GotoStmt{Label: "l"}, 5)}, "x:5: undefined label 'l'"},
++		{"duplicate label", DialectLuaJIT, []ast.Stmt{&ast.LabelStmt{Name: "l"}, at(&ast.LabelStmt{Name: "l"}, 2)}, "x:2: duplicate label 'l'"},
++		{"goto into a local's scope", DialectLuaJIT, []ast.Stmt{
++			at(&ast.GotoStmt{Label: "l"}, 1), local([]string{"a"}), local([]string{"b"}), &ast.LabelStmt{Name: "l"}, callStmt(ident("f")),
++		}, "x:1: <goto l> jumps into the scope of local 'a'"},
++		{"goto from a block into a local's scope", DialectLuaJIT, []ast.Stmt{
++			&ast.DoBlockStmt{Stmts: []ast.Stmt{at(&ast.GotoStmt{Label: "l"}, 3)}}, local([]string{"a"}), &ast.LabelStmt{Name: "l"}, callStmt(ident("f")),
++		}, "x:3: <goto l> jumps into the scope of local 'a'"},
++		{"vararg outside a vararg function", DialectLua51, []ast.Stmt{ret(at(function(nil, false, ret(&ast.Comma3Expr{})), 6))},
++			"x:6: cannot use '...' outside a vararg function"},
++		{"break outside a loop", DialectLua51, []ast.Stmt{at(&ast.BreakStmt{}, 8)}, "x:8: no loop to break"},
++		{"break in a function in a loop", DialectLua51, []ast.Stmt{&ast.WhileStmt{Condition: &ast.TrueExpr{}, Stmts: []ast.Stmt{
++			ret(function(nil, false, &ast.BreakStmt{})),
++		}}}, "x:1: no loop to break"},
++		{"break in a loop", DialectLua51, []ast.Stmt{&ast.RepeatStmt{Condition: &ast.TrueExpr{}, Stmts: []ast.Stmt{&ast.BreakStmt{}}}}, ""},
++		{"200 locals", DialectLua51, manyLocals(200), ""},
++		{"201 locals", DialectLua51, manyLocals(201), "x:1: main function has more than 200 local variables"},
++		{"201 parameters", DialectLuaJIT, []ast.Stmt{ret(at(function(make([]string, 201), false), 3))}, "x:3: function at line 3 has more than 200 local variables"},
++		{"60 upvalues", DialectLua51, manyUpvalues(60), ""},
++		{"61 upvalues", DialectLua51, manyUpvalues(61), "x:9: function at line 9 has more than 60 upvalues"},
++		{"deep nesting", DialectLua51, []ast.Stmt{ret(nested(maxCompileDepth, &ast.TrueExpr{}))}, "x:1: chunk has too many syntax levels"},
++		{"cycle", DialectLua51, []ast.Stmt{cyclic}, "x:1: chunk has too many syntax levels"},
++		{"negative line", DialectLua51, []ast.Stmt{at(ret(), -1)}, "x:1: invalid line -1"},
++		{"negative last line", DialectLua51, []ast.Stmt{&ast.ReturnStmt{Exprs: []ast.Expr{func() ast.Expr { e := num("1"); e.SetLastLine(-2); return e }()}}},
++			"x:1: invalid line -2"},
++		{"nil argument", DialectLua51, []ast.Stmt{ret(call(ident("f"), make([]ast.Expr, 3)...))}, "x:1: nil argument"},
++	}
++	for _, c := range cases {
++		t.Run(c.name, func(t *testing.T) {
++			_, err := CompileAST(c.chunk, "=x", c.dialect)
++			if c.want == "" {
++				if err != nil {
++					t.Fatalf("error %v", err)
++				}
++				return
++			}
++			var ce *CompileError
++			if !errors.As(err, &ce) {
++				t.Fatalf("error %v (%T), want a *CompileError", err, err)
++			}
++			if err.Error() != c.want {
++				t.Errorf("error %q, want %q", err.Error(), c.want)
++			}
++		})
++	}
++}
++
++// TestCompileASTLimits checks the limits of the compiler that remain for a
++// built tree: registers and Lua 5.1's local variable records.
++func TestCompileASTLimits(t *testing.T) {
++	args := make([]ast.Expr, 300)
++	for i := range args {
++		args[i] = num("1")
++	}
++	if _, err := CompileAST([]ast.Stmt{at(ret(call(ident("f"), args...)), 2)}, "=x", DialectLua51); err == nil ||
++		err.Error() != "x:2: function or expression too complex" {
++		t.Errorf("300 arguments: %v", err)
++	}
++	// 40000 locals in blocks of 100: Lua 5.1's 32767 records
++	var stmts []ast.Stmt
++	for range 400 {
++		stmts = append(stmts, &ast.DoBlockStmt{Stmts: manyLocals(100)})
++	}
++	if _, err := CompileAST(stmts, "=x", DialectLua51); err == nil || err.Error() != "x:1: too many local variables" {
++		t.Errorf("40000 locals under Lua51: %v", err)
++	}
++	if _, err := CompileAST(stmts, "=x", DialectLuaJIT); err != nil {
++		t.Errorf("40000 locals under LuaJIT: %v", err)
++	}
++	// a loop too long to jump over, under LuaJIT too (the parser's model
++	// of LuaJIT's code generator does not run)
++	body := make([]ast.Stmt, 70000)
++	for i := range body {
++		body[i] = &ast.AssignStmt{Lhs: []ast.Expr{ident("x")}, Rhs: []ast.Expr{num("1")}}
++	}
++	loop := &ast.NumberForStmt{Name: "i", Init: num("1"), Limit: num("2"), Stmts: body}
++	loop.SetLastLine(3)
++	if _, err := CompileAST([]ast.Stmt{loop}, "=x", DialectLuaJIT); err == nil || err.Error() != "x:3: control structure too long" {
++		t.Errorf("a long loop: %v", err)
++	}
++	if _, err := CompileAST(nil, "=x", Dialect(7)); err == nil {
++		t.Error("no error for an unknown dialect")
++	}
++}
++
++// TestLoadASTError: LoadAST's errors are LoadChunk's kind.
++func TestLoadASTError(t *testing.T) {
++	L := NewState(Options{SkipOpenLibs: true})
++	defer L.Close()
++	_, err := L.LoadAST([]ast.Stmt{at(&ast.BreakStmt{}, 3)}, "@file.lua")
++	var ae *ApiError
++	if !errors.As(err, &ae) || ae.Type != ApiErrorSyntax || err.Error() != "file.lua:3: no loop to break" {
++		t.Fatalf("error %v", err)
++	}
++	var ce *CompileError
++	if !errors.As(ae.Cause, &ce) || ce.Line != 3 {
++		t.Errorf("cause %#v", ae.Cause)
++	}
++}
++
++// treeString renders a tree with its lines, for comparisons.
++func treeString(v any) string {
++	var b strings.Builder
++	var walk func(rv reflect.Value, depth int)
++	walk = func(rv reflect.Value, depth int) {
++		if depth > 1000 {
++			b.WriteString("...")
++			return
++		}
++		switch rv.Kind() {
++		case reflect.Interface, reflect.Pointer:
++			if rv.IsNil() {
++				b.WriteString("nil")
++				return
++			}
++			if ph, ok := rv.Interface().(ast.PositionHolder); ok {
++				fmt.Fprintf(&b, "@%d-%d", ph.Line(), ph.LastLine())
++			}
++			walk(rv.Elem(), depth+1)
++		case reflect.Struct:
++			b.WriteString(rv.Type().Name() + "{")
++			for i := range rv.NumField() {
++				if rv.Type().Field(i).IsExported() {
++					b.WriteString(rv.Type().Field(i).Name + ":")
++					walk(rv.Field(i), depth+1)
++					b.WriteString(" ")
++				}
++			}
++			b.WriteString("}")
++		case reflect.Slice:
++			b.WriteString("[")
++			for i := range rv.Len() {
++				walk(rv.Index(i), depth+1)
++				b.WriteString(" ")
++			}
++			b.WriteString("]")
++		default:
++			fmt.Fprintf(&b, "%q", fmt.Sprint(rv.Interface()))
++		}
++	}
++	walk(reflect.ValueOf(v), 0)
++	return b.String()
++}
++
++// TestCompileASTKeepsTree: compiling leaves the tree as it is (a numeric
++// for's default step, the folded operand of a unary minus, the lines it
++// takes), and compiling it again gives the same function.
++func TestCompileASTKeepsTree(t *testing.T) {
++	src := "for i = 1, 3 do x = -(-(2 + 3)) - -i end\nlocal t = {-1, - -2}\nreturn t"
++	chunk, err := parse.ParseBytes([]byte(src), "x", parse.Lua51)
++	if err != nil {
++		t.Fatal(err)
++	}
++	// and a statement without lines
++	chunk = append([]ast.Stmt{callStmt(ident("f"), &ast.UnaryMinusOpExpr{Expr: num("4")})}, chunk...)
++	before := treeString(chunk)
++	var dumps [][]byte
++	for range 2 {
++		proto, err := CompileAST(chunk, "=x", DialectLua51)
++		if err != nil {
++			t.Fatal(err)
++		}
++		dump, err := DumpFunction(newLFunctionL(proto, nil, 0))
++		if err != nil {
++			t.Fatal(err)
++		}
++		dumps = append(dumps, dump)
++		if after := treeString(chunk); after != before {
++			t.Fatalf("the tree changed:\n%s\n%s", before, after)
++		}
++	}
++	if !bytes.Equal(dumps[0], dumps[1]) {
++		t.Error("compiled twice, different dumps")
++	}
++	if _, err := Compile(chunk[1:], "x"); err != nil {
++		t.Fatal(err)
++	}
++	if after := treeString(chunk); after != before {
++		t.Fatalf("Compile changed the tree:\n%s\n%s", before, after)
++	}
++}
++
++// TestCompileASTVarArg: under DialectLuaJIT no vararg function has the
++// implicit "arg", under DialectLua51 those without ParList.NoArg do.
++func TestCompileASTVarArg(t *testing.T) {
++	chunk := []ast.Stmt{ret(call(function(nil, true, ret(ident("arg"))), num("1")))}
++	for _, c := range []struct {
++		dialect Dialect
++		want    LValueType
++	}{{DialectLua51, LTTable}, {DialectLuaJIT, LTNil}} {
++		L := NewState(Options{Dialect: c.dialect, SkipOpenLibs: true})
++		fn, err := L.LoadAST(chunk, "=x")
++		if err != nil {
++			t.Fatal(err)
++		}
++		L.Push(fn)
++		L.Call(0, 1)
++		if got := L.Get(-1).Type(); got != c.want {
++			t.Errorf("%v: arg is a %v, want a %v", c.dialect, got, c.want)
++		}
++		L.Close()
++	}
++	// with NoArg under Lua51: none, and "arg" is the global
++	noarg := function(nil, true, ret(ident("arg")))
++	noarg.ParList.NoArg = true
++	L := NewState(Options{SkipOpenLibs: true})
++	defer L.Close()
++	fn, err := L.LoadAST([]ast.Stmt{ret(call(noarg))}, "=x")
++	if err != nil {
++		t.Fatal(err)
++	}
++	L.SetGlobal("arg", LString("global"))
++	L.Push(fn)
++	L.Call(0, 1)
++	if got := L.Get(-1); got != LString("global") {
++		t.Errorf("NoArg: arg is %v", got)
++	}
++}
++
++// runLines runs a chunk loaded with LoadAST, giving it a function lines
++// that returns debug.getinfo(f, "S").linedefined and lastlinedefined of
++// its argument, and the error message of calling its argument; it returns
++// what the chunk returns, as strings.
++func runLines(t *testing.T, chunk []ast.Stmt) []string {
++	t.Helper()
++	L := NewState()
++	defer L.Close()
++	fn, err := L.LoadAST(chunk, "@c.lua")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := L.DoString(`function lines(f)
++		local i = debug.getinfo(f, "S")
++		local ok, err = pcall(f)
++		return i.linedefined .. "-" .. i.lastlinedefined .. " " .. tostring(err)
++	end`); err != nil {
++		t.Fatal(err)
++	}
++	L.Push(fn)
++	if err := L.PCall(0, MultRet, nil); err != nil {
++		t.Fatal(err)
++	}
++	var out []string
++	for i := 1; i <= L.GetTop(); i++ {
++		out = append(out, L.ToString(i))
++	}
++	return out
++}
++
++func TestCompileASTLines(t *testing.T) {
++	// an unpositioned tree is on line 1: f errors at line 1
++	f := function(nil, false, callStmt(ident("undefined")))
++	got := runLines(t, []ast.Stmt{ret(call(ident("lines"), f))})
++	if want := "1-1 c.lua:1: attempt to call global 'undefined' (a nil value)"; len(got) != 1 || got[0] != want {
++		t.Errorf("unpositioned: %q, want %q", got, want)
++	}
++
++	// a node takes the line of the node before it in source order; an
++	// unpositioned function ends on the last line in it
++	g := function(nil, false,
++		at(local([]string{"x"}, num("1")), 4),
++		&ast.IfStmt{Condition: ident("x"), Then: []ast.Stmt{
++			at(local([]string{"y"}), 6),
++			callStmt(ident("undefined")), // line 6
++		}},
++	)
++	got = runLines(t, []ast.Stmt{at(local([]string{"z"}), 2), ret(call(ident("lines"), g))})
++	if want := "2-6 c.lua:6: attempt to call global 'undefined' (a nil value)"; len(got) != 1 || got[0] != want {
++		t.Errorf("partly positioned: %q, want %q", got, want)
++	}
++
++	// an inserted call in a parsed tree takes the line of the code before
++	// it
++	chunk, err := parse.ParseBytes([]byte("local n = 0\n\nlocal function f()\n  n = n + 1\nend\nreturn lines(f)"), "c", parse.Lua51)
++	if err != nil {
++		t.Fatal(err)
++	}
++	body := &chunk[1].(*ast.LocalAssignStmt).Exprs[0].(*ast.FunctionExpr).Stmts
++	*body = append(*body, callStmt(&ast.AttrGetExpr{Object: ident("string"), Key: str("x")}))
++	got = runLines(t, chunk)
++	if want := "3-5 c.lua:4: attempt to call field 'x' (a nil value)"; len(got) != 1 || got[0] != want {
++		t.Errorf("inserted: %q, want %q", got, want)
++	}
++
++	// a traceback of an unpositioned tree has lines
++	L := NewState()
++	defer L.Close()
++	tb := local([]string{"s"}, call(&ast.AttrGetExpr{Object: ident("debug"), Key: str("traceback")}))
++	fn, err := L.LoadAST([]ast.Stmt{
++		local([]string{"r"}, call(function(nil, false, tb, ret(ident("s"))))),
++		ret(ident("r")),
++	}, "=t")
++	if err != nil {
++		t.Fatal(err)
++	}
++	L.Push(fn)
++	L.Call(0, 1)
++	if got, want := L.ToString(-1), "stack traceback:\n\tt:1: in function <t:1>\n\tt:1: in main chunk\n\t[G]: ?"; got != want {
++		t.Errorf("traceback %q, want %q", got, want)
++	}
++}
+--- a/compileast_fuzz_fix_test.go
++++ b/compileast_fuzz_fix_test.go
+@@ -0,0 +1,464 @@
++package lua
++
++// go-moonscript patch: fuzz test of CompileAST / LState.LoadAST: parsed
++// trees, mutated (nodes removed, replaced by other nodes of the tree or by
++// nodes that break the parser's guarantees, fields changed, lines dropped)
++// load without a panic, as a *CompileError or as a function that runs, or
++// fails with a Lua error, but no Go panic in the VM. TestCompileASTMutations
++// runs the mutations of a fixed pseudo-random sequence; `go test -fuzz
++// FuzzCompileAST` searches further.
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"math/rand/v2"
++	"reflect"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// fuzzSeeds are the sources the fuzz test mutates the trees of: all the
++// kinds of nodes, scopes, loops, closures, varargs, methods, gotos.
++var fuzzSeeds = []string{
++	`local a, b = 1, 2; a, b = b, a; return a - b`,
++	`local t = {1, 2, x = 3, [4] = 5, f(), ...}; return #t, t.x, t[4]`,
++	`local s = 0; for i = 1, 10, 2 do s = s + i end; return s`,
++	`local s = 0; for k, v in pairs({a = 1, b = 2}) do s = s + v end; return s`,
++	`local i = 0; while i < 5 do i = i + 1; if i == 3 then break end end; return i`,
++	`local i = 0; repeat local j = i; i = i + 1 until j >= 3; return i`,
++	`local function f(n) if n < 2 then return n end return f(n - 1) + f(n - 2) end; return f(10)`,
++	`local o = {v = 1}; function o:get() return self.v end; function o.set(x) o.v = x end; o.set(2); return o:get()`,
++	`local function count(...) local n = select('#', ...); return n, ... end; return count(1, nil, 3)`,
++	`local function g(...) local t = {...}; return arg, #t end; return g(1, 2)`,
++	`local x = 1; local function a() local function b() return x end; x = x + 1; return b() end; return a()`,
++	`return not nil, not 1, -2 ^ 2, 2 ^ -1, 7 % 3, -7 % 3, 1 / 0, "a" .. "b" .. 1 .. 2`,
++	`local a, b = 1, nil; return a and b, a or b, b and a, b or a, a and b or 3, (a > 0) and "p" or "n"`,
++	`local t = setmetatable({}, {__index = function(t, k) return k .. "!" end}); return t.x, t[1]`,
++	`local co = coroutine.wrap(function(a) local b = coroutine.yield(a + 1); return b * 2 end); return co(1), co(5)`,
++	`local ok, err = pcall(error, {code = 1}); return ok, type(err), err.code`,
++	`local s = ("x"):rep(3):upper(); return s:len(), s:sub(2), string.format("%5.2f", 3.14159)`,
++	`local t = {}; for i = 1, 5 do t[#t + 1] = function() return i end end; return t[1](), t[5]()`,
++	`local f = loadstring("return 1 + ..."); return f(2)`,
++	`if a then b = 1 elseif c then b = 2 elseif d then b = 3 else b = 4 end; return b`,
++	`do local x = 1; do local y = x + 1; z = y end end; return z`,
++	`local t = {}; t.a = {}; t.a.b = {}; t.a.b.c = 1; t["a"].b["c"] = t.a.b.c + 1; return t.a.b.c`,
++	`local t = {}; t[1], t[2] = 1, 2; local a = t; a.x, a = 1, 2; return t.x, a`,
++	`local i = 1; ::top:: i = i + 1; if i < 5 then goto top end; return i`,
++	`for i = 1, 3 do for j = 1, 3 do if j == 2 then goto continue end; x = (x or 0) + j; ::continue:: end end; return x`,
++	`do goto done; local x = 1; ::done:: end; return 0x10, 1e2, 0x1p4`,
++	`local t = {n = 0}; function t.inc(self, d) self.n = self.n + (d or 1); return self end; return t:inc():inc(2).n`,
++	`return (f or print)(("%d"):format(#{1, 2}))`,
++}
++
++// fuzzNames are the names the mutations put in name, label and method
++// fields.
++var fuzzNames = []string{"a", "b", "x", "i", "t", "f", "self", "arg", "print", "top", "continue", "done", "", "_ENV"}
++
++// fuzzOperators are the operators the mutations put in operator fields,
++// some of them not Lua's.
++var fuzzOperators = []string{"+", "-", "*", "/", "%", "^", "==", "~=", "<", "<=", ">", ">=", "and", "or", "..", "//", ""}
++
++// fuzzLines are the lines the mutations give nodes.
++var fuzzLines = []int{0, 0, 0, 1, 2, 7, 100, 1 << 30, -1}
++
++var (
++	exprType  = reflect.TypeFor[ast.Expr]()
++	stmtType  = reflect.TypeFor[ast.Stmt]()
++	posType   = reflect.TypeFor[ast.PositionHolder]()
++	stmtsType = reflect.TypeFor[[]ast.Stmt]()
++	exprsType = reflect.TypeFor[[]ast.Expr]()
++)
++
++// deepCopy copies a tree (a tree of pointers, slices and interfaces).
++func deepCopy(v reflect.Value) reflect.Value {
++	switch v.Kind() {
++	case reflect.Pointer:
++		if v.IsNil() {
++			return v
++		}
++		n := reflect.New(v.Type().Elem())
++		n.Elem().Set(v.Elem())
++		if n.Elem().Kind() == reflect.Struct {
++			s := n.Elem()
++			for i := range s.NumField() {
++				if f := s.Field(i); f.CanSet() {
++					f.Set(deepCopy(f))
++				}
++			}
++		}
++		return n
++	case reflect.Interface:
++		if v.IsNil() {
++			return v
++		}
++		r := reflect.New(v.Type()).Elem()
++		r.Set(deepCopy(v.Elem()))
++		return r
++	case reflect.Slice:
++		if v.IsNil() {
++			return v
++		}
++		n := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
++		for i := range v.Len() {
++			n.Index(i).Set(deepCopy(v.Index(i)))
++		}
++		return n
++	}
++	return v
++}
++
++// slots are the places of a tree a mutation changes: settable values.
++type slots struct {
++	exprs   []reflect.Value // fields and elements of type ast.Expr
++	stmts   []reflect.Value // slices of statements
++	elists  []reflect.Value // slices of expressions
++	ptrs    []reflect.Value // pointer fields: *ast.Field, *ast.ParList, *ast.FuncName, *ast.FunctionExpr
++	strs    []reflect.Value // string fields
++	names   []reflect.Value // []string fields
++	bools   []reflect.Value
++	nodes   []ast.PositionHolder
++	donorsE []reflect.Value // expressions to copy
++	donorsS []reflect.Value // statements to copy
++}
++
++func (s *slots) collect(v reflect.Value) {
++	switch v.Kind() {
++	case reflect.Pointer:
++		if v.IsNil() {
++			return
++		}
++		if ph, ok := v.Interface().(ast.PositionHolder); ok {
++			s.nodes = append(s.nodes, ph)
++		}
++		s.collect(v.Elem())
++	case reflect.Interface:
++		if v.IsNil() {
++			return
++		}
++		switch {
++		case v.Type() == exprType:
++			s.donorsE = append(s.donorsE, v.Elem())
++		case v.Type() == stmtType:
++			s.donorsS = append(s.donorsS, v.Elem())
++		}
++		s.collect(v.Elem())
++	case reflect.Struct:
++		for i := range v.NumField() {
++			f := v.Field(i)
++			if !f.CanSet() {
++				continue
++			}
++			switch {
++			case f.Type() == exprType:
++				s.exprs = append(s.exprs, f)
++			case f.Kind() == reflect.Pointer:
++				s.ptrs = append(s.ptrs, f)
++			case f.Kind() == reflect.String:
++				s.strs = append(s.strs, f)
++			case f.Kind() == reflect.Bool:
++				s.bools = append(s.bools, f)
++			case f.Type() == reflect.TypeFor[[]string]():
++				s.names = append(s.names, f)
++			}
++			s.collect(f)
++		}
++	case reflect.Slice:
++		switch v.Type() {
++		case stmtsType:
++			s.stmts = append(s.stmts, v)
++		case exprsType:
++			s.elists = append(s.elists, v)
++		}
++		for i := range v.Len() {
++			e := v.Index(i)
++			if e.Type() == exprType {
++				s.exprs = append(s.exprs, e)
++			}
++			s.collect(e)
++		}
++	}
++}
++
++// mutator mutates a tree as its bytes say.
++type mutator struct {
++	ops []byte
++}
++
++func (m *mutator) next() int {
++	if len(m.ops) == 0 {
++		return 0
++	}
++	b := m.ops[0]
++	m.ops = m.ops[1:]
++	return int(b)
++}
++
++func pick[T any](m *mutator, list []T) (T, bool) {
++	var zero T
++	if len(list) == 0 {
++		return zero, false
++	}
++	return list[m.next()%len(list)], true
++}
++
++// expr is an expression to put into the tree: a copy of one of it, or one
++// the parser does not build.
++func (m *mutator) expr(s *slots) ast.Expr {
++	switch m.next() % 24 {
++	case 0:
++		return nil
++	case 1:
++		return &ast.Comma3Expr{}
++	case 2:
++		return &ast.CdataNumberExpr{Value: []string{"1LL", "2ULL", "3i", ""}[m.next()%4]}
++	case 3:
++		return &unknownExpr{}
++	case 4:
++		return &ast.NumberExpr{Value: []string{"1x", "", "0x", "nan", "inf", "1e400", " 2 "}[m.next()%7]}
++	case 5:
++		return &ast.FunctionExpr{ParList: []*ast.ParList{nil, {}, {HasVargs: true}, {Names: []string{"a", "a"}}}[m.next()%4]}
++	case 6:
++		return nested(m.next()*4, &ast.Comma3Expr{})
++	case 7:
++		return &ast.FuncCallExpr{Receiver: ident("t"), Method: "m", Func: []ast.Expr{nil, ident("f")}[m.next()%2]}
++	case 8:
++		return call(ident("f"), make([]ast.Expr, m.next()%2)...)
++	case 9:
++		args := make([]ast.Expr, 200+m.next())
++		for i := range args {
++			args[i] = &ast.Comma3Expr{AdjustRet: i%2 == 0}
++		}
++		return call(ident("f"), args...)
++	case 10:
++		return &ast.TableExpr{Fields: []*ast.Field{nil, {Key: str("k")}, {Value: &ast.Comma3Expr{}}}[m.next()%3:]}
++	case 11:
++		return ident(fuzzNames[m.next()%len(fuzzNames)])
++	}
++	if d, ok := pick(m, s.donorsE); ok {
++		return deepCopy(d).Interface().(ast.Expr)
++	}
++	return &ast.NilExpr{}
++}
++
++// stmt is a statement to put into the tree.
++func (m *mutator) stmt(s *slots) ast.Stmt {
++	switch m.next() % 20 {
++	case 0:
++		return nil
++	case 1:
++		return &ast.BreakStmt{}
++	case 2:
++		return &ast.GotoStmt{Label: fuzzNames[m.next()%len(fuzzNames)]}
++	case 3:
++		return &ast.LabelStmt{Name: fuzzNames[m.next()%len(fuzzNames)]}
++	case 4:
++		return ret(m.expr(s))
++	case 5:
++		return &unknownStmt{}
++	case 6:
++		names := make([]string, m.next()+m.next())
++		for i := range names {
++			names[i] = fmt.Sprintf("l%d", i)
++		}
++		return local(names)
++	case 7:
++		return &ast.DoBlockStmt{Stmts: manyUpvalues(40 + m.next()%30)}
++	case 8:
++		return &ast.FuncCallStmt{Expr: m.expr(s)}
++	case 9:
++		return &ast.AssignStmt{Lhs: []ast.Expr{m.expr(s)}, Rhs: []ast.Expr{m.expr(s)}}
++	}
++	if d, ok := pick(m, s.donorsS); ok {
++		return deepCopy(d).Interface().(ast.Stmt)
++	}
++	return &ast.DoBlockStmt{}
++}
++
++// mutate applies the mutations of m's bytes to the tree.
++func (m *mutator) mutate(chunk []ast.Stmt) []ast.Stmt {
++	root := reflect.ValueOf(&chunk).Elem()
++	for n := 0; len(m.ops) > 0 && n < 12; n++ {
++		var s slots
++		s.collect(root)
++		s.stmts = append(s.stmts, root)
++		switch m.next() % 11 {
++		case 0: // an expression replaced
++			if v, ok := pick(m, s.exprs); ok {
++				e := m.expr(&s)
++				if e == nil {
++					v.SetZero()
++				} else {
++					v.Set(reflect.ValueOf(e))
++				}
++			}
++		case 1, 2: // a statement inserted or replaced
++			if v, ok := pick(m, s.stmts); ok {
++				st := m.stmt(&s)
++				i := m.next() % (v.Len() + 1)
++				if i < v.Len() && m.next()%2 == 0 {
++					v.Index(i).Set(reflect.ValueOf(&st).Elem())
++				} else {
++					old := v.Interface().([]ast.Stmt)
++					v.Set(reflect.ValueOf(append(append(append([]ast.Stmt{}, old[:i]...), st), old[i:]...)))
++				}
++			}
++		case 3: // a statement removed
++			if v, ok := pick(m, s.stmts); ok && v.Len() > 0 {
++				i := m.next() % v.Len()
++				v.Set(reflect.AppendSlice(v.Slice(0, i), v.Slice(i+1, v.Len())))
++			}
++		case 4: // an expression list changed
++			if v, ok := pick(m, s.elists); ok {
++				if v.Len() > 0 && m.next()%2 == 0 {
++					v.Set(v.Slice(0, v.Len()-1))
++				} else {
++					e := m.expr(&s)
++					v.Set(reflect.Append(v, reflect.ValueOf(&e).Elem()))
++				}
++			}
++		case 5: // a pointer field made nil
++			if v, ok := pick(m, s.ptrs); ok {
++				v.SetZero()
++			}
++		case 6: // a string field changed
++			if v, ok := pick(m, s.strs); ok {
++				if m.next()%2 == 0 {
++					v.SetString(fuzzOperators[m.next()%len(fuzzOperators)])
++				} else {
++					v.SetString(fuzzNames[m.next()%len(fuzzNames)])
++				}
++			}
++		case 7: // a bool field flipped
++			if v, ok := pick(m, s.bools); ok {
++				v.SetBool(!v.Bool())
++			}
++		case 8: // names changed
++			if v, ok := pick(m, s.names); ok {
++				names := append([]string(nil), v.Interface().([]string)...)
++				if len(names) > 0 && m.next()%2 == 0 {
++					names = names[:len(names)-1]
++				} else {
++					names = append(names, fuzzNames[m.next()%len(fuzzNames)])
++				}
++				v.Set(reflect.ValueOf(names))
++			}
++		case 9, 10: // lines changed
++			if n, ok := pick(m, s.nodes); ok {
++				if m.next()%2 == 0 {
++					n.SetLine(fuzzLines[m.next()%len(fuzzLines)])
++				} else {
++					n.SetLastLine(fuzzLines[m.next()%len(fuzzLines)])
++				}
++			}
++		}
++	}
++	return chunk
++}
++
++// fuzzState is a state for running mutated code: the base, table, string,
++// math and coroutine libraries without the functions that reach out of
++// it or take long, limits of memory, stack and time.
++func fuzzState(t *testing.T, dialect Dialect) (*LState, context.CancelFunc) {
++	t.Helper()
++	L := NewState(Options{Dialect: dialect, SkipOpenLibs: true, CallStackSize: 200, RegistrySize: 1024, RegistryMaxSize: 1 << 18})
++	for _, lib := range []luaLib{{LoadLibName, OpenPackage}, {BaseLibName, OpenBase}, {TabLibName, OpenTable}, {StringLibName, OpenString},
++		{MathLibName, OpenMath}, {CoroutineLibName, OpenCoroutine}} {
++		L.Push(L.NewFunction(lib.libFunc))
++		L.Push(LString(lib.libName))
++		L.Call(1, 0)
++	}
++	for _, name := range []string{"dofile", "loadfile", "require", "collectgarbage", "gcinfo", "module", "package"} {
++		L.SetGlobal(name, LNil)
++	}
++	L.SetGlobal("print", L.NewFunction(func(*LState) int { return 0 }))
++	L.SetMemoryLimit(64 << 20)
++	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
++	L.SetContext(ctx)
++	return L, func() { cancel(); L.Close() }
++}
++
++// The outcomes of a mutant.
++const (
++	mutantUnparsed = iota // its seed is of the other dialect
++	mutantRejected        // a *CompileError
++	mutantRan             // it ran
++	mutantFailed          // it failed with a Lua error
++	mutantOutcomes
++)
++
++// checkMutant loads a tree with LoadAST and runs it: it must fail with a
++// *CompileError, or run, or fail with a Lua error.
++func checkMutant(t *testing.T, chunk []ast.Stmt, dialect Dialect) int {
++	t.Helper()
++	L, done := fuzzState(t, dialect)
++	defer done()
++	fn, err := L.LoadAST(chunk, "=fuzz")
++	if err != nil {
++		var ae *ApiError
++		if !errors.As(err, &ae) {
++			t.Fatalf("LoadAST: %v (%T)", err, err)
++		}
++		if ce, ok := ae.Cause.(*CompileError); !ok || strings.Contains(ce.Message, "internal compiler error") {
++			t.Fatalf("LoadAST: %v (%T)\n%s", err, ae.Cause, treeString(chunk))
++		}
++		return mutantRejected
++	}
++	L.Push(fn)
++	if err := L.PCall(0, MultRet, nil); err != nil {
++		var ae *ApiError
++		if !errors.As(err, &ae) || ae.Type == ApiErrorPanic {
++			t.Fatalf("run: %v\n%s", err, treeString(chunk))
++		}
++		return mutantFailed
++	}
++	return mutantRan
++}
++
++// fuzzMutant parses the seed sel picks (and the dialect, its low bit),
++// mutates it with ops and checks it.
++func fuzzMutant(t *testing.T, sel uint8, ops []byte) int {
++	dialect := DialectLua51
++	if sel&1 != 0 {
++		dialect = DialectLuaJIT
++	}
++	src := fuzzSeeds[int(sel>>1)%len(fuzzSeeds)]
++	chunk, err := parse.ParseBytes([]byte(src), "fuzz", parseDialect(dialect))
++	if err != nil {
++		return mutantUnparsed
++	}
++	chunk = (&mutator{ops: ops}).mutate(chunk)
++	return checkMutant(t, chunk, dialect)
++}
++
++func FuzzCompileAST(f *testing.F) {
++	for i := range fuzzSeeds {
++		f.Add(uint8(2*i), []byte{})
++		f.Add(uint8(2*i+1), []byte{byte(i), 1, 2, 3, byte(i * 7)})
++	}
++	f.Fuzz(func(t *testing.T, sel uint8, ops []byte) { fuzzMutant(t, sel, ops) })
++}
++
++// TestCompileASTMutations checks the mutants of a fixed pseudo-random
++// sequence of seeds and mutations.
++func TestCompileASTMutations(t *testing.T) {
++	n := 3000
++	if testing.Short() {
++		n = 300
++	}
++	r := rand.New(rand.NewPCG(1, 2))
++	var outcomes [mutantOutcomes]int
++	for range n {
++		ops := make([]byte, r.IntN(24))
++		for i := range ops {
++			ops[i] = byte(r.IntN(256))
++		}
++		outcomes[fuzzMutant(t, uint8(r.IntN(256)), ops)]++
++	}
++	t.Logf("%d mutants: %d rejected, %d ran, %d failed at run time (%d seeds of the other dialect)",
++		n, outcomes[mutantRejected], outcomes[mutantRan], outcomes[mutantFailed], outcomes[mutantUnparsed])
 +}
 --- a/coroutinelib.go
 +++ b/coroutinelib.go
@@ -24735,7 +27032,7 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		return nil, newApiErrorE(ApiErrorSyntax, err)
 +	}
-+	proto, err := Compile(chunk, parseName)
++	proto, err := compileDialect(chunk, parseName, ls.Dialect()) // go-moonscript patch
 +	// go-moonscript patch: lua5.1 finds that a function needs too many
 +	// registers while parsing, and reports it near the token it is at; the
 +	// parser's model of its registers tells, if the compiler needed many
@@ -28914,6 +31211,47 @@ regenerates the diff below; this header is edited by hand.
 +local y = nil
 +y = (id(1) and (id(nil) and 2)) or (id(false) and 3)
 +print(y)
+--- a/testdata/compat/compile_assign_extra.lua
++++ b/testdata/compat/compile_assign_extra.lua
+@@ -0,0 +1,38 @@
++-- go-moonscript patch: an assignment to a local evaluates all its values
++-- before it assigns the local (i = 5, f(i) passes f the old i), and a
++-- vararg value for a local leaves the registers above it alone (they were
++-- cleared: a Go panic when read). Found by FuzzCompileAST.
++
++local i = 1
++i = 5, print("old i", i)
++print("new i", i)
++
++local a, b = 1, 2
++a = 3, b, print("a b", a, b)
++print("a b", a, b)
++
++local t = {}
++local k = 1
++k, t[k] = 2, k, print("k", k)
++print("k t[1] t[2]", k, t[1], t[2])
++
++local function f(...)
++  local x, y = 1, 2
++  x = (...)
++  local u, v = 1, 2
++  v, u = 3, (...)
++  local p, q = 1, 2
++  p = ..., ...
++  return x, y, u, v, p, q
++end
++print(f(7, 8))
++print(f())
++
++local j = 0
++local n = 0
++repeat
++  local m = j
++  j = ..., ...
++  n = n + 1
++until m == nil or n > 3
++print("j n", j, n)
 --- a/testdata/compat/compile_backjump.lua
 +++ b/testdata/compat/compile_backjump.lua
 @@ -0,0 +1,13 @@
@@ -36175,6 +38513,18 @@ regenerates the diff below; this header is edited by hand.
 +false	true	false
 +false
 +false
+--- a/testdata/compat/ref/compile_assign_extra.out
++++ b/testdata/compat/ref/compile_assign_extra.out
+@@ -0,0 +1,9 @@
++old i	1
++new i	5
++a b	1	2
++a b	3	2
++k	1
++k t[1] t[2]	2	1	nil
++7	2	7	3	7	2
++nil	2	nil	3	nil	2
++j n	nil	2
 --- a/testdata/compat/ref/compile_backjump.out
 +++ b/testdata/compat/ref/compile_backjump.out
 @@ -0,0 +1,8 @@
@@ -47070,6 +49420,12 @@ regenerates the diff below; this header is edited by hand.
 +a	nil
 +nil	(binary): cannot load incompatible bytecode
 +unable to dump given function
+--- a/testdata/fuzz/FuzzCompileAST/f5beff71ad27784f
++++ b/testdata/fuzz/FuzzCompileAST/f5beff71ad27784f
+@@ -0,0 +1,3 @@
++go test fuzz v1
++byte('C')
++[]byte("00000110011")
 --- a/testdata/hookstate.lua
 +++ b/testdata/hookstate.lua
 @@ -0,0 +1,62 @@
