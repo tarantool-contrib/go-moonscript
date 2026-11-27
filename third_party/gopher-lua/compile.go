@@ -156,7 +156,7 @@ var cdataNumeralFn = newLFunctionG(cdataNumeral, nil, 0)
 func cdataNumeral(L *LState) int {
 	s := L.CheckString(1)
 	kind := "64-bit integer"
-	if s[len(s)-1]|0x20 == 'i' {
+	if s != "" && s[len(s)-1]|0x20 == 'i' {
 		kind = "complex number"
 	}
 	L.RaiseError("%s literal '%s' needs the FFI, which is not supported", kind, s)
@@ -496,6 +496,9 @@ const maxCompileDepth = 100000
 
 type compileState struct {
 	depth int // statements and expressions being compiled
+	// go-moonscript patch: no vararg function has Lua 5.1's implicit local
+	// "arg", whatever its ParList.NoArg (DialectLuaJIT, see compileDialect)
+	noArg bool
 	// what constFold returned for an operator expression, so that a chain is
 	// folded once, not once per level (that was quadratic)
 	folded map[ast.Expr]ast.Expr
@@ -568,12 +571,32 @@ func (fc *funcContext) GetNamedLabel(name string) *gotoLabelDesc {
 
 func (fc *funcContext) ResolveGoto(from, to *gotoLabelDesc, index int) {
 	if from.NumActiveLocalVars < to.NumActiveLocalVars {
-		varName := fc.Block.LocalVars.Names()[len(fc.Block.LocalVars.Names())-1]
-		// go-moonscript patch: LuaJIT's message
+		// go-moonscript patch: LuaJIT's message, with the first local the
+		// goto jumps into the scope of, as LuaJIT names it (it took the
+		// block's last local, and failed in a block without any)
+		varName := fc.activeLocalName(from.NumActiveLocalVars)
 		raiseCompileError(fc, from.Line, "<goto %s> jumps into the scope of local '%s'", to.Name, varName)
 	}
 	fc.Code.SetSbx(from.Pc, to.Id)
 	delete(fc.unresolvedGotos, index)
+}
+
+// activeLocalName is the name of the local variable with index n among
+// the active ones of the function, "?" if there is none. go-moonscript
+// patch.
+func (fc *funcContext) activeLocalName(n int) string {
+	var blocks []*codeBlock
+	for b := fc.Block; b != nil; b = b.Parent {
+		blocks = append(blocks, b)
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		names := blocks[i].LocalVars.Names()
+		if n < len(names) {
+			return names[n]
+		}
+		n -= len(names)
+	}
+	return "?"
 }
 
 func (fc *funcContext) FindLabel(block *codeBlock, gotoLabel *gotoLabelDesc, i int) bool {
@@ -1516,12 +1539,15 @@ func compileNumberForStmt(context *funcContext, stmt *ast.NumberForStmt) { // {{
 	compileExpr(context, rlimit, stmt.Limit, ec)
 
 	rstep := rindex + 2
-	if stmt.Step == nil {
-		stmt.Step = &ast.NumberExpr{Value: "1"}
-		stmt.Step.SetLine(sline(stmt.Init))
+	step := stmt.Step
+	if step == nil {
+		// go-moonscript patch: a default step of its own, the tree is left
+		// as it is (it was stored in stmt.Step)
+		step = &ast.NumberExpr{Value: "1"}
+		step.SetLine(sline(stmt.Init))
 	}
 	ecupdate(ec, ecLocal, rstep, 0)
-	compileExpr(context, rstep, stmt.Step, ec)
+	compileExpr(context, rstep, step, ec)
 
 	firstdbg := len(context.Proto.DbgLocals)
 	context.RegisterLocalVar("(for index)")
@@ -1530,7 +1556,7 @@ func compileNumberForStmt(context *funcContext, stmt *ast.NumberForStmt) { // {{
 
 	// go-moonscript patch: luac emits FORPREP after "do", see above
 	prepline := exprLastLine(stmt.Limit)
-	if l := exprLastLine(stmt.Step); l > prepline {
+	if l := exprLastLine(step); l > prepline {
 		prepline = l
 	}
 	code.AddASbx(OP_FORPREP, rindex, 0, prepline)
@@ -1848,8 +1874,10 @@ func (fc *funcContext) constFoldOnce(exp ast.Expr, depth int) ast.Expr { // {{{
 			return expr
 		}
 	case *ast.UnaryMinusOpExpr:
-		expr.Expr = fc.constFoldAt(expr.Expr, depth+1)
-		if value, ok := lnumberValue(expr.Expr); ok {
+		// go-moonscript patch: the operand is not replaced by its folded
+		// value (the tree is left as it is): it is either a constant, or
+		// the operand itself
+		if value, ok := lnumberValue(fc.constFoldAt(expr.Expr, depth+1)); ok {
 			return &constLValueExpr{Value: LNumber(-value)}
 		}
 		return expr
@@ -1876,7 +1904,7 @@ func compileFunctionExpr(context *funcContext, funcexpr *ast.FunctionExpr, ec *e
 	}
 	if funcexpr.ParList.HasVargs {
 		// go-moonscript patch: LuaJIT has no implicit arg (ParList.NoArg)
-		if CompatVarArg && !funcexpr.ParList.NoArg {
+		if CompatVarArg && !funcexpr.ParList.NoArg && (!context.state.noArg || context.Parent == nil) {
 			context.Proto.IsVarArg = VarArgHasArg | VarArgNeedsArg
 			if context.Parent != nil {
 				context.RegisterLocalVar("arg")
@@ -2539,7 +2567,20 @@ func patchCode(context *funcContext) { // {{{
 	context.Proto.NumUsedRegisters = uint8(maxreg)
 } // }}}
 
+// Compile compiles the syntax tree of a chunk, as the parser builds it
+// (parse.Parse), into the prototype of its main function, whose name in
+// error messages and tracebacks is name. go-moonscript patch: it trusts the
+// tree; CompileAST checks a tree built or transformed by other code, and
+// compiles it for a dialect (compileast.go).
 func Compile(chunk []ast.Stmt, name string) (proto *FunctionProto, err error) { // {{{
+	return compileDialect(chunk, name, DialectLua51)
+} // }}}
+
+// compileDialect is Compile for a dialect: under DialectLuaJIT, a vararg
+// function has no implicit local "arg" (LuaJIT's parser marks them with
+// ParList.NoArg, a tree built for LuaJIT needn't; the main function has
+// none in either dialect). go-moonscript patch.
+func compileDialect(chunk []ast.Stmt, name string, dialect Dialect) (proto *FunctionProto, err error) { // {{{
 	defer func() {
 		if rcv := recover(); rcv != nil {
 			if _, ok := rcv.(*CompileError); ok {
@@ -2557,6 +2598,7 @@ func Compile(chunk []ast.Stmt, name string) (proto *FunctionProto, err error) { 
 		funcexpr.SetLastLine(eline(chunk[len(chunk)-1]) + 1)
 	}
 	context := newFuncContext(name, nil)
+	context.state.noArg = dialect == DialectLuaJIT
 	compileFunctionExpr(context, funcexpr, ecnone(0))
 	proto = context.Proto
 	return

@@ -44,6 +44,14 @@ func TestCompat(t *testing.T) {
 // global tostring as Lua 5.1's print does.
 func runCompatScript(t *testing.T, script string) string {
 	t.Helper()
+	return runCompatScriptWith(t, script, func(L *LState, code []byte, chunkname string) (*LFunction, error) {
+		return L.LoadChunk(strings.NewReader(string(code)), chunkname)
+	})
+}
+
+// runCompatScriptWith is runCompatScript, the script loaded by load.
+func runCompatScriptWith(t *testing.T, script string, load func(L *LState, code []byte, chunkname string) (*LFunction, error)) string {
+	t.Helper()
 	dialect := DialectLua51
 	if strings.HasSuffix(script, ".jit.lua") {
 		dialect = DialectLuaJIT
@@ -71,7 +79,7 @@ func runCompatScript(t *testing.T, script string) string {
 		out.WriteByte('\n')
 		return 0
 	}))
-	fn, err := L.LoadChunk(strings.NewReader(string(code)), "@"+filepath.Base(script))
+	fn, err := load(L, code, "@"+filepath.Base(script))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2396,7 +2396,7 @@ func (ls *LState) load(reader io.Reader, name, parseName, chunkname string) (*LF
 		}
 		return nil, newApiErrorE(ApiErrorSyntax, err)
 	}
-	proto, err := Compile(chunk, parseName)
+	proto, err := compileDialect(chunk, parseName, ls.Dialect()) // go-moonscript patch
 	// go-moonscript patch: lua5.1 finds that a function needs too many
 	// registers while parsing, and reports it near the token it is at; the
 	// parser's model of its registers tells, if the compiler needed many

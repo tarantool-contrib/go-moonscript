@@ -252,6 +252,17 @@ and tracebacks of `return error ...`), debug hooks are per coroutine and
 fire on Lua 5.1's lines (`moon -c`), and `t[k]` errors say `field '?'`; see
 the [`moon` documentation](cmd/moon/main.go).
 
+Programs that build or transform Lua code can hand the VM the syntax tree
+instead of printing Lua source and loading it again: `parse.ParseBytes`
+(package `third_party/gopher-lua/parse`) gives the tree of a chunk,
+`L.LoadAST(chunk, chunkname)` loads a tree as `L.LoadChunk` loads source
+(the tree of a parsed chunk gives the same function), and
+`lua.CompileAST(chunk, chunkname, dialect)` compiles one into a prototype.
+A tree built or changed by hand is checked first, so that a broken one is a
+compile error at its line rather than a crash; nodes without lines take the
+line of the code before them. See `third_party/gopher-lua/compileast.go` and
+its [examples](third_party/gopher-lua/compileast_example_test.go).
+
 **Use this module's gopher-lua, not `github.com/yuin/gopher-lua`.** The Lua
 types of the API (`*lua.LState`, `lua.LValue`, ...) belong to the patched
 copy in `third_party/gopher-lua`. They are not interchangeable with the
