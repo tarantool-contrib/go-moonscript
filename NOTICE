@@ -63,6 +63,21 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 -------------------------------------------------------------------------------
+Lua 5.1.5 (https://www.lua.org) and LuaJIT 2.1 (https://luajit.org)
+
+third_party/gopher-lua/parse is a port of their lexers and parsers: the
+lexer (lexer.go) of Lua 5.1's llex.c and LuaJIT's lj_lex.c, the parser
+(parser.go) of Lua 5.1's lparser.c and LuaJIT's lj_parse.c, the model of
+Lua 5.1's register allocation (lua51regs.go) of lcode.c, and the model of
+LuaJIT's code generator (jitcode.go, by way of go-luascope below) of
+lj_parse.c and lj_bc.h. Both are under the MIT License, whose text is the
+one above, with these copyright lines:
+
+Copyright (C) 1994-2012 Lua.org, PUC-Rio.
+
+Copyright (C) 2005-2017 Mike Pall. All rights reserved.
+
+-------------------------------------------------------------------------------
 go-luascope (https://github.com/bigbes/go-luascope)
 
 third_party/gopher-lua/parse/strscan.go, the number scanner of the LuaJIT
