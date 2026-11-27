@@ -19,18 +19,24 @@ func mainLoop(L *LState, baseframe *callFrame) {
 	}
 
 	// go-moonscript patch: the current frame, its function's code and
-	// constants and its registers' base are kept in locals, reloaded after
-	// an opcode that may change them (one done by its jumpTable function).
+	// constants, its registers' base and its pc are kept in locals,
+	// reloaded after an opcode that may change them (one done by its
+	// jumpTable function). cf.Pc is set from pc before each instruction,
+	// for what reads it (errors, the debug library, the opcode functions).
 	reg := L.reg
 	cf := L.currentFrame
 	code, consts := cf.Fn.Proto.Code, cf.Fn.Proto.Constants
 	lbase := cf.LocalBase
+	pc := cf.Pc
 	for {
 		if L.hookMask&hookMaskTrace != 0 { // go-moonscript patch
+			cf.Pc = pc
 			traceExec(L, cf)
+			pc = cf.Pc
 		}
-		inst := code[cf.Pc]
-		cf.Pc++
+		inst := code[pc]
+		pc++
+		cf.Pc = pc
 		// go-moonscript patch: the common cases of the frequent opcodes are
 		// handled here, without the call through jumpTable; the others, and
 		// the other cases, go to the opcode's function.
@@ -136,7 +142,7 @@ func mainLoop(L *LState, baseframe *callFrame) {
 				}
 			}
 		case OP_JMP:
-			cf.Pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
+			pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
 			continue
 		case OP_EQ:
 			B := int(inst & 0x1ff)    //GETB
@@ -151,9 +157,9 @@ func mainLoop(L *LState, baseframe *callFrame) {
 				ret = equals(L, lhs, rhs, false)
 			}
 			if ret != (int(inst>>18)&0xff != 0) { //GETA
-				cf.Pc++
+				pc++
 			} else {
-				jmpNext(L, cf, code)
+				pc = jmpNext(L, code, pc)
 			}
 			continue
 		case OP_LT:
@@ -171,9 +177,9 @@ func mainLoop(L *LState, baseframe *callFrame) {
 				ret = lessThan(L, lhs, rhs)
 			}
 			if ret != (int(inst>>18)&0xff != 0) { //GETA
-				cf.Pc++
+				pc++
 			} else {
-				jmpNext(L, cf, code)
+				pc = jmpNext(L, code, pc)
 			}
 			continue
 		case OP_LE:
@@ -191,18 +197,18 @@ func mainLoop(L *LState, baseframe *callFrame) {
 				ret = lessEqual(L, lhs, rhs)
 			}
 			if ret != (int(inst>>18)&0xff != 0) { //GETA
-				cf.Pc++
+				pc++
 			} else {
-				jmpNext(L, cf, code)
+				pc = jmpNext(L, code, pc)
 			}
 			continue
 		case OP_TEST:
 			A := int(inst>>18) & 0xff //GETA
 			C := int(inst>>9) & 0x1ff //GETC
 			if LVAsBool(reg.Get(lbase+A)) == (C == 0) {
-				cf.Pc++
+				pc++
 			} else {
-				jmpNext(L, cf, code)
+				pc = jmpNext(L, code, pc)
 			}
 			continue
 		case OP_TESTSET:
@@ -211,9 +217,9 @@ func mainLoop(L *LState, baseframe *callFrame) {
 			C := int(inst>>9) & 0x1ff //GETC
 			if value := reg.Get(lbase + B); LVAsBool(value) != (C == 0) {
 				// +inline-call reg.Set lbase+A value
-				jmpNext(L, cf, code)
+				pc = jmpNext(L, code, pc)
 			} else {
-				cf.Pc++
+				pc++
 			}
 			continue
 		case OP_FORLOOP:
@@ -225,7 +231,7 @@ func mainLoop(L *LState, baseframe *callFrame) {
 						v := reg.alloc.LNumber2I(init) // one box for both registers
 						// +inline-call reg.Set RA v
 						if (step > 0 && init <= limit) || (step <= 0 && init >= limit) {
-							cf.Pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
+							pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
 							// +inline-call reg.Set RA+3 v
 						} else {
 							// +inline-call reg.SetTop RA+1
@@ -241,18 +247,20 @@ func mainLoop(L *LState, baseframe *callFrame) {
 		cf = L.currentFrame
 		code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
 		lbase = cf.LocalBase
+		pc = cf.Pc
 	}
 }
 
 // jmpNext does the JMP that follows a test that doesn't skip it, unless
 // there is a line or count hook to call for it (go-moonscript patch: one
 // dispatch for the two).
-func jmpNext(L *LState, cf *callFrame, code []uint32) {
+func jmpNext(L *LState, code []uint32, pc int) int {
 	if L.hookMask&hookMaskTrace == 0 {
-		if j := code[cf.Pc]; int(j>>26) == OP_JMP { //GETOPCODE
-			cf.Pc += 1 + int(j&0x3ffff) - opMaxArgSbx //GETSBX
+		if j := code[pc]; int(j>>26) == OP_JMP { //GETOPCODE
+			return pc + 1 + int(j&0x3ffff) - opMaxArgSbx //GETSBX
 		}
 	}
+	return pc
 }
 
 // rk is RK(idx) of an instruction of a function with constants consts and
