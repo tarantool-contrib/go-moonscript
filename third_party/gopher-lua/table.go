@@ -1,6 +1,9 @@
 package lua
 
-import "math/bits"
+import (
+	"math/bits"
+	"unsafe"
+)
 
 // go-moonscript patch: a table has the shape of a Lua 5.1 table (ltable.c):
 // an array part for the keys 1..len(array), which may hold nils, and a hash
@@ -74,9 +77,7 @@ func newLTable(acap int, hcap int) *LTable {
 		tb = &LTable{}
 		if acap > 0 {
 			tb.array = make([]LValue, acap)
-			for i := range tb.array {
-				tb.array[i] = LNil
-			}
+			fillNil(tb.array)
 		}
 	}
 	tb.Metatable = LNil
@@ -367,11 +368,7 @@ func (tb *LTable) resize(nasize, nhsize int) {
 	oldarray := tb.array
 	oldhash := tb.hash
 	if nasize != len(oldarray) {
-		tb.array = make([]LValue, nasize)
-		n := copy(tb.array, oldarray)
-		for i := n; i < nasize; i++ {
-			tb.array[i] = LNil
-		}
+		tb.array = resizedArray(oldarray, nasize)
 	}
 	tb.hash.init(nhsize)
 	for i := nasize; i < len(oldarray); i++ {
@@ -416,6 +413,39 @@ func (tb *LTable) resize(nasize, nhsize int) {
 	}
 }
 
+// resizedArray returns a new array part of n elements with the elements
+// of a, LNil past them. (go-moonscript patch: a make followed by a copy
+// from local to local is one makeslicecopy, whose write barrier shades
+// only the source; copy into the result of make shades the destination
+// too. The new elements are set with fillNil.)
+func resizedArray(a []LValue, n int) []LValue {
+	array := make([]LValue, n)
+	copy(array, a)
+	if len(a) < n {
+		fillNil(array[len(a):])
+	}
+	return array
+}
+
+// fillNil sets the elements of s, which are nil (zeroed memory), to LNil.
+// The two words of LNil are pointers out of the Go heap (an itab and
+// runtime.zerobase), and so are those of nil: the collector has nothing
+// to shade, and they are copied as plain words, without a write barrier.
+func fillNil(s []LValue) {
+	if len(s) < 8 {
+		for i := range s {
+			s[i] = LNil
+		}
+		return
+	}
+	w := unsafe.Slice((*uintptr)(unsafe.Pointer(&s[0])), 2*len(s))
+	nw := (*[2]uintptr)(unsafe.Pointer(&LNil))
+	w[0], w[1] = nw[0], nw[1]
+	for i := 2; i < len(w); i *= 2 {
+		copy(w[i:], w[:i])
+	}
+}
+
 // resizeArray makes the array part n elements long if it is shorter
 // (OP_SETLIST, luaH_resizearray).
 func (tb *LTable) resizeArray(n int) {
@@ -426,12 +456,7 @@ func (tb *LTable) resizeArray(n int) {
 		if n >= tableBigSlots {
 			tableReserve(n, 0) // go-moonscript patch
 		}
-		array := make([]LValue, n)
-		copy(array, tb.array)
-		for i := len(tb.array); i < n; i++ {
-			array[i] = LNil
-		}
-		tb.array = array
+		tb.array = resizedArray(tb.array, n)
 		return
 	}
 	tb.resize(n, len(tb.hash.nodes))
