@@ -23,6 +23,10 @@ type Chunk struct {
 	// Comments are the comments of the source in order, if the parser was
 	// asked for them (parse.Options.Comments).
 	Comments []Comment
+	// Tokens are the tokens of the source as written, trivia included, if
+	// the parser was asked for them (parse.Options.Tokens): their texts in
+	// order are the source.
+	Tokens Tokens
 	// Lines gives the lines and columns of the offsets of the source.
 	Lines *Lines
 }
@@ -36,6 +40,14 @@ func (c *Chunk) Pos(offset int) Pos {
 // of an element of the chunk (Lines.Positions).
 func (c *Chunk) Positions(n Element) (start, end Pos) {
 	return c.Lines.Positions(n.Span())
+}
+
+// TokenRange returns the indices in c.Tokens of the first and the last
+// token of an element of the chunk (Tokens.Range of its span), with the
+// trivia between them; the chunk must have its tokens. The tokens before
+// and after the element are c.Tokens[:first] and c.Tokens[last+1:].
+func (c *Chunk) TokenRange(n Element) (first, last int) {
+	return c.Tokens.Range(n.Span())
 }
 
 // Comment is a comment of the source.

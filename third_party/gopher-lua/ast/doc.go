@@ -85,6 +85,39 @@
 // lua5.1 skips running a file (parse.Options.Shebang), is no comment: it
 // is Chunk.Header.
 //
+// # Tokens
+//
+// parse.ParseChunk with parse.Options.Tokens keeps the tokens of the
+// source as written in Chunk.Tokens, and parse.Tokenize reads them without
+// parsing, from a source that need not parse, up to its first lexical
+// error. They are what a formatter, a minifier or a fix rewriting the
+// source work on: each token of the grammar (a keyword, an operator, a
+// name, a string or a number, ";"), each piece of trivia, then an empty
+// TokenEOF, so that the concatenation of their texts is the source, byte
+// for byte. A Lexeme is a TokenKind and a span, 12 bytes; a string's
+// quote style, a numeral's spelling and a comment's brackets are in its
+// text, src[t.Span().Start:t.Span().End].
+//
+// Trivia are tokens of their own (TokenHeader, TokenWhitespace,
+// TokenNewline, TokenComment), not lists attached to the tokens of the
+// grammar: the list is flat, and an offset finds its token by binary
+// search. A run of white space within a line is one token, each line
+// break one ("\r\n" is one, as the lexer counts lines), a comment one
+// (without the line break that ends a short one). Which token a comment
+// belongs to is a policy that tools differ on (the statement before it if
+// on its line, the next one if above it, none after a blank line), and it
+// can be read off the tokens: a comment on the line of the token before
+// it has no TokenNewline between them, a blank line is two TokenNewline
+// with only white space between. A minifier keeps the tokens of the grammar
+// and drops or shrinks the trivia.
+//
+// Elements do not hold token indices: their spans start at the start of
+// their first token and end at the end of their last one, so
+// Chunk.TokenRange (Tokens.Range) finds the indices of both by binary
+// search, and Tokens.At the token at an offset. The tree is the same with
+// or without the tokens, and keeping them costs nothing when they are not
+// asked for.
+//
 // # Walking a tree
 //
 // Walk and Inspect traverse a tree in source order, as go/ast's do;
