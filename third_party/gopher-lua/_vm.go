@@ -253,6 +253,68 @@ func mainLoop(L *LState, baseframe *callFrame) {
 				pc++
 			}
 			continue
+		case OP_CALL:
+			// a call of a Lua function, with no "call" hook, whose frame fits
+			// in the current segment of the call stack
+			RA := lbase + int(inst>>18)&0xff //GETA
+			if fn, ok := reg.Get(RA).(*LFunction); ok && !fn.IsG && L.hookMask&MaskCall == 0 {
+				if s, ok := L.stack.(*autoGrowingCallFrameStack); ok {
+					if newcf := s.pushSlot(); newcf != nil {
+						B := int(inst & 0x1ff)    //GETB
+						C := int(inst>>9) & 0x1ff //GETC
+						nargs := B - 1
+						if B == 0 {
+							nargs = reg.Top() - (RA + 1)
+						}
+						newcf.Fn = fn
+						newcf.Parent = cf
+						newcf.Pc = 0
+						newcf.Base = RA
+						newcf.LocalBase = RA + 1
+						newcf.ReturnBase = RA
+						newcf.NArgs = nargs
+						newcf.NRet = C - 1
+						newcf.TailCall = 0
+						// +inline-call L.initCallFrame newcf
+						L.currentFrame = newcf
+						cf = newcf
+						code, consts = fn.Proto.Code, fn.Proto.Constants
+						lbase = newcf.LocalBase
+						pc = 0
+						continue
+					}
+				}
+			}
+		case OP_RETURN:
+			// a return, with no "return" hook, to a Lua function's frame in
+			// the same segment of the call stack, not the end of a coroutine
+			if L.hookMask&MaskReturn == 0 {
+				if s, ok := L.stack.(*autoGrowingCallFrameStack); ok && (L.Parent == nil || s.Sp() != 1) {
+					if popped, top := s.popFast(); top != nil {
+						RA := lbase + int(inst>>18)&0xff //GETA
+						B := int(inst & 0x1ff)           //GETB
+						// +inline-call L.closeUpvalues lbase
+						nret := B - 1
+						if B == 0 {
+							nret = reg.Top() - RA
+						}
+						n := cf.NRet
+						if n == MultRet {
+							n = nret
+						}
+						// +inline-call copyReturnValues L cf.ReturnBase RA n B
+						L.currentFrame = top
+						if baseframe == popped || top.Fn.IsG {
+							return
+						}
+						cf = top
+						code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
+						lbase = cf.LocalBase
+						pc = cf.Pc
+						continue
+					}
+				}
+			}
 		case OP_FORLOOP:
 			RA := lbase + int(inst>>18)&0xff //GETA
 			if init, ok1 := reg.Get(RA).(LNumber); ok1 {

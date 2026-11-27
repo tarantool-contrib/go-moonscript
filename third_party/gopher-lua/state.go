@@ -451,6 +451,19 @@ func (cs *autoGrowingCallFrameStack) pushFast(cf *callFrame) *callFrame {
 	return f
 }
 
+// pushSlot pushes a frame if the current segment has room for it,
+// returning it with only its Idx set, otherwise nil (go-moonscript patch:
+// mainLoop's call path sets the fields, without copying a frame).
+func (cs *autoGrowingCallFrameStack) pushSlot() *callFrame {
+	if cs.segSp >= FramesPerSegment {
+		return nil
+	}
+	f := &cs.segments[cs.segIdx].array[cs.segSp]
+	f.Idx = int(cs.segSp) + FramesPerSegment*int(cs.segIdx)
+	cs.segSp++
+	return f
+}
+
 // popFast pops the top frame if the frame below it is in the same segment,
 // returning both, otherwise nil, nil (go-moonscript patch: the return path
 // without the interface calls of Pop and Last).

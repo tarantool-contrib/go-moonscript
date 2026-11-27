@@ -504,6 +504,281 @@ func mainLoop(L *LState, baseframe *callFrame) {
 				pc++
 			}
 			continue
+		case OP_CALL:
+			// a call of a Lua function, with no "call" hook, whose frame fits
+			// in the current segment of the call stack
+			RA := lbase + int(inst>>18)&0xff //GETA
+			if fn, ok := reg.Get(RA).(*LFunction); ok && !fn.IsG && L.hookMask&MaskCall == 0 {
+				if s, ok := L.stack.(*autoGrowingCallFrameStack); ok {
+					if newcf := s.pushSlot(); newcf != nil {
+						B := int(inst & 0x1ff)    //GETB
+						C := int(inst>>9) & 0x1ff //GETC
+						nargs := B - 1
+						if B == 0 {
+							nargs = reg.Top() - (RA + 1)
+						}
+						newcf.Fn = fn
+						newcf.Parent = cf
+						newcf.Pc = 0
+						newcf.Base = RA
+						newcf.LocalBase = RA + 1
+						newcf.ReturnBase = RA
+						newcf.NArgs = nargs
+						newcf.NRet = C - 1
+						newcf.TailCall = 0
+						// this section is inlined by go-inline
+						// source function is 'func (ls *LState) initCallFrame(cf *callFrame) ' in '_state.go'
+						{
+							ls := L
+							cf := newcf
+							if cf.Fn.IsG {
+								ls.reg.SetTop(cf.LocalBase + cf.NArgs)
+							} else {
+								proto := cf.Fn.Proto
+								nargs := cf.NArgs
+								np := int(proto.NumParameters)
+								if nargs < np {
+									// default any missing arguments to nil
+									newSize := cf.LocalBase + np
+									// this section is inlined by go-inline
+									// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+									{
+										rg := ls.reg
+										requiredSize := newSize
+										if requiredSize > cap(rg.array) {
+											rg.resize(requiredSize)
+										}
+									}
+									for i := nargs; i < np; i++ {
+										ls.reg.array[cf.LocalBase+i] = LNil
+									}
+									nargs = np
+									ls.reg.top = newSize
+								}
+
+								if (proto.IsVarArg & VarArgIsVarArg) == 0 {
+									if nargs < int(proto.NumUsedRegisters) {
+										nargs = int(proto.NumUsedRegisters)
+									}
+									newSize := cf.LocalBase + nargs
+									// this section is inlined by go-inline
+									// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+									{
+										rg := ls.reg
+										requiredSize := newSize
+										if requiredSize > cap(rg.array) {
+											rg.resize(requiredSize)
+										}
+									}
+									for i := np; i < nargs; i++ {
+										ls.reg.array[cf.LocalBase+i] = LNil
+									}
+									ls.reg.top = cf.LocalBase + int(proto.NumUsedRegisters)
+								} else {
+									/* swap vararg positions:
+											   closure
+											   namedparam1 <- lbase
+											   namedparam2
+											   vararg1
+											   vararg2
+
+									           TO
+
+											   closure
+											   nil
+											   nil
+											   vararg1
+											   vararg2
+											   namedparam1 <- lbase
+											   namedparam2
+									*/
+									nvarargs := nargs - np
+									if nvarargs < 0 {
+										nvarargs = 0
+									}
+
+									ls.reg.SetTop(cf.LocalBase + nargs + np)
+									for i := 0; i < np; i++ {
+										//ls.reg.Set(cf.LocalBase+nargs+i, ls.reg.Get(cf.LocalBase+i))
+										ls.reg.array[cf.LocalBase+nargs+i] = ls.reg.array[cf.LocalBase+i]
+										//ls.reg.Set(cf.LocalBase+i, LNil)
+										ls.reg.array[cf.LocalBase+i] = LNil
+									}
+
+									if CompatVarArg {
+										ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
+										if (proto.IsVarArg & VarArgNeedsArg) != 0 {
+											argtb := newLTable(nvarargs, 1) // go-moonscript patch: as luaH_new(L, nvar, 1)
+											for i := 0; i < nvarargs; i++ {
+												argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
+											}
+											argtb.RawSetString("n", LNumber(nvarargs))
+											//ls.reg.Set(cf.LocalBase+nargs+np, argtb)
+											ls.reg.array[cf.LocalBase+nargs+np] = argtb
+										} else {
+											ls.reg.array[cf.LocalBase+nargs+np] = LNil
+										}
+									}
+									cf.LocalBase += nargs
+									maxreg := cf.LocalBase + int(proto.NumUsedRegisters)
+									ls.reg.SetTop(maxreg)
+								}
+							}
+						}
+						L.currentFrame = newcf
+						cf = newcf
+						code, consts = fn.Proto.Code, fn.Proto.Constants
+						lbase = newcf.LocalBase
+						pc = 0
+						continue
+					}
+				}
+			}
+		case OP_RETURN:
+			// a return, with no "return" hook, to a Lua function's frame in
+			// the same segment of the call stack, not the end of a coroutine
+			if L.hookMask&MaskReturn == 0 {
+				if s, ok := L.stack.(*autoGrowingCallFrameStack); ok && (L.Parent == nil || s.Sp() != 1) {
+					if popped, top := s.popFast(); top != nil {
+						RA := lbase + int(inst>>18)&0xff //GETA
+						B := int(inst & 0x1ff)           //GETB
+						// this section is inlined by go-inline
+						// source function is 'func (ls *LState) closeUpvalues(idx int) ' in '_state.go'
+						{
+							ls := L
+							idx := lbase
+							for uv := ls.uvcache; uv != nil && uv.index >= idx; uv = ls.uvcache {
+								ls.uvcache = uv.next
+								uv.next = nil
+								uv.Close()
+							}
+						}
+						nret := B - 1
+						if B == 0 {
+							nret = reg.Top() - RA
+						}
+						n := cf.NRet
+						if n == MultRet {
+							n = nret
+						}
+						// this section is inlined by go-inline
+						// source function is 'func copyReturnValues(L *LState, regv, start, n, b int) ' in '_vm.go'
+						{
+							regv := cf.ReturnBase
+							start := RA
+							b := B
+							if b == 1 {
+								// this section is inlined by go-inline
+								// source function is 'func (rg *registry) FillNil(regm, n int) ' in '_state.go'
+								{
+									rg := L.reg
+									regm := regv
+									newSize := regm + n
+									// this section is inlined by go-inline
+									// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+									{
+										requiredSize := newSize
+										if requiredSize > cap(rg.array) {
+											rg.resize(requiredSize)
+										}
+									}
+									for i := 0; i < n; i++ {
+										rg.array[regm+i] = LNil
+									}
+									// values beyond top don't need to be valid LValues, so setting them to nil is fine
+									// setting them to nil rather than LNil lets us invoke the golang memclr opto
+									oldtop := rg.top
+									rg.top = regm + n
+									if rg.top < oldtop {
+										nilRange := rg.array[rg.top:oldtop]
+										for i := range nilRange {
+											nilRange[i] = nil
+										}
+									}
+								}
+							} else {
+								// this section is inlined by go-inline
+								// source function is 'func (rg *registry) CopyRange(regv, start, limit, n int) ' in '_state.go'
+								{
+									rg := L.reg
+									limit := -1
+									newSize := regv + n
+									// this section is inlined by go-inline
+									// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+									{
+										requiredSize := newSize
+										if requiredSize > cap(rg.array) {
+											rg.resize(requiredSize)
+										}
+									}
+									if limit == -1 || limit > rg.top {
+										limit = rg.top
+									}
+									for i := 0; i < n; i++ {
+										srcIdx := start + i
+										if srcIdx >= limit || srcIdx < 0 {
+											rg.array[regv+i] = LNil
+										} else {
+											rg.array[regv+i] = rg.array[srcIdx]
+										}
+									}
+
+									// values beyond top don't need to be valid LValues, so setting them to nil is fine
+									// setting them to nil rather than LNil lets us invoke the golang memclr opto
+									oldtop := rg.top
+									rg.top = regv + n
+									if rg.top < oldtop {
+										nilRange := rg.array[rg.top:oldtop]
+										for i := range nilRange {
+											nilRange[i] = nil
+										}
+									}
+								}
+								if b > 1 && n > (b-1) {
+									// this section is inlined by go-inline
+									// source function is 'func (rg *registry) FillNil(regm, n int) ' in '_state.go'
+									{
+										rg := L.reg
+										regm := regv + b - 1
+										n := n - (b - 1)
+										newSize := regm + n
+										// this section is inlined by go-inline
+										// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
+										{
+											requiredSize := newSize
+											if requiredSize > cap(rg.array) {
+												rg.resize(requiredSize)
+											}
+										}
+										for i := 0; i < n; i++ {
+											rg.array[regm+i] = LNil
+										}
+										// values beyond top don't need to be valid LValues, so setting them to nil is fine
+										// setting them to nil rather than LNil lets us invoke the golang memclr opto
+										oldtop := rg.top
+										rg.top = regm + n
+										if rg.top < oldtop {
+											nilRange := rg.array[rg.top:oldtop]
+											for i := range nilRange {
+												nilRange[i] = nil
+											}
+										}
+									}
+								}
+							}
+						}
+						L.currentFrame = top
+						if baseframe == popped || top.Fn.IsG {
+							return
+						}
+						cf = top
+						code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
+						lbase = cf.LocalBase
+						pc = cf.Pc
+						continue
+					}
+				}
+			}
 		case OP_FORLOOP:
 			RA := lbase + int(inst>>18)&0xff //GETA
 			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
