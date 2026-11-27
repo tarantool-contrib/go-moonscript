@@ -254,6 +254,30 @@ that change.
       LState.Load from L.Dialect() via parse.ParseDialect
       (_state.go/state.go); a parse error with no token is reported as
       "<chunk>:<line>: <message>": go-moonscript
+    - parse/parser.go, compile.go, ast/misc.go: no implicit "arg" in
+      vararg functions under DialectLuaJIT (ast.ParList.NoArg; no local,
+      no table), as in LuaJIT 2.1; DialectLua51 keeps LUA_COMPAT_VARARG's:
+      go-moonscript
+    - parse/parser.go: under DialectLuaJIT a goto or break right after a
+      block whose locals are upvalues has the line of that block's UCLO,
+      into which bcemit_jmp merges its jump ("undefined label", "no loop
+      to break", "jumps into the scope of local"): go-moonscript
+    - parse/parser.go, parse/lexer.go, _state.go/state.go: Lua 5.1's limit
+      of 32767 local variable records per function ("too many local
+      variables", raised without a position: parse.NoLine, which
+      LState.Load keeps as it is): go-moonscript
+    - parse/lexer.go: under DialectLua51 check_next takes a NUL byte for
+      any character of its set (strchr finds the terminator) and a numeral
+      is converted up to a NUL ("x = 1\0garbage", "x = a.\0b" load as in
+      lua5.1): go-moonscript
+    - parse/lexer.go, luajitlib.go, auxlib.go: under DialectLuaJIT bytecode
+      after a "#" line or a UTF-8 BOM is refused with "cannot load
+      malformed bytecode" (lj_lex_setup), before the mode check of load
+      and loadfile (JITLoadModeError); loadfile and LState.LoadFile leave
+      the "#" line to the parser: go-moonscript
+    - testdata/compat/parse_vararg_arg, parse_goto_line, parse_locvars_limit,
+      parse_nul_byte, parse_shebang_bytecode (lua5.1 refs for .lua, luajit
+      refs for .jit.lua): go-moonscript
     - compile.go: funcContext.ConstIndex looks constants up in a map instead
       of a linear scan (compiling verybig.lua: 2m31s -> 0.69s): go-
       moonscript
@@ -1329,7 +1353,7 @@ regenerates the diff below; this header is edited by hand.
  	if err != nil {
 +		// go-moonscript patch: an error near no token (a limit) is reported
 +		// like the compiler's limit errors, as "<chunk>:<line>: <message>"
-+		if pe, ok := err.(*parse.Error); ok && pe.Token == "" {
++		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
 +			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: name}
 +		}
  		return nil, newApiErrorE(ApiErrorSyntax, err)
@@ -2789,6 +2813,20 @@ regenerates the diff below; this header is edited by hand.
  }
  
  type LogicalOpExpr struct {
+--- a/ast/misc.go
++++ b/ast/misc.go
+@@ -7,7 +7,10 @@
+ 
+ type ParList struct {
+ 	HasVargs bool
+-	Names    []string
++	// NoArg: a vararg function without Lua 5.1's implicit local "arg"
++	// (LUA_COMPAT_VARARG), as in LuaJIT (go-moonscript patch)
++	NoArg bool
++	Names []string
+ }
+ 
+ type FuncName struct {
 --- a/ast/stmt.go
 +++ b/ast/stmt.go
 @@ -23,6 +23,9 @@
@@ -2967,7 +3005,18 @@ regenerates the diff below; this header is edited by hand.
  /* }}} */
  
  /* metatable operations {{{ */
-@@ -423,6 +475,8 @@
+@@ -368,7 +420,9 @@
+ 	if err != nil && err != io.EOF {
+ 		return nil, newApiErrorE(ApiErrorFile, err)
+ 	}
+-	if c == byte('#') {
++	// go-moonscript patch: LuaJIT's parser skips the "#" line itself (and
++	// refuses bytecode after it)
++	if c == byte('#') && ls.Dialect() != DialectLuaJIT {
+ 		// Unix exec. file?
+ 		// skip first line
+ 		_, err, _ = readBufioLine(reader)
+@@ -423,6 +477,8 @@
  		ls.Push(lv)
  		ls.Call(1, 1)
  		return ls.reg.Pop()
@@ -4836,7 +4885,13 @@ regenerates the diff below; this header is edited by hand.
  	if len(funcexpr.ParList.Names) > maxRegisters {
  		raiseCompileError(context, context.Proto.LineDefined, "register overflow")
  	}
-@@ -1323,19 +1830,36 @@
+@@ -1319,23 +1826,41 @@
+ 		context.RegisterLocalVar(name)
+ 	}
+ 	if funcexpr.ParList.HasVargs {
+-		if CompatVarArg {
++		// go-moonscript patch: LuaJIT has no implicit arg (ParList.NoArg)
++		if CompatVarArg && !funcexpr.ParList.NoArg {
  			context.Proto.IsVarArg = VarArgHasArg | VarArgNeedsArg
  			if context.Parent != nil {
  				context.RegisterLocalVar("arg")
@@ -4875,7 +4930,7 @@ regenerates the diff below; this header is edited by hand.
  	context.Proto.NumUpvalues = uint8(len(context.Proto.DbgUpvalues))
  	for _, clv := range context.Proto.Constants {
  		sv := ""
-@@ -1343,6 +1867,7 @@
+@@ -1343,6 +1868,7 @@
  			sv = string(slv)
  		}
  		context.Proto.stringConstants = append(context.Proto.stringConstants, sv)
@@ -4883,7 +4938,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	patchCode(context)
  } // }}}
-@@ -1357,12 +1882,19 @@
+@@ -1357,12 +1883,19 @@
  	*/
  	tablereg := reg
  	reg++
@@ -4904,7 +4959,7 @@ regenerates the diff below; this header is edited by hand.
  	for i, field := range ex.Fields {
  		islast := i == len(ex.Fields)-1
  		if field.Key == nil {
-@@ -1370,10 +1902,15 @@
+@@ -1370,10 +1903,15 @@
  				reg += compileExpr(context, reg, field.Value, ecnone(-2))
  				lastvararg = true
  			} else {
@@ -4921,7 +4976,7 @@ regenerates the diff below; this header is edited by hand.
  			regorg := reg
  			b := reg
  			compileExprWithKMVPropagation(context, field.Key, &reg, &b)
-@@ -1383,43 +1920,61 @@
+@@ -1383,43 +1921,61 @@
  			if _, ok := field.Key.(*ast.StringExpr); ok {
  				opcode = OP_SETTABLEKS
  			}
@@ -5001,7 +5056,7 @@ regenerates the diff below; this header is edited by hand.
  	if ex, ok := exp.(*constLValueExpr); ok {
  		exp.SetLine(sline(expr))
  		compileExpr(context, reg, ex, ec)
-@@ -1477,7 +2032,7 @@
+@@ -1477,7 +2033,7 @@
  	var operandexpr ast.Expr
  	switch ex := expr.(type) {
  	case *ast.UnaryMinusOpExpr:
@@ -5010,7 +5065,7 @@ regenerates the diff below; this header is edited by hand.
  		if lvexpr, ok := exp.(*constLValueExpr); ok {
  			exp.SetLine(sline(expr))
  			compileExpr(context, reg, lvexpr, ec)
-@@ -1510,6 +2065,8 @@
+@@ -1510,6 +2066,8 @@
  } // }}}
  
  func compileRelationalOpExprAux(context *funcContext, reg int, expr *ast.RelationalOpExpr, flip int, label int) { // {{{
@@ -5019,7 +5074,7 @@ regenerates the diff below; this header is edited by hand.
  	code := context.Code
  	b := reg
  	compileExprWithKMVPropagation(context, expr.Lhs, &reg, &b)
-@@ -1517,19 +2074,19 @@
+@@ -1517,19 +2075,19 @@
  	compileExprWithKMVPropagation(context, expr.Rhs, &reg, &c)
  	switch expr.Operator {
  	case "<":
@@ -5046,7 +5101,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileRelationalOpExpr(context *funcContext, reg int, expr *ast.RelationalOpExpr, ec *expcontext) { // {{{
-@@ -1537,9 +2094,9 @@
+@@ -1537,9 +2095,9 @@
  	code := context.Code
  	jumplabel := context.NewLabel()
  	compileRelationalOpExprAux(context, reg, expr, 1, jumplabel)
@@ -5058,7 +5113,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileLogicalOpExpr(context *funcContext, reg int, expr *ast.LogicalOpExpr, ec *expcontext) { // {{{
-@@ -1574,6 +2131,8 @@
+@@ -1574,6 +2132,8 @@
  } // }}}
  
  func compileLogicalOpExprAux(context *funcContext, reg int, expr ast.Expr, ec *expcontext, thenlabel, elselabel int, hasnextcond bool, lb *lblabels) { // {{{
@@ -5067,7 +5122,7 @@ regenerates the diff below; this header is edited by hand.
  	// TODO folding constants?
  	code := context.Code
  	flip := 0
-@@ -1657,24 +2216,27 @@
+@@ -1657,24 +2217,27 @@
  		if sreg == b {
  			op = OP_TEST
  		}
@@ -5101,7 +5156,7 @@ regenerates the diff below; this header is edited by hand.
  } // }}}
  
  func compileFuncCallExpr(context *funcContext, reg int, expr *ast.FuncCallExpr, ec *expcontext) int { // {{{
-@@ -1705,10 +2267,16 @@
+@@ -1705,10 +2268,16 @@
  		name = string(expr.Method)
  	}
  
@@ -5118,7 +5173,7 @@ regenerates the diff below; this header is edited by hand.
  		} else {
  			reg += compileExpr(context, reg, ar, ecnone(0))
  		}
-@@ -1717,11 +2285,17 @@
+@@ -1717,11 +2286,17 @@
  	if islastvararg {
  		b = 0
  	}
@@ -5138,7 +5193,7 @@ regenerates the diff below; this header is edited by hand.
  		return 1
  	}
  	if context.RegTop() > (funcreg+2+ec.varargopt) || ec.varargopt < -1 {
-@@ -1775,17 +2349,26 @@
+@@ -1775,17 +2350,26 @@
  	}
  	moven := 0
  	code := context.Code.List()
@@ -5166,7 +5221,7 @@ regenerates the diff below; this header is edited by hand.
  			/* nothing to do */
  		case OP_CALL:
  			if reg := opGetArgA(inst) + opGetArgC(inst) - 2; reg > maxreg {
-@@ -1816,6 +2399,11 @@
+@@ -1816,6 +2400,11 @@
  				}
  				distance = d
  				count++
@@ -5178,7 +5233,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			if distance == 0 {
  				context.Code.SetOpCode(pc, OP_NOP)
-@@ -1827,6 +2415,9 @@
+@@ -1827,6 +2416,9 @@
  				maxreg = reg
  			}
  		}
@@ -5188,7 +5243,7 @@ regenerates the diff below; this header is edited by hand.
  
  		// bulk move optimization(reducing op dipatch costs)
  		if curop == OP_MOVE {
-@@ -1838,10 +2429,17 @@
+@@ -1838,10 +2430,17 @@
  			}
  			moven = 0
  		}
@@ -11728,7 +11783,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/luajitlib.go
 +++ b/luajitlib.go
-@@ -0,0 +1,961 @@
+@@ -0,0 +1,980 @@
 +package lua
 +
 +// go-moonscript patch: the library side of DialectLuaJIT, LuaJIT 2.1 as the
@@ -11953,8 +12008,13 @@ regenerates the diff below; this header is edited by hand.
 +
 +// JITLoadModeError is LuaJIT's check of the mode argument of load and
 +// loadfile: the message for a chunk the mode does not allow, "" if it is
-+// allowed (hasMode false: no mode given, anything goes).
++// allowed (hasMode false: no mode given, anything goes). Bytecode after a
++// "#" line or a UTF-8 BOM is refused before the mode is looked at
++// (lj_lex_setup), whatever the mode; the parser refuses it too.
 +func JITLoadModeError(code, mode string, hasMode bool) string {
++	if hasMode && jitHeaderBytecode(code) {
++		return "cannot load malformed bytecode"
++	}
 +	kind := byte('t')
 +	if JITIsBinaryChunk(code) {
 +		kind = 'b'
@@ -11963,6 +12023,25 @@ regenerates the diff below; this header is edited by hand.
 +		return "attempt to load chunk with wrong mode"
 +	}
 +	return ""
++}
++
++// jitHeaderBytecode reports whether code starts with a UTF-8 BOM or a "#"
++// line, or both, and bytecode after them, as lj_lex_setup reads them.
++func jitHeaderBytecode(code string) bool {
++	rest := strings.TrimPrefix(code, "\xef\xbb\xbf")
++	if strings.HasPrefix(rest, "#") {
++		i := strings.IndexAny(rest, "\n\r")
++		if i < 0 {
++			return false
++		}
++		rest = rest[i:]
++		if len(rest) > 1 && rest[1] != rest[0] && (rest[1] == '\n' || rest[1] == '\r') {
++			rest = rest[2:] // "\r\n" or "\n\r"
++		} else {
++			rest = rest[1:]
++		}
++	}
++	return len(rest) < len(code) && JITIsBinaryChunk(rest)
 +}
 +
 +// jitLoadFile is LuaJIT 2.1's loadfile(filename [, mode [, env]]).
@@ -11991,14 +12070,9 @@ regenerates the diff below; this header is edited by hand.
 +		L.Push(LString("cannot open " + chunkname + ": " + msg))
 +		return 2
 +	}
++	// go-moonscript patch: the parser skips a first "#" line (lj_lex_setup;
++	// luaL_loadfilex reads the file as it is), and refuses bytecode after it
 +	src := string(code)
-+	if strings.HasPrefix(src, "#") { // the first line is skipped, as luaL_loadfile does
-+		if i := strings.IndexByte(src, '\n'); i >= 0 {
-+			src = src[i:]
-+		} else {
-+			src = ""
-+		}
-+	}
 +	if msg := JITLoadModeError(src, mode, hasMode); msg != "" {
 +		L.Push(LNil)
 +		L.Push(LString(msg))
@@ -13679,7 +13753,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/parse/lexer.go
 +++ b/parse/lexer.go
-@@ -1,549 +1,742 @@
+@@ -1,549 +1,771 @@
  package parse
  
 +// go-moonscript patch: the lexer is Lua 5.1's llex.c (Lua51) or LuaJIT
@@ -13729,6 +13803,12 @@ regenerates the diff below; this header is edited by hand.
  	Token   string
  }
  
++// NoLine is the line of an error without a position (Error gives the
++// message alone): Lua 5.1's luaG_runerror in the parser, which adds none
++// as the loader is a C function, and LuaJIT's error for bytecode after a
++// "#" line or a BOM.
++const NoLine = 0
++
 +// Error formats the error as Lua does, with the chunk name verbatim:
 +// "<chunk>:<line>: <message> near '<token>'".
  func (e *Error) Error() string {
@@ -13737,9 +13817,12 @@ regenerates the diff below; this header is edited by hand.
 -		return fmt.Sprintf("%v at EOF:   %s\n", pos.Source, e.Message)
 -	} else {
 -		return fmt.Sprintf("%v line:%d(column:%d) near '%v':   %s\n", pos.Source, pos.Line, pos.Column, e.Token, e.Message)
++	if e.Pos.Line == NoLine {
++		return e.Message
+ 	}
 +	if e.Token == "" {
 +		return fmt.Sprintf("%s:%d: %s", e.Pos.Source, e.Pos.Line, e.Message)
- 	}
++	}
 +	return fmt.Sprintf("%s:%d: %s near '%s'", e.Pos.Source, e.Pos.Line, e.Message, e.Token)
  }
  
@@ -13829,9 +13912,11 @@ regenerates the diff below; this header is edited by hand.
 +	ls.ahead.typ = tkEOS
 +	ls.next()
 +	if dialect == LuaJIT { // lj_lex_setup skips a UTF-8 BOM and a "#" line
++		header := false
 +		if ls.current == 0xef && len(ls.src) >= ls.pos+2 && ls.src[ls.pos] == 0xbb && ls.src[ls.pos+1] == 0xbf {
 +			ls.pos += 2
 +			ls.next()
++			header = true
 +		}
 +		if ls.current == '#' {
 +			for {
@@ -13844,6 +13929,11 @@ regenerates the diff below; this header is edited by hand.
 +				}
 +			}
 +			ls.inclinenumber()
++			header = true
++		}
++		// bytecode after a header is refused, the chunk name not echoed
++		if header && ls.current == 0x1b {
++			ls.runError("cannot load malformed bytecode")
 +		}
 +	}
 +	return ls
@@ -13893,13 +13983,13 @@ regenerates the diff below; this header is edited by hand.
 +	ls.save(ls.current)
 +	ls.next()
 +}
-+
-+func (ls *lexer) currIsNewline() bool { return ls.current == '\n' || ls.current == '\r' }
  
 -func (sc *Scanner) readNext() int {
 -	ch, err := sc.reader.ReadByte()
 -	if err == io.EOF {
 -		return EOF
++func (ls *lexer) currIsNewline() bool { return ls.current == '\n' || ls.current == '\r' }
++
 +func (ls *lexer) inclinenumber() {
 +	old := ls.current
 +	ls.next() // skip '\n' or '\r'
@@ -13919,8 +14009,13 @@ regenerates the diff below; this header is edited by hand.
 -	next := sc.Peek()
 -	if ch == '\n' && next == '\r' || ch == '\r' && next == '\n' {
 -		sc.reader.ReadByte()
++// checkNext is check_next: Lua 5.1's looks the character up with strchr,
++// which finds a NUL byte too (the set's terminator), so a NUL is taken
++// for any character of the set: "1\0x" is the numeral 1 (the conversion
++// stops at the NUL) and "a.\0b" is a .. b. LuaJIT compares characters.
 +func (ls *lexer) checkNext(set string) bool {
-+	if ls.current < 0 || !strings.ContainsRune(set, rune(ls.current)) {
++	nul := ls.current == 0 && ls.dialect == Lua51
++	if !nul && (ls.current < 0 || !strings.ContainsRune(set, rune(ls.current))) {
 +		return false
  	}
 +	ls.saveNext()
@@ -13998,6 +14093,11 @@ regenerates the diff below; this header is edited by hand.
 -			return nil
 -		}
 -	}
++// runError is an error without a position (NoLine).
++func (ls *lexer) runError(msg string) {
++	panic(&Error{Pos: ast.Position{Source: ls.source, Line: NoLine}, Message: msg})
++}
++
 +// lexError is luaX_lexerror / lj_lex_error.
 +func (ls *lexer) lexError(msg string, tok int) { ls.errorAt(ls.linenumber, msg, tok) }
 +
@@ -14035,9 +14135,12 @@ regenerates the diff below; this header is edited by hand.
 -		writeChar(buf, sc.Next())
 +	for isAlnum(ls.current) || ls.current == '_' {
 +		ls.saveNext()
++	}
++	s := string(ls.buff)
++	if i := strings.IndexByte(s, 0); i >= 0 {
++		s = s[:i] // luaO_str2d converts a C string
  	}
 -	return nil
-+	s := string(ls.buff)
 +	if !isNumeral(s) {
 +		ls.lexError("malformed number", tkNumber)
 +	}
@@ -14110,13 +14213,6 @@ regenerates the diff below; this header is edited by hand.
 -	for ch != quote {
 -		if ch == '\n' || ch == '\r' || ch < 0 {
 -			return sc.Error(buf.String(), "unterminated string")
--		}
--		if ch == '\\' {
--			if err := sc.scanEscape(ch, buf); err != nil {
--				return err
--			}
--		} else {
--			writeChar(buf, ch)
 +// lexNumber is LuaJIT's lex_number: the numeral, as lj_strscan reads it with
 +// the FFI (scanNumeral). It returns the token's value, the number formatted
 +// to convert back exactly (by parseNumber) or the numeral of a cdata one
@@ -14129,6 +14225,13 @@ regenerates the diff below; this header is edited by hand.
 +		if ls.current|0x20 == 'x' {
 +			xp = 'p'
  		}
+-		if ch == '\\' {
+-			if err := sc.scanEscape(ch, buf); err != nil {
+-				return err
+-			}
+-		} else {
+-			writeChar(buf, ch)
+-		}
 -		ch = sc.Next()
  	}
 -	return nil
@@ -14686,7 +14789,8 @@ regenerates the diff below; this header is edited by hand.
  			} else {
 -				tok.Type = ch
 -				tok.Str = string(rune(ch))
--			}
++				tok.sem = ls.readNumeral()
+ 			}
 -		case '+', '*', '/', '%', '^', '#', '(', ')', '{', '}', ']', ';', ',':
 -			tok.Type = ch
 -			tok.Str = string(rune(ch))
@@ -14783,8 +14887,7 @@ regenerates the diff below; this header is edited by hand.
 -		for i := 0; i < tt.NumField(); i++ {
 -			if strings.Index(tt.Field(i).Name, "Base") > -1 {
 -				continue
-+				tok.sem = ls.readNumeral()
- 			}
+-			}
 -			indicies = append(indicies, i)
 +			return tkNumber
 +		case EOF:
@@ -14861,7 +14964,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/parse/parser.go
 +++ b/parse/parser.go
-@@ -1,1385 +1,1057 @@
+@@ -1,1385 +1,1111 @@
 -// Code generated by goyacc -o parser.go parser.go.y. DO NOT EDIT.
 -
 -//line parser.go.y:2
@@ -15306,6 +15409,7 @@ regenerates the diff below; this header is edited by hand.
 +	vstart   int
 +	hasBreak bool
 +	hasGola  bool
++	hasUpval bool // FSCOPE_UPVAL: a local of the block is an upvalue
 +}
 +
 +// gola is a goto or label of LuaJIT's (lj_parse.c's VarInfo): the number
@@ -15327,9 +15431,15 @@ regenerates the diff below; this header is edited by hand.
 +	vararg  bool
 +	actvar  []varInfo // the active local variables
 +	pending []varInfo // declared, not active yet
++	nlocvar int       // Lua 5.1: the local variable records (f->locvars)
 +	upvals  []int     // variable ids
 +	bl      *blockScope
 +	vstack  []gola // LuaJIT
++	// ucloLine is LuaJIT's code position: when the last instruction is
++	// the UCLO that ended a block with upvalues (nothing emitted since),
++	// its line, else 0. bcemit_jmp merges the jump of a goto or break
++	// into that UCLO, so the goto has its line in errors.
++	ucloLine int
 +}
 +
 +type parser struct {
@@ -15367,47 +15477,35 @@ regenerates the diff below; this header is edited by hand.
  }
  
 -const yyFlag = -1000
--
++func (p *parser) testNext(c int) bool {
++	if p.ls.t.typ == c {
++		p.next()
++		return true
++	}
++	return false
++}
+ 
 -func yyTokname(c int) string {
 -	if c >= 1 && c-1 < len(yyToknames) {
 -		if yyToknames[c-1] != "" {
 -			return yyToknames[c-1]
 -		}
-+func (p *parser) testNext(c int) bool {
-+	if p.ls.t.typ == c {
-+		p.next()
-+		return true
++func (p *parser) check(c int) {
++	if p.ls.t.typ != c {
++		p.errorExpected(c)
  	}
 -	return __yyfmt__.Sprintf("tok-%v", c)
-+	return false
  }
  
 -func yyStatname(s int) string {
 -	if s >= 0 && s < len(yyStatenames) {
 -		if yyStatenames[s] != "" {
 -			return yyStatenames[s]
--		}
-+func (p *parser) check(c int) {
-+	if p.ls.t.typ != c {
-+		p.errorExpected(c)
- 	}
--	return __yyfmt__.Sprintf("state-%v", s)
- }
- 
--func yyErrorMessage(state, lookAhead int) string {
--	const TOKSTART = 4
--
--	if !yyErrorVerbose {
--		return "syntax error"
--	}
 +func (p *parser) checkNext(c int) {
 +	p.check(c)
 +	p.next()
 +}
- 
--	for _, e := range yyErrorMessages {
--		if e.state == state && e.token == lookAhead {
--			return "syntax error: " + e.msg
++
 +func (p *parser) checkMatch(what, who, where int) {
 +	if !p.testNext(what) {
 +		if where == p.ls.linenumber {
@@ -15416,6 +15514,40 @@ regenerates the diff below; this header is edited by hand.
 +		p.ls.syntaxError(fmt.Sprintf("'%s' expected (to close '%s' at line %d)",
 +			p.ls.token2str(what), p.ls.token2str(who), where))
  	}
+-	return __yyfmt__.Sprintf("state-%v", s)
+ }
+ 
+-func yyErrorMessage(state, lookAhead int) string {
+-	const TOKSTART = 4
++// isName: LuaJIT's goto is a name where a name is expected.
++func (p *parser) isName() bool {
++	return p.ls.t.typ == tkName || p.ls.t.typ == tkGoto
++}
+ 
+-	if !yyErrorVerbose {
+-		return "syntax error"
++// strCheckName is str_checkname / lex_str: the name and its line.
++func (p *parser) strCheckName() (string, int) {
++	if !p.isName() {
++		p.errorExpected(tkName)
+ 	}
++	name, line := p.ls.t.sem, p.ls.t.line
++	p.next()
++	return name, line
++}
+ 
+-	for _, e := range yyErrorMessages {
+-		if e.state == state && e.token == lookAhead {
+-			return "syntax error: " + e.msg
+-		}
++func (p *parser) errorLimit(fs *funcState, limit int, what string) {
++	var msg string
++	if fs.line == 0 {
++		msg = fmt.Sprintf("main function has more than %d %s", limit, what)
++	} else {
++		msg = fmt.Sprintf("function at line %d has more than %d %s", fs.line, limit, what)
+ 	}
++	p.ls.lexError(msg, 0)
 +}
  
 -	res := "syntax error: unexpected " + yyTokname(lookAhead)
@@ -15432,14 +15564,20 @@ regenerates the diff below; this header is edited by hand.
 -			}
 -			expected = append(expected, tok)
 -		}
--	}
--
++func (p *parser) enterLevel() {
++	p.level++
++	if p.level > maxLevels || p.jit && p.level >= maxLevels {
++		p.ls.lexError("chunk has too many syntax levels", 0)
+ 	}
++}
+ 
 -	if yyDef[state] == -2 {
 -		i := 0
 -		for yyExca[i] != -1 || int(yyExca[i+1]) != state {
 -			i += 2
 -		}
--
++func (p *parser) leaveLevel() { p.level-- }
+ 
 -		// Look for tokens that we accept or reduce.
 -		for i += 2; yyExca[i] >= 0; i += 2 {
 -			tok := int(yyExca[i])
@@ -15451,15 +15589,17 @@ regenerates the diff below; this header is edited by hand.
 -			}
 -			expected = append(expected, tok)
 -		}
--
++/* variables and scopes */
+ 
 -		// If the default action is to accept or reduce, give up.
 -		if yyExca[i+1] != 0 {
 -			return res
 -		}
 -	}
-+// isName: LuaJIT's goto is a name where a name is expected.
-+func (p *parser) isName() bool {
-+	return p.ls.t.typ == tkName || p.ls.t.typ == tkGoto
++func (p *parser) openFunc(line int, vararg bool) {
++	fs := &funcState{prev: p.fs, line: line, vararg: vararg}
++	p.fs = fs
++	p.enterBlock(false)
 +}
  
 -	for i, tok := range expected {
@@ -15469,15 +15609,11 @@ regenerates the diff below; this header is edited by hand.
 -			res += " or "
 -		}
 -		res += yyTokname(tok)
-+// strCheckName is str_checkname / lex_str: the name and its line.
-+func (p *parser) strCheckName() (string, int) {
-+	if !p.isName() {
-+		p.errorExpected(tkName)
- 	}
+-	}
 -	return res
-+	name, line := p.ls.t.sem, p.ls.t.line
-+	p.next()
-+	return name, line
++func (p *parser) closeFunc() {
++	p.leaveBlock()
++	p.fs = p.fs.prev
  }
  
 -func yylex1(lex yyLexer, lval *yySymType) (char, token int) {
@@ -15496,33 +15632,45 @@ regenerates the diff below; this header is edited by hand.
 -			token = int(yyTok2[char-yyPrivate])
 -			goto out
 -		}
--	}
++func (p *parser) enterBlock(isLoop bool) {
++	fs := p.fs
++	fs.bl = &blockScope{prev: fs.bl, nactvar: len(fs.actvar), isLoop: isLoop, vstart: len(fs.vstack)}
++}
++
++// leaveBlock is fscope_end: under LuaJIT, it resolves the breaks of a
++// loop, and the gotos and labels of the block, or passes them on.
++func (p *parser) leaveBlock() {
++	fs := p.fs
++	bl := fs.bl
++	fs.actvar = fs.actvar[:bl.nactvar]
++	fs.bl = bl.prev
++	if bl.hasUpval {
++		fs.ucloLine = p.ls.lastline
+ 	}
 -	for i := 0; i < len(yyTok3); i += 2 {
 -		token = int(yyTok3[i+0])
 -		if token == char {
 -			token = int(yyTok3[i+1])
 -			goto out
--		}
-+func (p *parser) errorLimit(fs *funcState, limit int, what string) {
-+	var msg string
-+	if fs.line == 0 {
-+		msg = fmt.Sprintf("main function has more than %d %s", limit, what)
-+	} else {
-+		msg = fmt.Sprintf("function at line %d has more than %d %s", fs.line, limit, what)
++	if bl.hasBreak {
++		if bl.isLoop {
++			idx := p.golaNew(breakName, true, 0)
++			p.golaResolve(bl, idx)
++			fs.vstack = fs.vstack[:idx]
++		} else {
++			p.golaFixup(bl)
++			return
+ 		}
  	}
-+	p.ls.lexError(msg, 0)
-+}
- 
+-
 -out:
 -	if token == 0 {
 -		token = int(yyTok2[1]) /* unknown char */
 -	}
 -	if yyDebug >= 3 {
 -		__yyfmt__.Printf("lex %s(%d)\n", yyTokname(token), uint(char))
-+func (p *parser) enterLevel() {
-+	p.level++
-+	if p.level > maxLevels || p.jit && p.level >= maxLevels {
-+		p.ls.lexError("chunk has too many syntax levels", 0)
++	if bl.hasGola {
++		p.golaFixup(bl)
  	}
 -	return char, token
  }
@@ -15530,16 +15678,14 @@ regenerates the diff below; this header is edited by hand.
 -func yyParse(yylex yyLexer) int {
 -	return yyNewParser().Parse(yylex)
 -}
-+func (p *parser) leaveLevel() { p.level-- }
- 
+-
 -func (yyrcvr *yyParserImpl) Parse(yylex yyLexer) int {
 -	var yyn int
 -	var yyVAL yySymType
 -	var yyDollar []yySymType
 -	_ = yyDollar // silence set and not used
 -	yyS := yyrcvr.stack[:]
-+/* variables and scopes */
- 
+-
 -	Nerrs := 0   /* number of errors */
 -	Errflag := 0 /* error recovery flag */
 -	yystate := 0
@@ -15553,58 +15699,32 @@ regenerates the diff below; this header is edited by hand.
 -	}()
 -	yyp := -1
 -	goto yystack
-+func (p *parser) openFunc(line int, vararg bool) {
-+	fs := &funcState{prev: p.fs, line: line, vararg: vararg}
-+	p.fs = fs
-+	p.enterBlock(false)
-+}
- 
+-
 -ret0:
 -	return 0
-+func (p *parser) closeFunc() {
-+	p.leaveBlock()
-+	p.fs = p.fs.prev
-+}
++/* LuaJIT's gotos and labels (they are compiled by compile.go) */
  
 -ret1:
 -	return 1
-+func (p *parser) enterBlock(isLoop bool) {
-+	fs := p.fs
-+	fs.bl = &blockScope{prev: fs.bl, nactvar: len(fs.actvar), isLoop: isLoop, vstart: len(fs.vstack)}
-+}
- 
+-
 -yystack:
 -	/* put a state and value onto the stack */
 -	if yyDebug >= 4 {
 -		__yyfmt__.Printf("char %v in %v\n", yyTokname(yytoken), yyStatname(yystate))
-+// leaveBlock is fscope_end: under LuaJIT, it resolves the breaks of a
-+// loop, and the gotos and labels of the block, or passes them on.
-+func (p *parser) leaveBlock() {
-+	fs := p.fs
-+	bl := fs.bl
-+	fs.actvar = fs.actvar[:bl.nactvar]
-+	fs.bl = bl.prev
-+	if bl.hasBreak {
-+		if bl.isLoop {
-+			idx := p.golaNew(breakName, true, 0)
-+			p.golaResolve(bl, idx)
-+			fs.vstack = fs.vstack[:idx]
-+		} else {
-+			p.golaFixup(bl)
-+			return
-+		}
- 	}
+-	}
 -
 -	yyp++
 -	if yyp >= len(yyS) {
 -		nyys := make([]yySymType, len(yyS)*2)
 -		copy(nyys, yyS)
 -		yyS = nyys
-+	if bl.hasGola {
-+		p.golaFixup(bl)
- 	}
+-	}
 -	yyS[yyp] = yyVAL
 -	yyS[yyp].yys = yystate
++func (p *parser) golaNew(name string, isLabel bool, line int) int {
++	fs := p.fs
++	fs.vstack = append(fs.vstack, gola{name: name, isLabel: isLabel, slot: len(fs.actvar), line: line, valid: true})
++	return len(fs.vstack) - 1
 +}
  
 -yynewstate:
@@ -15627,10 +15747,17 @@ regenerates the diff below; this header is edited by hand.
 -		yystate = yyn
 -		if Errflag > 0 {
 -			Errflag--
--		}
++// golaFindLabel reports whether the label is in the current block.
++func (p *parser) golaFindLabel(name string) bool {
++	fs := p.fs
++	for _, v := range fs.vstack[fs.bl.vstart:] {
++		if v.valid && v.isLabel && v.name == name {
++			return true
+ 		}
 -		goto yystack
--	}
-+/* LuaJIT's gotos and labels (they are compiled by compile.go) */
+ 	}
++	return false
++}
  
 -yydefault:
 -	/* default state action */
@@ -15639,34 +15766,12 @@ regenerates the diff below; this header is edited by hand.
 -		if yyrcvr.char < 0 {
 -			yyrcvr.char, yytoken = yylex1(yylex, &yyrcvr.lval)
 -		}
-+func (p *parser) golaNew(name string, isLabel bool, line int) int {
-+	fs := p.fs
-+	fs.vstack = append(fs.vstack, gola{name: name, isLabel: isLabel, slot: len(fs.actvar), line: line, valid: true})
-+	return len(fs.vstack) - 1
-+}
- 
+-
 -		/* look through exception table */
 -		xi := 0
 -		for {
 -			if yyExca[xi+0] == -1 && int(yyExca[xi+1]) == yystate {
 -				break
--			}
--			xi += 2
-+// golaFindLabel reports whether the label is in the current block.
-+func (p *parser) golaFindLabel(name string) bool {
-+	fs := p.fs
-+	for _, v := range fs.vstack[fs.bl.vstart:] {
-+		if v.valid && v.isLabel && v.name == name {
-+			return true
- 		}
--		for xi += 2; ; xi += 2 {
--			yyn = int(yyExca[xi+0])
--			if yyn < 0 || yyn == yytoken {
--				break
-+	}
-+	return false
-+}
-+
 +// golaResolve resolves the pending gotos of the block to the label at idx.
 +func (p *parser) golaResolve(bl *blockScope, idx int) {
 +	fs := p.fs
@@ -15678,6 +15783,13 @@ regenerates the diff below; this header is edited by hand.
 +				p.ls.errorAt(vg.line, fmt.Sprintf("<goto %s> jumps into the scope of local '%s'",
 +					vg.name, fs.actvar[vg.slot].name), 0)
  			}
+-			xi += 2
+-		}
+-		for xi += 2; ; xi += 2 {
+-			yyn = int(yyExca[xi+0])
+-			if yyn < 0 || yyn == yytoken {
+-				break
+-			}
 -		}
 -		yyn = int(yyExca[xi+1])
 -		if yyn < 0 {
@@ -15767,7 +15879,10 @@ regenerates the diff below; this header is edited by hand.
 -	yynt := yyn
 -	yypt := yyp
 -	_ = yypt // guard against "declared and not used"
--
++// maxLocVars is Lua 5.1's limit of local variable records per function:
++// registerlocalvar grows f->locvars by luaM_growvector up to SHRT_MAX.
++const maxLocVars = 32767
+ 
 -	yyp -= int(yyR2[yyn])
 -	// yyp is now the index of $0. Perform the default action. Iff the
 -	// reduced production is Îµ, $1 is possibly out of range.
@@ -15775,47 +15890,78 @@ regenerates the diff below; this header is edited by hand.
 -		nyys := make([]yySymType, len(yyS)*2)
 -		copy(nyys, yyS)
 -		yyS = nyys
--	}
--	yyVAL = yyS[yyp+1]
--
--	/* consult goto table to find next state */
--	yyn = int(yyR1[yyn])
--	yyg := int(yyPgo[yyn])
--	yyj := yyg + yyS[yyp].yys + 1
--
--	if yyj >= yyLast {
--		yystate = int(yyAct[yyg])
--	} else {
--		yystate = int(yyAct[yyj])
--		if int(yyChk[yystate]) != -yyn {
--			yystate = int(yyAct[yyg])
 +// newLocalVar declares the n-th variable of a declaration.
 +func (p *parser) newLocalVar(name string, n int) {
 +	fs := p.fs
 +	if len(fs.actvar)+n+1 > maxVars {
 +		p.errorLimit(fs, maxVars, "local variables")
+ 	}
+-	yyVAL = yyS[yyp+1]
++	if !p.jit {
++		if fs.nlocvar >= maxLocVars {
++			p.ls.runError("too many local variables") // luaM_growaux_'s
++		}
++		fs.nlocvar++
 +	}
 +	p.nextID++
 +	fs.pending = append(fs.pending[:n], varInfo{name, p.nextID})
 +}
-+
+ 
+-	/* consult goto table to find next state */
+-	yyn = int(yyR1[yyn])
+-	yyg := int(yyPgo[yyn])
+-	yyj := yyg + yyS[yyp].yys + 1
 +// adjustLocalVars activates the first n variables declared.
 +func (p *parser) adjustLocalVars(n int) {
 +	fs := p.fs
 +	fs.actvar = append(fs.actvar, fs.pending[:n]...)
 +	fs.pending = append(fs.pending[:0], fs.pending[n:]...)
 +}
-+
+ 
+-	if yyj >= yyLast {
+-		yystate = int(yyAct[yyg])
+-	} else {
+-		yystate = int(yyAct[yyj])
+-		if int(yyChk[yystate]) != -yyn {
+-			yystate = int(yyAct[yyg])
+-		}
 +// singleVar resolves a name, making it an upvalue of the functions it is
 +// referenced from, as singlevaraux does.
 +func (p *parser) singleVar(fs *funcState, name string) (int, bool) {
 +	if fs == nil {
 +		return 0, false // a global
-+	}
+ 	}
+-	// dummy call; replaced with literal code
+-	switch yynt {
+-
+-	case 1:
+-		yyDollar = yyS[yypt-1 : yypt+1]
+-//line parser.go.y:73
+-		{
+-			yyVAL.stmts = yyDollar[1].stmts
+-			if l, ok := yylex.(*Lexer); ok {
+-				l.Stmts = yyVAL.stmts
 +	for i := len(fs.actvar) - 1; i >= 0; i-- {
 +		if fs.actvar[i].name == name {
++			if fs != p.fs { // fscope_uvmark
++				bl := fs.bl
++				for bl != nil && bl.nactvar > i {
++					bl = bl.prev
++				}
++				if bl != nil {
++					bl.hasUpval = true
++				}
+ 			}
 +			return fs.actvar[i].id, true
-+		}
+ 		}
+-	case 2:
+-		yyDollar = yyS[yypt-2 : yypt+1]
+-//line parser.go.y:79
+-		{
+-			yyVAL.stmts = append(yyDollar[1].stmts, yyDollar[2].stmt)
+-			if l, ok := yylex.(*Lexer); ok {
+-				l.Stmts = yyVAL.stmts
+-			}
 +	}
 +	id, ok := p.singleVar(fs.prev, name)
 +	if !ok {
@@ -15868,6 +16014,20 @@ regenerates the diff below; this header is edited by hand.
 +	line := ls.linenumber
 +	tokLine := ls.t.line
 +	add := func(s ast.Stmt) { *stmts = append(*stmts, s) }
++	// LuaJIT: a goto or break right after a UCLO takes its line; any
++	// statement but do (a block without code of its own) emits code or a
++	// jump target, before its blocks and after them
++	uclo := p.fs.ucloLine
++	jmpLine := func() int {
++		if uclo != 0 {
++			return uclo
++		}
++		return ls.lastline
++	}
++	if ls.t.typ != tkDo {
++		p.fs.ucloLine = 0
++		defer func(fs *funcState) { fs.ucloLine = 0 }(p.fs)
++	}
 +	switch ls.t.typ {
 +	case tkIf:
 +		add(p.ifStat(line))
@@ -15924,15 +16084,11 @@ regenerates the diff below; this header is edited by hand.
 +		} else {
 +			add(p.localStat(tokLine))
  		}
--	}
--	// dummy call; replaced with literal code
--	switch yynt {
--
--	case 1:
--		yyDollar = yyS[yypt-1 : yypt+1]
--//line parser.go.y:73
+-	case 3:
+-		yyDollar = yyS[yypt-3 : yypt+1]
+-//line parser.go.y:85
 -		{
--			yyVAL.stmts = yyDollar[1].stmts
+-			yyVAL.stmts = append(yyDollar[1].stmts, yyDollar[2].stmt)
 -			if l, ok := yylex.(*Lexer); ok {
 -				l.Stmts = yyVAL.stmts
 +	case tkReturn:
@@ -15949,31 +16105,90 @@ regenerates the diff below; this header is edited by hand.
 +		p.next()
 +		if p.jit { // a goto, resolved when the loop ends
 +			p.fs.bl.hasBreak = true
-+			p.golaNew(breakName, false, ls.lastline)
++			p.golaNew(breakName, false, jmpLine())
 +		} else {
 +			bl := p.fs.bl
 +			for bl != nil && !bl.isLoop {
 +				bl = bl.prev
  			}
 -		}
--	case 2:
+-	case 4:
+-		yyDollar = yyS[yypt-0 : yypt+1]
+-//line parser.go.y:93
+-		{
+-			yyVAL.stmts = []ast.Stmt{}
+-		}
+-	case 5:
 -		yyDollar = yyS[yypt-2 : yypt+1]
--//line parser.go.y:79
+-//line parser.go.y:96
 -		{
 -			yyVAL.stmts = append(yyDollar[1].stmts, yyDollar[2].stmt)
--			if l, ok := yylex.(*Lexer); ok {
--				l.Stmts = yyVAL.stmts
+-		}
+-	case 6:
+-		yyDollar = yyS[yypt-2 : yypt+1]
+-//line parser.go.y:99
+-		{
+-			yyVAL.stmts = yyDollar[1].stmts
+-		}
+-	case 7:
+-		yyDollar = yyS[yypt-1 : yypt+1]
+-//line parser.go.y:104
+-		{
+-			yyVAL.stmts = yyDollar[1].stmts
+-		}
+-	case 8:
+-		yyDollar = yyS[yypt-3 : yypt+1]
+-//line parser.go.y:109
+-		{
+-			yyVAL.stmt = &ast.AssignStmt{Lhs: yyDollar[1].exprlist, Rhs: yyDollar[3].exprlist}
+-			yyVAL.stmt.SetLine(yyDollar[1].exprlist[0].Line())
+-		}
+-	case 9:
+-		yyDollar = yyS[yypt-1 : yypt+1]
+-//line parser.go.y:114
+-		{
+-			if _, ok := yyDollar[1].expr.(*ast.FuncCallExpr); !ok {
+-				yylex.(*Lexer).Error("parse error")
+-			} else {
+-				yyVAL.stmt = &ast.FuncCallStmt{Expr: yyDollar[1].expr}
+-				yyVAL.stmt.SetLine(yyDollar[1].expr.Line())
 +			if bl == nil {
 +				ls.syntaxError("no loop to break")
  			}
  		}
--	case 3:
+-	case 10:
 -		yyDollar = yyS[yypt-3 : yypt+1]
--//line parser.go.y:85
+-//line parser.go.y:122
 -		{
--			yyVAL.stmts = append(yyDollar[1].stmts, yyDollar[2].stmt)
--			if l, ok := yylex.(*Lexer); ok {
--				l.Stmts = yyVAL.stmts
+-			yyVAL.stmt = &ast.DoBlockStmt{Stmts: yyDollar[2].stmts}
+-			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
+-			yyVAL.stmt.SetLastLine(yyDollar[3].token.Pos.Line)
+-		}
+-	case 11:
+-		yyDollar = yyS[yypt-5 : yypt+1]
+-//line parser.go.y:127
+-		{
+-			yyVAL.stmt = &ast.WhileStmt{Condition: yyDollar[2].expr, Stmts: yyDollar[4].stmts}
+-			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
+-			yyVAL.stmt.SetLastLine(yyDollar[5].token.Pos.Line)
+-		}
+-	case 12:
+-		yyDollar = yyS[yypt-4 : yypt+1]
+-//line parser.go.y:132
+-		{
+-			yyVAL.stmt = &ast.RepeatStmt{Condition: yyDollar[4].expr, Stmts: yyDollar[2].stmts}
+-			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
+-			yyVAL.stmt.SetLastLine(yyDollar[4].expr.Line())
+-		}
+-	case 13:
+-		yyDollar = yyS[yypt-6 : yypt+1]
+-//line parser.go.y:137
+-		{
+-			yyVAL.stmt = &ast.IfStmt{Condition: yyDollar[2].expr, Then: yyDollar[4].stmts}
+-			cur := yyVAL.stmt
+-			for _, elseif := range yyDollar[5].stmts {
+-				cur.(*ast.IfStmt).Else = []ast.Stmt{elseif}
+-				cur = elseif
 +		st := &ast.BreakStmt{}
 +		st.SetLine(tokLine)
 +		add(st)
@@ -15984,8 +16199,12 @@ regenerates the diff below; this header is edited by hand.
 +		if ls.lookahead() == tkName {
 +			p.next()
 +			name, _ := p.strCheckName()
++			line := jmpLine()
++			if p.golaFindLabel(name) { // a backward goto: a LOOP first
++				line = ls.lastline
++			}
 +			p.fs.bl.hasGola = true
-+			p.golaNew(name, false, ls.lastline)
++			p.golaNew(name, false, line)
 +			st := &ast.GotoStmt{Label: name}
 +			st.SetLine(tokLine)
 +			add(st)
@@ -16001,10 +16220,16 @@ regenerates the diff below; this header is edited by hand.
 +func (p *parser) ifStat(line int) ast.Stmt {
 +	ls := p.ls
 +	ifLine := ls.t.line
++	// LuaJIT: a branch ends with a jump out of the if, or a jump target
++	thenBlock := func() []ast.Stmt {
++		b := p.block()
++		p.fs.ucloLine = 0
++		return b
++	}
 +	p.next()
 +	cond, _ := p.expr()
 +	p.checkNext(tkThen)
-+	top := &ast.IfStmt{Condition: cond, Then: p.block()}
++	top := &ast.IfStmt{Condition: cond, Then: thenBlock()}
 +	top.SetLine(ifLine)
 +	cur := top
 +	for ls.t.typ == tkElseif {
@@ -16012,7 +16237,7 @@ regenerates the diff below; this header is edited by hand.
 +		p.next()
 +		cond, _ := p.expr()
 +		p.checkNext(tkThen)
-+		st := &ast.IfStmt{Condition: cond, Then: p.block()}
++		st := &ast.IfStmt{Condition: cond, Then: thenBlock()}
 +		st.SetLine(elseifLine)
 +		cur.Else = []ast.Stmt{st}
 +		cur = st
@@ -16181,49 +16406,20 @@ regenerates the diff below; this header is edited by hand.
 +			if p.level+nvars >= maxLevels {
 +				p.errorLimit(p.fs, maxLevels, "variable names")
  			}
+-			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
+-			yyVAL.stmt.SetLastLine(yyDollar[6].token.Pos.Line)
 +		} else if limit := maxLevels - p.level; nvars > limit {
 +			p.errorLimit(p.fs, limit, "variables in assignment")
  		}
--	case 4:
--		yyDollar = yyS[yypt-0 : yypt+1]
--//line parser.go.y:93
+-	case 14:
+-		yyDollar = yyS[yypt-8 : yypt+1]
+-//line parser.go.y:147
 -		{
--			yyVAL.stmts = []ast.Stmt{}
--		}
--	case 5:
--		yyDollar = yyS[yypt-2 : yypt+1]
--//line parser.go.y:96
--		{
--			yyVAL.stmts = append(yyDollar[1].stmts, yyDollar[2].stmt)
--		}
--	case 6:
--		yyDollar = yyS[yypt-2 : yypt+1]
--//line parser.go.y:99
--		{
--			yyVAL.stmts = yyDollar[1].stmts
--		}
--	case 7:
--		yyDollar = yyS[yypt-1 : yypt+1]
--//line parser.go.y:104
--		{
--			yyVAL.stmts = yyDollar[1].stmts
--		}
--	case 8:
--		yyDollar = yyS[yypt-3 : yypt+1]
--//line parser.go.y:109
--		{
--			yyVAL.stmt = &ast.AssignStmt{Lhs: yyDollar[1].exprlist, Rhs: yyDollar[3].exprlist}
--			yyVAL.stmt.SetLine(yyDollar[1].exprlist[0].Line())
--		}
--	case 9:
--		yyDollar = yyS[yypt-1 : yypt+1]
--//line parser.go.y:114
--		{
--			if _, ok := yyDollar[1].expr.(*ast.FuncCallExpr); !ok {
--				yylex.(*Lexer).Error("parse error")
--			} else {
--				yyVAL.stmt = &ast.FuncCallStmt{Expr: yyDollar[1].expr}
--				yyVAL.stmt.SetLine(yyDollar[1].expr.Line())
+-			yyVAL.stmt = &ast.IfStmt{Condition: yyDollar[2].expr, Then: yyDollar[4].stmts}
+-			cur := yyVAL.stmt
+-			for _, elseif := range yyDollar[5].stmts {
+-				cur.(*ast.IfStmt).Else = []ast.Stmt{elseif}
+-				cur = elseif
 +		lhs = append(lhs, e)
 +	}
 +	p.checkNext('=')
@@ -16258,60 +16454,11 @@ regenerates the diff below; this header is edited by hand.
 +					p.newLocalVar("arg", len(parlist.Names))
 +				}
 +				parlist.HasVargs = true
++				parlist.NoArg = p.jit
 +				p.fs.vararg = true
 +			default:
 +				ls.syntaxError("<name> or '...' expected")
  			}
--		}
--	case 10:
--		yyDollar = yyS[yypt-3 : yypt+1]
--//line parser.go.y:122
--		{
--			yyVAL.stmt = &ast.DoBlockStmt{Stmts: yyDollar[2].stmts}
--			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
--			yyVAL.stmt.SetLastLine(yyDollar[3].token.Pos.Line)
--		}
--	case 11:
--		yyDollar = yyS[yypt-5 : yypt+1]
--//line parser.go.y:127
--		{
--			yyVAL.stmt = &ast.WhileStmt{Condition: yyDollar[2].expr, Stmts: yyDollar[4].stmts}
--			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
--			yyVAL.stmt.SetLastLine(yyDollar[5].token.Pos.Line)
--		}
--	case 12:
--		yyDollar = yyS[yypt-4 : yypt+1]
--//line parser.go.y:132
--		{
--			yyVAL.stmt = &ast.RepeatStmt{Condition: yyDollar[4].expr, Stmts: yyDollar[2].stmts}
--			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
--			yyVAL.stmt.SetLastLine(yyDollar[4].expr.Line())
--		}
--	case 13:
--		yyDollar = yyS[yypt-6 : yypt+1]
--//line parser.go.y:137
--		{
--			yyVAL.stmt = &ast.IfStmt{Condition: yyDollar[2].expr, Then: yyDollar[4].stmts}
--			cur := yyVAL.stmt
--			for _, elseif := range yyDollar[5].stmts {
--				cur.(*ast.IfStmt).Else = []ast.Stmt{elseif}
--				cur = elseif
-+			if parlist.HasVargs || !p.testNext(',') {
-+				break
- 			}
--			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
--			yyVAL.stmt.SetLastLine(yyDollar[6].token.Pos.Line)
- 		}
--	case 14:
--		yyDollar = yyS[yypt-8 : yypt+1]
--//line parser.go.y:147
--		{
--			yyVAL.stmt = &ast.IfStmt{Condition: yyDollar[2].expr, Then: yyDollar[4].stmts}
--			cur := yyVAL.stmt
--			for _, elseif := range yyDollar[5].stmts {
--				cur.(*ast.IfStmt).Else = []ast.Stmt{elseif}
--				cur = elseif
--			}
 -			cur.(*ast.IfStmt).Else = yyDollar[7].stmts
 -			yyVAL.stmt.SetLine(yyDollar[1].token.Pos.Line)
 -			yyVAL.stmt.SetLastLine(yyDollar[8].token.Pos.Line)
@@ -16721,6 +16868,40 @@ regenerates the diff below; this header is edited by hand.
 -//line parser.go.y:406
 -		{
 -			if ex, ok := yyDollar[2].expr.(*ast.Comma3Expr); ok {
+-				ex.AdjustRet = true
++			if parlist.HasVargs || !p.testNext(',') {
++				break
+ 			}
+-			yyVAL.expr = yyDollar[2].expr
+-			yyVAL.expr.SetLine(yyDollar[1].token.Pos.Line)
+ 		}
+-	case 74:
+-		yyDollar = yyS[yypt-3 : yypt+1]
+-//line parser.go.y:415
+-		{
+-			yyDollar[2].expr.(*ast.FuncCallExpr).AdjustRet = true
+-			yyVAL.expr = yyDollar[2].expr
+-		}
+-	case 75:
+-		yyDollar = yyS[yypt-2 : yypt+1]
+-//line parser.go.y:421
+-		{
+-			yyVAL.expr = &ast.FuncCallExpr{Func: yyDollar[1].expr, Args: yyDollar[2].exprlist}
+-			yyVAL.expr.SetLine(yyDollar[1].expr.Line())
+-		}
+-	case 76:
+-		yyDollar = yyS[yypt-4 : yypt+1]
+-//line parser.go.y:425
+-		{
+-			yyVAL.expr = &ast.FuncCallExpr{Method: yyDollar[3].token.Str, Receiver: yyDollar[1].expr, Args: yyDollar[4].exprlist}
+-			yyVAL.expr.SetLine(yyDollar[1].expr.Line())
+-		}
+-	case 77:
+-		yyDollar = yyS[yypt-2 : yypt+1]
+-//line parser.go.y:431
+-		{
+-			if yylex.(*Lexer).PNewLine {
+-				yylex.(*Lexer).TokenError(yyDollar[1].token, "ambiguous syntax (function call x new statement)")
 +	}
 +	n := len(parlist.Names)
 +	if parlist.HasVargs && !p.jit {
@@ -16789,41 +16970,17 @@ regenerates the diff below; this header is edited by hand.
 +			call.AdjustRet = true
 +		} else {
 +			if ex, ok := e.(*ast.Comma3Expr); ok {
- 				ex.AdjustRet = true
++				ex.AdjustRet = true
  			}
--			yyVAL.expr = yyDollar[2].expr
--			yyVAL.expr.SetLine(yyDollar[1].token.Pos.Line)
+-			yyVAL.exprlist = []ast.Expr{}
 +			e.SetLine(parenLine)
  		}
--	case 74:
+-	case 78:
 -		yyDollar = yyS[yypt-3 : yypt+1]
--//line parser.go.y:415
--		{
--			yyDollar[2].expr.(*ast.FuncCallExpr).AdjustRet = true
--			yyVAL.expr = yyDollar[2].expr
--		}
--	case 75:
--		yyDollar = yyS[yypt-2 : yypt+1]
--//line parser.go.y:421
--		{
--			yyVAL.expr = &ast.FuncCallExpr{Func: yyDollar[1].expr, Args: yyDollar[2].exprlist}
--			yyVAL.expr.SetLine(yyDollar[1].expr.Line())
--		}
--	case 76:
--		yyDollar = yyS[yypt-4 : yypt+1]
--//line parser.go.y:425
--		{
--			yyVAL.expr = &ast.FuncCallExpr{Method: yyDollar[3].token.Str, Receiver: yyDollar[1].expr, Args: yyDollar[4].exprlist}
--			yyVAL.expr.SetLine(yyDollar[1].expr.Line())
--		}
--	case 77:
--		yyDollar = yyS[yypt-2 : yypt+1]
--//line parser.go.y:431
+-//line parser.go.y:437
 -		{
 -			if yylex.(*Lexer).PNewLine {
 -				yylex.(*Lexer).TokenError(yyDollar[1].token, "ambiguous syntax (function call x new statement)")
--			}
--			yyVAL.exprlist = []ast.Expr{}
 +		kind = kindParen
 +	case p.isName():
 +		name, line := p.strCheckName()
@@ -16865,13 +17022,7 @@ regenerates the diff below; this header is edited by hand.
 +			e, kind = c, kindCall
 +		default:
 +			return e, kind
- 		}
--	case 78:
--		yyDollar = yyS[yypt-3 : yypt+1]
--//line parser.go.y:437
--		{
--			if yylex.(*Lexer).PNewLine {
--				yylex.(*Lexer).TokenError(yyDollar[1].token, "ambiguous syntax (function call x new statement)")
++		}
 +	}
 +}
 +
@@ -16932,7 +17083,8 @@ regenerates the diff below; this header is edited by hand.
 +				v, _ := p.expr()
 +				fields = append(fields, &ast.Field{Value: v})
 +				break
-+			}
+ 			}
+-			yyVAL.exprlist = yyDollar[2].exprlist
 +			name, nameLine := p.strCheckName()
 +			key := &ast.StringExpr{Value: name}
 +			key.SetLine(nameLine)
@@ -17077,8 +17229,7 @@ regenerates the diff below; this header is edited by hand.
 +		for i := 0; i < tt.NumField(); i++ {
 +			if strings.Index(tt.Field(i).Name, "Base") > -1 {
 +				continue
- 			}
--			yyVAL.exprlist = yyDollar[2].exprlist
++			}
 +			indicies = append(indicies, i)
  		}
 -	case 79:
@@ -19308,7 +19459,7 @@ regenerates the diff below; this header is edited by hand.
  	if err != nil {
 +		// go-moonscript patch: an error near no token (a limit) is reported
 +		// like the compiler's limit errors, as "<chunk>:<line>: <message>"
-+		if pe, ok := err.(*parse.Error); ok && pe.Token == "" {
++		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
 +			err = &CompileError{Line: pe.Pos.Line, Message: pe.Message, source: name}
 +		}
  		return nil, newApiErrorE(ApiErrorSyntax, err)
@@ -27822,6 +27973,55 @@ regenerates the diff below; this header is edited by hand.
 +try("x = 1\r\ry")
 +try("--[[ comment\n]] x")
 +try("-- comment\n\nx")
+--- a/testdata/compat/parse_goto_line.jit.lua
++++ b/testdata/compat/parse_goto_line.jit.lua
+@@ -0,0 +1,46 @@
++-- The line of a goto or break in LuaJIT's errors ("undefined label", "no
++-- loop to break", "jumps into the scope of local") is the line of its jump
++-- instruction. Right after a block whose locals are upvalues, which ends
++-- with a UCLO, bcemit_jmp merges the jump into that UCLO: the goto gets the
++-- line of the block's last token. Any statement but an empty do block
++-- emits code or a jump target in between; loops, if and repeat end with
++-- their own jumps. luajit is the reference.
++local function try(name, src)
++  local f, err = loadstring(src, "=src")
++  print(name, f and "ok" or (err:gsub("^[^:]*:", "")))
++end
++local U = "do local x f = function() return x end end"
++try("after do", U .. "\n\ngoto nowhere")
++try("last token", "do\n  local x\n  f = function() return x end\n\nend\n\ngoto nowhere")
++try("inner do", "do\n do\n  local x\n  f = function() return x end\n end\nend\n\ngoto nowhere")
++try("both do", "do\n local y\n g = function() return y end\n do\n  local x\n  f = function() return x end\n end\nend\n\ngoto nowhere")
++try("semicolon", U .. "\n;\ngoto nowhere")
++try("empty do", U .. "\ndo end\ngoto nowhere")
++try("while", "while c do local x f = function() return x end end\n\ngoto nowhere")
++try("into scope", U .. "\ngoto l\nlocal y\n::l::\nprint(y)")
++try("break", "function g()\n" .. U .. "\nbreak\nend")
++try("two gotos", U .. "\ngoto a\ngoto b")
++try("repeat", "repeat local x f = function() return x end until x\n\ngoto nowhere")
++try("if", "if a then " .. U .. " end\n\ngoto nowhere")
++try("else", "if c then\n" .. U .. "\nelse\ngoto nowhere\nend")
++try("elseif", "if c then\n" .. U .. "\nelseif d then\nbreak\nend")
++try("for", "for i = 1, 2 do local x f = function() return x end end\n\ngoto nowhere")
++try("for var", "for i = 1, 2 do f = function() return i end end\n\ngoto nowhere")
++try("return", "do local x f = function() return x end return end\n\ngoto nowhere")
++try("label", U .. "\n::l::\ngoto nowhere")
++try("inside", "do local x f = function() return x end\ngoto nowhere end")
++try("main local", "local x f = function() return x end\ndo end\ngoto nowhere")
++try("if in do", "do local x f = function() return x end if a then b() end end\n\ngoto nowhere")
++try("label in do", "do local x f = function() return x end ::m:: end\n\ngoto nowhere")
++try("deep closure", "do local x f = function() return function() return x end end end\n\ngoto nowhere")
++try("local", U .. "\nlocal z\ngoto nowhere")
++try("name line", U .. "\n\ngoto\nnowhere")
++try("goto in if", U .. "\n\nif a then goto nowhere end")
++try("goto in do", U .. "\n\ndo goto nowhere end")
++try("break in do", U .. "\n\ndo break end")
++try("after function", "local function q() end " .. U .. "\n\ngoto nowhere")
++try("first goto", U .. "\n\ngoto l\ngoto nowhere\nlocal y ::l:: y()")
++try("in function", "local function q()\n" .. U .. "\n\ngoto nowhere\nend")
++try("in loop", "while a do\n" .. U .. "\n\nbreak\nend\ngoto nowhere")
++try("resolved", U .. "\n\ngoto l\n::l::")
++try("backward", "::l::\n" .. U .. "\n\ngoto l\ngoto nowhere")
 --- a/testdata/compat/parse_lexer.lua
 +++ b/testdata/compat/parse_lexer.lua
 @@ -0,0 +1,74 @@
@@ -27991,6 +28191,178 @@ regenerates the diff below; this header is edited by hand.
 +levels("index", function(n) return "return " .. r("a[", n) .. "1" .. r("]", n) end)
 +levels("assign", function(n) return r("a, ", n) .. "a = 1" end)
 +levels("nested assign", function(n) return "do do " .. r("a, ", n) .. "a = 1 end end" end)
+--- a/testdata/compat/parse_locvars_limit.jit.lua
++++ b/testdata/compat/parse_locvars_limit.jit.lua
+@@ -0,0 +1,44 @@
++-- Lua 5.1 keeps a record of every local variable a function declares
++-- (f->locvars, for debug info), at most SHRT_MAX = 32767: the 32768th,
++-- even in a block long closed, fails in luaM_growvector with "too many
++-- local variables", raised by luaG_runerror without a position (the
++-- loader is a C function). Parameters, "self", the implicit "arg" and the
++-- hidden variables of a for loop have records too. LuaJIT 2.1 has no such
++-- limit (parse_locvars_limit.lua: the same script for lua5.1).
++-- loadstring is called under pcall: lua.c's traceback handler would get
++-- the message of a runtime error otherwise.
++local r = string.rep
++local function decls(n)
++  local b = {}
++  while n > 0 do
++    local k = n > 100 and 100 or n
++    b[#b + 1] = "do local " .. r("a,", k - 1) .. "a end\n"
++    n = n - k
++  end
++  return table.concat(b)
++end
++local function try(name, src)
++  local ok, f, err = pcall(loadstring, src, "=src")
++  if f then
++    print(name, "ok")
++  else
++    print(name, ok, (string.gsub(err, "^[^:]*:", "")))
++  end
++end
++try("main 32767", decls(32767))
++try("main 32768", decls(32768))
++try("function 32767", "local function f(p, q)\n" .. decls(32765) .. "end")
++try("function 32768", "local function f(p, q)\n" .. decls(32766) .. "end")
++try("vararg 32767", "local function f(...)\n" .. decls(32766) .. "end")
++try("vararg 32768", "local function f(...)\n" .. decls(32767) .. "end")
++try("method 32768", "local t = {} function t:m()\n" .. decls(32767) .. "end")
++try("numeric for", decls(32763) .. "for i = 1, 2 do end")
++try("numeric for over", decls(32764) .. "for i = 1, 2 do end")
++try("generic for", decls(32762) .. "for k, v in next, {} do end")
++try("generic for over", decls(32763) .. "for k, v in next, {} do end")
++try("local function", decls(32767) .. "local function g() end")
++try("nested apart", decls(32000) .. "local function g()\n" .. decls(32000) .. "end\n" .. decls(700))
++try("before an error", decls(32768) .. "x = = 1")
++try("after an error", "x = = 1\n" .. decls(32768))
++local ok, f = pcall(loadstring, decls(32767) .. "return 'run'")
++print("runs", f and f())
+--- a/testdata/compat/parse_locvars_limit.lua
++++ b/testdata/compat/parse_locvars_limit.lua
+@@ -0,0 +1,44 @@
++-- Lua 5.1 keeps a record of every local variable a function declares
++-- (f->locvars, for debug info), at most SHRT_MAX = 32767: the 32768th,
++-- even in a block long closed, fails in luaM_growvector with "too many
++-- local variables", raised by luaG_runerror without a position (the
++-- loader is a C function). Parameters, "self", the implicit "arg" and the
++-- hidden variables of a for loop have records too. LuaJIT 2.1 has no such
++-- limit (parse_locvars_limit.jit.lua: the same script for luajit).
++-- loadstring is called under pcall: lua.c's traceback handler would get
++-- the message of a runtime error otherwise.
++local r = string.rep
++local function decls(n)
++  local b = {}
++  while n > 0 do
++    local k = n > 100 and 100 or n
++    b[#b + 1] = "do local " .. r("a,", k - 1) .. "a end\n"
++    n = n - k
++  end
++  return table.concat(b)
++end
++local function try(name, src)
++  local ok, f, err = pcall(loadstring, src, "=src")
++  if f then
++    print(name, "ok")
++  else
++    print(name, ok, (string.gsub(err, "^[^:]*:", "")))
++  end
++end
++try("main 32767", decls(32767))
++try("main 32768", decls(32768))
++try("function 32767", "local function f(p, q)\n" .. decls(32765) .. "end")
++try("function 32768", "local function f(p, q)\n" .. decls(32766) .. "end")
++try("vararg 32767", "local function f(...)\n" .. decls(32766) .. "end")
++try("vararg 32768", "local function f(...)\n" .. decls(32767) .. "end")
++try("method 32768", "local t = {} function t:m()\n" .. decls(32767) .. "end")
++try("numeric for", decls(32763) .. "for i = 1, 2 do end")
++try("numeric for over", decls(32764) .. "for i = 1, 2 do end")
++try("generic for", decls(32762) .. "for k, v in next, {} do end")
++try("generic for over", decls(32763) .. "for k, v in next, {} do end")
++try("local function", decls(32767) .. "local function g() end")
++try("nested apart", decls(32000) .. "local function g()\n" .. decls(32000) .. "end\n" .. decls(700))
++try("before an error", decls(32768) .. "x = = 1")
++try("after an error", "x = = 1\n" .. decls(32768))
++local ok, f = pcall(loadstring, decls(32767) .. "return 'run'")
++print("runs", f and f())
+--- a/testdata/compat/parse_nul_byte.jit.lua
++++ b/testdata/compat/parse_nul_byte.jit.lua
+@@ -0,0 +1,36 @@
++-- A NUL byte in the source where Lua 5.1's lexer checks the next character
++-- against a set (check_next: "." after ".", "Ee" and "+-" in a numeral)
++-- is taken as one of the set: strchr finds the set's terminating NUL. So
++-- "1\0garbage" is a numeral (read_numeral reads it through the exponent
++-- check, luaO_str2d converts the C string "1") and "a.\0b" is a .. b.
++-- LuaJIT compares characters: both are errors there
++-- (parse_nul_byte.lua: the same script for lua5.1).
++local function try(name, src)
++  local f, err = loadstring(src, "=src")
++  if not f then
++    print(name, (err:gsub("^[^:]*:", "")))
++    return
++  end
++  a, b = "A", "B"
++  print(name, pcall(f))
++end
++try("number", "return 1\0garbage")
++try("number sign", "return 1\0+5")
++try("number two nul", "return 1.5\0\0")
++try("number then x", "return 0\0x5")
++try("number then e", "return 3\0e5")
++try("number dot", "return .5\0z")
++try("number at end", "return 1\0")
++try("exponent nul", "return 1e\0")
++try("exponent nul digits", "return 1e\0x5")
++try("exponent sign nul", "return 1e+\0")
++try("hex nul", "return 0x\0")
++try("hex digits nul", "return 0x1\0p4")
++try("dot", "return a.\0b")
++try("dot at end", "return a.\0")
++try("dots", "return a..\0b")
++try("dot dot nul", "return a.\0.b")
++try("field", "return a.\0")
++try("name", "return a\0b")
++try("string", "return 'a\0b' == 'a' .. '\0' .. 'b'")
++try("comment", "return 1 -- \0 x")
+--- a/testdata/compat/parse_nul_byte.lua
++++ b/testdata/compat/parse_nul_byte.lua
+@@ -0,0 +1,36 @@
++-- A NUL byte in the source where Lua 5.1's lexer checks the next character
++-- against a set (check_next: "." after ".", "Ee" and "+-" in a numeral)
++-- is taken as one of the set: strchr finds the set's terminating NUL. So
++-- "1\0garbage" is a numeral (read_numeral reads it through the exponent
++-- check, luaO_str2d converts the C string "1") and "a.\0b" is a .. b.
++-- LuaJIT compares characters: both are errors there
++-- (parse_nul_byte.jit.lua: the same script for luajit).
++local function try(name, src)
++  local f, err = loadstring(src, "=src")
++  if not f then
++    print(name, (err:gsub("^[^:]*:", "")))
++    return
++  end
++  a, b = "A", "B"
++  print(name, pcall(f))
++end
++try("number", "return 1\0garbage")
++try("number sign", "return 1\0+5")
++try("number two nul", "return 1.5\0\0")
++try("number then x", "return 0\0x5")
++try("number then e", "return 3\0e5")
++try("number dot", "return .5\0z")
++try("number at end", "return 1\0")
++try("exponent nul", "return 1e\0")
++try("exponent nul digits", "return 1e\0x5")
++try("exponent sign nul", "return 1e+\0")
++try("hex nul", "return 0x\0")
++try("hex digits nul", "return 0x1\0p4")
++try("dot", "return a.\0b")
++try("dot at end", "return a.\0")
++try("dots", "return a..\0b")
++try("dot dot nul", "return a.\0.b")
++try("field", "return a.\0")
++try("name", "return a\0b")
++try("string", "return 'a\0b' == 'a' .. '\0' .. 'b'")
++try("comment", "return 1 -- \0 x")
 --- a/testdata/compat/parse_numeral_on_luajit.jit.lua
 +++ b/testdata/compat/parse_numeral_on_luajit.jit.lua
 @@ -0,0 +1,79 @@
@@ -28073,6 +28445,160 @@ regenerates the diff below; this header is edited by hand.
 +print(show("1" .. string.rep("0", 1048576) .. "LL"), show("0x" .. string.rep("0", 1048576) .. "1LL"))
 +-- operators after a numeral
 +print(1e+5+3, 0x1p-1-1, 0xe+1, 1-1, 2^-1, 0x10 .. "", 1 .. 2)
+--- a/testdata/compat/parse_shebang_bytecode.jit.lua
++++ b/testdata/compat/parse_shebang_bytecode.jit.lua
+@@ -0,0 +1,55 @@
++-- LuaJIT's lexer (lj_lex_setup) skips a UTF-8 BOM and a first line
++-- starting with "#" in any chunk, loadstring's too, and refuses bytecode
++-- after them with "cannot load malformed bytecode", the chunk name not
++-- echoed; the mode of load and loadfile is checked after that. loadfile
++-- (luaL_loadfilex) reads the file as it is and leaves the line to the
++-- lexer. Lua 5.1's loadstring skips nothing (parse_shebang_bytecode.lua).
++local function try(name, src, chunk)
++  local f, err = loadstring(src, chunk or "=src")
++  if f then
++    print(name, "ok", f())
++  else
++    print(name, (err:gsub("^[^:]*:", "")))
++  end
++end
++try("shebang bytecode", "#!lua\n\27LJ")
++try("shebang Lua bytecode", "#!lua\n\27Lua")
++try("bom bytecode", "\239\187\191\27LJ")
++try("bom shebang bytecode", "\239\187\191#!x\n\27LJ")
++try("shebang only", "#!lua")
++try("shebang code", "#!lua\nreturn 1")
++try("bom code", "\239\187\191return 2")
++try("bytecode in the line", "#\27")
++try("cr", "#!lua\r\27LJ")
++try("crlf", "#!lua\r\n\27LJ")
++try("blank line", "#!lua\n\n\27LJ")
++try("file name", "#!lua\n\27LJ", "@file.lua")
++try("line numbers", "#!lua\nreturn 1 +")
++print("load b", load("#!lua\n\27LJ", "=src", "b"))
++print("load t", load("#!lua\n\27LJ", "=src", "t"))
++print("load bt", load("#!lua\n\27LJ", "=src", "bt"))
++print("load b text", load("#!lua\nreturn 1", "=src", "b"))
++local dump = string.dump(function() return "dumped" end)
++local name = os.tmpname()
++local function file(text)
++  local f = assert(io.open(name, "wb"))
++  f:write(text)
++  f:close()
++end
++local function clean(s) return (tostring(s):gsub(name:gsub("%p", "%%%0"), "FILE")) end
++for _, c in ipairs({
++  {"dump", "#!lua\n" .. dump},
++  {"bytecode", "#!lua\n\27LJ"},
++  {"text", "#!lua\nreturn 'text'"},
++  {"bom", "\239\187\191#!lua\nreturn 'bom'"},
++  {"two lines", "#!lua\n#second\nreturn 'two'"},
++  {"crlf", "#!lua\r\nreturn 'crlf'"},
++}) do
++  file(c[2])
++  local f, err = loadfile(name)
++  print("loadfile " .. c[1], f and f() or clean(err))
++  print("loadfile b " .. c[1], clean(select(2, loadfile(name, "b"))))
++  local ok, r = pcall(dofile, name)
++  print("dofile " .. c[1], ok, clean(r))
++end
++os.remove(name)
+--- a/testdata/compat/parse_shebang_bytecode.lua
++++ b/testdata/compat/parse_shebang_bytecode.lua
+@@ -0,0 +1,21 @@
++-- Lua 5.1's loadstring skips no "#" line and no BOM (luaL_loadfile skips
++-- the line of a file); LuaJIT's lexer does, and refuses bytecode after
++-- them (parse_shebang_bytecode.jit.lua).
++local function try(name, src, chunk)
++  local f, err = loadstring(src, chunk or "=src")
++  if f then
++    print(name, "ok", f())
++  else
++    print(name, (err:gsub("^[^:]*:", "")))
++  end
++end
++try("shebang bytecode", "#!lua\n\27LJ")
++try("shebang Lua bytecode", "#!lua\n\27Lua")
++try("bom bytecode", "\239\187\191\27LJ")
++try("bom shebang bytecode", "\239\187\191#!x\n\27LJ")
++try("shebang only", "#!lua")
++try("shebang code", "#!lua\nreturn 1")
++try("bom code", "\239\187\191return 2")
++try("bytecode in the line", "#\27")
++try("cr", "#!lua\r\27LJ")
++try("file name", "#!lua\n\27LJ", "@file.lua")
+--- a/testdata/compat/parse_vararg_arg.jit.lua
++++ b/testdata/compat/parse_vararg_arg.jit.lua
+@@ -0,0 +1,33 @@
++-- The implicit local "arg" of a vararg function: Lua 5.1 (LUA_COMPAT_VARARG)
++-- declares it, a table of the extra arguments when the function does not
++-- use "...", nil when it does; LuaJIT 2.1 declares none, "arg" is the
++-- global there (parse_vararg_arg.lua: the same script for lua5.1).
++arg = "global"
++local function f(...) return type(arg) end
++print("no ...", f(1, 2))
++local function g(a, ...) local t = arg return select("#", ...), type(t), type(t) == "table" and t.n end
++print("extra", g(1, 2, 3))
++local function g2(a, ...) local t = arg return type(t), type(t) == "table" and t.n, type(t) == "table" and t[2] end
++print("table", g2(1, 2, 3))
++local function h(...) local a = ... return type(arg) end
++print("with ...", h(1, 2))
++print("assign", (function(...) arg = 5 return arg end)(1), arg)
++arg = "global"
++local function names(...)
++  local n, i = {}, 1
++  while true do
++    local k = debug.getlocal(1, i)
++    if not k then break end
++    n[#n + 1] = k
++    i = i + 1
++  end
++  return table.concat(n, ",")
++end
++print("locals", names(1, 2))
++local function nested(...) return function() return type(arg) end end
++print("upvalue", nested(1)())
++local t = {}
++function t:m(...) return type(arg), select("#", ...) end
++print("method", t:m(1, 2))
++print("main chunk", type(arg))
++print("loaded chunk", loadstring("return type(arg), select('#', ...)")(1, 2))
+--- a/testdata/compat/parse_vararg_arg.lua
++++ b/testdata/compat/parse_vararg_arg.lua
+@@ -0,0 +1,33 @@
++-- The implicit local "arg" of a vararg function: Lua 5.1 (LUA_COMPAT_VARARG)
++-- declares it, a table of the extra arguments when the function does not
++-- use "...", nil when it does; LuaJIT 2.1 declares none, "arg" is the
++-- global there (parse_vararg_arg.jit.lua: the same script for luajit).
++arg = "global"
++local function f(...) return type(arg) end
++print("no ...", f(1, 2))
++local function g(a, ...) local t = arg return select("#", ...), type(t), type(t) == "table" and t.n end
++print("extra", g(1, 2, 3))
++local function g2(a, ...) local t = arg return type(t), type(t) == "table" and t.n, type(t) == "table" and t[2] end
++print("table", g2(1, 2, 3))
++local function h(...) local a = ... return type(arg) end
++print("with ...", h(1, 2))
++print("assign", (function(...) arg = 5 return arg end)(1), arg)
++arg = "global"
++local function names(...)
++  local n, i = {}, 1
++  while true do
++    local k = debug.getlocal(1, i)
++    if not k then break end
++    n[#n + 1] = k
++    i = i + 1
++  end
++  return table.concat(n, ",")
++end
++print("locals", names(1, 2))
++local function nested(...) return function() return type(arg) end end
++print("upvalue", nested(1)())
++local t = {}
++function t:m(...) return type(arg), select("#", ...) end
++print("method", t:m(1, 2))
++print("main chunk", type(arg))
++print("loaded chunk", loadstring("return type(arg), select('#', ...)")(1, 2))
 --- a/testdata/compat/perf_patterns.lua
 +++ b/testdata/compat/perf_patterns.lua
 @@ -0,0 +1,38 @@
@@ -33247,6 +33773,43 @@ regenerates the diff below; this header is edited by hand.
 +3: '=' expected near '<eof>'
 +2: '=' expected near '<eof>'
 +3: '=' expected near '<eof>'
+--- a/testdata/compat/ref/parse_goto_line.jit.out
++++ b/testdata/compat/ref/parse_goto_line.jit.out
+@@ -0,0 +1,34 @@
++after do	1: undefined label 'nowhere'
++last token	3: undefined label 'nowhere'
++inner do	4: undefined label 'nowhere'
++both do	7: undefined label 'nowhere'
++semicolon	1: undefined label 'nowhere'
++empty do	1: undefined label 'nowhere'
++while	3: undefined label 'nowhere'
++into scope	1: <goto l> jumps into the scope of local 'y'
++break	2: no loop to break
++two gotos	1: undefined label 'a'
++repeat	3: undefined label 'nowhere'
++if	3: undefined label 'nowhere'
++else	4: undefined label 'nowhere'
++elseif	4: no loop to break
++for	3: undefined label 'nowhere'
++for var	3: undefined label 'nowhere'
++return	1: undefined label 'nowhere'
++label	3: undefined label 'nowhere'
++inside	2: undefined label 'nowhere'
++main local	3: undefined label 'nowhere'
++if in do	1: undefined label 'nowhere'
++label in do	1: undefined label 'nowhere'
++deep closure	1: undefined label 'nowhere'
++local	3: undefined label 'nowhere'
++name line	1: undefined label 'nowhere'
++goto in if	3: undefined label 'nowhere'
++goto in do	1: undefined label 'nowhere'
++break in do	1: no loop to break
++after function	1: undefined label 'nowhere'
++first goto	1: <goto l> jumps into the scope of local 'y'
++in function	2: undefined label 'nowhere'
++in loop	6: undefined label 'nowhere'
++resolved	ok
++backward	5: undefined label 'nowhere'
 --- a/testdata/compat/ref/parse_lexer.out
 +++ b/testdata/compat/ref/parse_lexer.out
 @@ -0,0 +1,63 @@
@@ -33361,6 +33924,90 @@ regenerates the diff below; this header is edited by hand.
 +index	196	1: chunk has too many syntax levels
 +assign	197	1: main function has more than 197 variables in assignment
 +nested assign	195	1: main function has more than 195 variables in assignment
+--- a/testdata/compat/ref/parse_locvars_limit.jit.out
++++ b/testdata/compat/ref/parse_locvars_limit.jit.out
+@@ -0,0 +1,16 @@
++main 32767	ok
++main 32768	ok
++function 32767	ok
++function 32768	ok
++vararg 32767	ok
++vararg 32768	ok
++method 32768	ok
++numeric for	ok
++numeric for over	ok
++generic for	ok
++generic for over	ok
++local function	ok
++nested apart	ok
++before an error	true	329: unexpected symbol near '='
++after an error	true	1: unexpected symbol near '='
++runs	run
+--- a/testdata/compat/ref/parse_locvars_limit.out
++++ b/testdata/compat/ref/parse_locvars_limit.out
+@@ -0,0 +1,16 @@
++main 32767	ok
++main 32768	true	too many local variables
++function 32767	ok
++function 32768	true	too many local variables
++vararg 32767	ok
++vararg 32768	true	too many local variables
++method 32768	true	too many local variables
++numeric for	ok
++numeric for over	true	too many local variables
++generic for	ok
++generic for over	true	too many local variables
++local function	true	too many local variables
++nested apart	ok
++before an error	true	too many local variables
++after an error	true	1: unexpected symbol near '='
++runs	run
+--- a/testdata/compat/ref/parse_nul_byte.jit.out
++++ b/testdata/compat/ref/parse_nul_byte.jit.out
+@@ -0,0 +1,20 @@
++number	1: '<eof>' expected
++number sign	1: '<eof>' expected
++number two nul	1: '<eof>' expected
++number then x	1: '<eof>' expected
++number then e	1: '<eof>' expected
++number dot	1: '<eof>' expected
++number at end	1: '<eof>' expected
++exponent nul	1: malformed number near '1e'
++exponent nul digits	1: malformed number near '1e'
++exponent sign nul	1: malformed number near '1e+'
++hex nul	1: malformed number near '0x'
++hex digits nul	1: '<eof>' expected
++dot	1: '<name>' expected
++dot at end	1: '<name>' expected
++dots	1: unexpected symbol
++dot dot nul	1: '<name>' expected
++field	1: '<name>' expected
++name	1: '<eof>' expected
++string	true	true
++comment	true	1
+--- a/testdata/compat/ref/parse_nul_byte.out
++++ b/testdata/compat/ref/parse_nul_byte.out
+@@ -0,0 +1,20 @@
++number	true	1
++number sign	true	1
++number two nul	true	1.5
++number then x	true	0
++number then e	true	3
++number dot	true	0.5
++number at end	true	1
++exponent nul	1: malformed number near '1e'
++exponent nul digits	1: malformed number near '1e'
++exponent sign nul	1: malformed number near '1e+'
++hex nul	1: malformed number near '0x'
++hex digits nul	1: '<eof>' expected
++dot	true	AB
++dot at end	1: unexpected symbol near '<eof>'
++dots	1: '<eof>' expected near '...'
++dot dot nul	1: '<eof>' expected near '...'
++field	1: unexpected symbol near '<eof>'
++name	1: '<eof>' expected
++string	true	true
++comment	true	1
 --- a/testdata/compat/ref/parse_numeral_on_luajit.jit.out
 +++ b/testdata/compat/ref/parse_numeral_on_luajit.jit.out
 @@ -0,0 +1,185 @@
@@ -33549,6 +34196,83 @@ regenerates the diff below; this header is edited by hand.
 +0x1.b6b667e83f483p+594	0x1p+4	inf
 +1: malformed number near '1000000000000000000000000000000000...(1048606)...0000000000000000000000000000000000000LL'	cdata
 +100003	-0.5	15	0	0.5	16	12
+--- a/testdata/compat/ref/parse_shebang_bytecode.jit.out
++++ b/testdata/compat/ref/parse_shebang_bytecode.jit.out
+@@ -0,0 +1,35 @@
++shebang bytecode	cannot load malformed bytecode
++shebang Lua bytecode	cannot load malformed bytecode
++bom bytecode	cannot load malformed bytecode
++bom shebang bytecode	cannot load malformed bytecode
++shebang only	ok
++shebang code	ok	1
++bom code	ok	2
++bytecode in the line	ok
++cr	cannot load malformed bytecode
++crlf	cannot load malformed bytecode
++blank line	3: unexpected symbol near 'char(27)'
++file name	cannot load malformed bytecode
++line numbers	2: unexpected symbol near '<eof>'
++load b	nil	cannot load malformed bytecode
++load t	nil	cannot load malformed bytecode
++load bt	nil	cannot load malformed bytecode
++load b text	nil	attempt to load chunk with wrong mode
++loadfile dump	cannot load malformed bytecode
++loadfile b dump	cannot load malformed bytecode
++dofile dump	false	cannot load malformed bytecode
++loadfile bytecode	cannot load malformed bytecode
++loadfile b bytecode	cannot load malformed bytecode
++dofile bytecode	false	cannot load malformed bytecode
++loadfile text	text
++loadfile b text	attempt to load chunk with wrong mode
++dofile text	true	text
++loadfile bom	bom
++loadfile b bom	attempt to load chunk with wrong mode
++dofile bom	true	bom
++loadfile two lines	FILE:2: unexpected symbol near '#'
++loadfile b two lines	attempt to load chunk with wrong mode
++dofile two lines	false	FILE:2: unexpected symbol near '#'
++loadfile crlf	crlf
++loadfile b crlf	attempt to load chunk with wrong mode
++dofile crlf	true	crlf
+--- a/testdata/compat/ref/parse_shebang_bytecode.out
++++ b/testdata/compat/ref/parse_shebang_bytecode.out
+@@ -0,0 +1,10 @@
++shebang bytecode	1: unexpected symbol near '#'
++shebang Lua bytecode	1: unexpected symbol near '#'
++bom bytecode	1: unexpected symbol near 'ï'
++bom shebang bytecode	1: unexpected symbol near 'ï'
++shebang only	1: unexpected symbol near '#'
++shebang code	1: unexpected symbol near '#'
++bom code	1: unexpected symbol near 'ï'
++bytecode in the line	1: unexpected symbol near '#'
++cr	1: unexpected symbol near '#'
++file name	1: unexpected symbol near '#'
+--- a/testdata/compat/ref/parse_vararg_arg.jit.out
++++ b/testdata/compat/ref/parse_vararg_arg.jit.out
+@@ -0,0 +1,10 @@
++no ...	string
++extra	2	string	false
++table	string	false	false
++with ...	string
++assign	5	5
++locals	n,i
++upvalue	string
++method	string	2
++main chunk	string
++loaded chunk	string	2
+--- a/testdata/compat/ref/parse_vararg_arg.out
++++ b/testdata/compat/ref/parse_vararg_arg.out
+@@ -0,0 +1,10 @@
++no ...	table
++extra	2	nil	false
++table	table	2	3
++with ...	nil
++assign	5	global
++locals	arg,n,i
++upvalue	table
++method	nil	2
++main chunk	string
++loaded chunk	string	2
 --- a/testdata/compat/ref/perf_patterns.out
 +++ b/testdata/compat/ref/perf_patterns.out
 @@ -0,0 +1,56 @@
