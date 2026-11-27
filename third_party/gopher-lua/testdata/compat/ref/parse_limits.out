@@ -16,17 +16,25 @@ for locals	198: main function has more than 200 local variables
 for locals 196	ok
 forin locals	197: main function has more than 200 local variables
 scopes	ok
-call 54	too complex
+call 54	198: function or expression too complex near '<eof>'
 call 53	ok
-call later	too complex
+call later	199: function or expression too complex near '1'
 table	ok
 table 53	ok
 table 54	ok
-concat	too complex
-return	too complex
+concat	197: function or expression too complex near 'v1'
+return	197: function or expression too complex near 'v1'
 assign 54	ok
 assign 55	ok
 assign index	ok
+closures	193: function or expression too complex near '<eof>'
+closures 58	ok
+vararg call	192: function or expression too complex near ')'
+vararg return	193: function or expression too complex near 'end'
+conflict copies	ok
+method key	453: function or expression too complex near '('
+before a syntax error	197: function or expression too complex near '1'
+after a syntax error	197: unexpected symbol near '='
 upvalues 60	ok
 upvalues 61	66: function at line 64 has more than 60 upvalues
 upvalues 300	304: function at line 152 has more than 60 upvalues

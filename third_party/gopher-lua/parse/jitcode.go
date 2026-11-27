@@ -208,6 +208,7 @@ const (
 	vNonReloc  // info is the register
 	vCall      // info is the instruction, aux the base
 	vVoid
+	vVararg // the model of Lua 5.1's registers only: VVARARG
 
 	vKLast = vKNum
 )
@@ -252,6 +253,9 @@ type jitFunc struct {
 	kstr       map[string]uint32
 	nkn, nkgc  uint32
 	vbase      int // parser.vtop when the function starts
+	// the register model of Lua 5.1 (lua51regs.go) has freereg, kstr, kn
+	// and its constants in nkn, and the constants nil, false, true
+	k51 [3]uint32
 }
 
 // maxPooledBytecode is the size of the largest bytecode stack kept for the

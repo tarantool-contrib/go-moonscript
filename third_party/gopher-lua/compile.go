@@ -10,11 +10,15 @@ import (
 
 /* internal constants & structs  {{{ */
 
-// maxRegisters is Lua 5.1's MAXSTACK: a function uses fewer registers.
-// go-moonscript patch: it was 200, LUAI_MAXVARS (the parser checks that
-// limit, the number of local variables per function), which made functions
-// with many locals fail that Lua 5.1 compiles.
-const maxRegisters = 250
+// maxRegisters is the number of registers an instruction can address
+// (NumUsedRegisters is a byte): a function uses fewer. go-moonscript
+// patch: it was 200, LUAI_MAXVARS (the parser checks that limit, the
+// number of local variables per function), which made functions with many
+// locals fail that Lua 5.1 compiles. The limits of the dialects, Lua 5.1's
+// MAXSTACK 250 and LuaJIT's LJ_MAX_SLOTS 250, are the parser's: its models
+// of their register allocation (parse/lua51regs.go, parse/jitcode.go)
+// find them where their parsers do.
+const maxRegisters = 256
 
 type expContextType int
 
@@ -2366,6 +2370,39 @@ func getExprName(context *funcContext, expr ast.Expr) string { // {{{
 	return "?"
 } // }}}
 
+// registerOverflow is luaK_checkstack's message, for a function needing
+// MAXSTACK registers. go-moonscript patch.
+const registerOverflow = "function or expression too complex"
+
+// manyRegisters is the number of registers from which a function's chunk
+// is parsed again with the model of Lua 5.1's registers (Load): the
+// compiler allocates registers as luac does, but not exactly. go-moonscript
+// patch.
+const manyRegisters = 200
+
+// lua51Overflow reports whether a compiled chunk, or the compiler's error,
+// may be one lua5.1 rejects as too complex: a function needing too many
+// registers, or many. go-moonscript patch.
+func lua51Overflow(proto *FunctionProto, err error) bool {
+	if err != nil {
+		ce, ok := err.(*CompileError)
+		return ok && ce.Message == registerOverflow
+	}
+	var many func(*FunctionProto) bool
+	many = func(p *FunctionProto) bool {
+		if int(p.NumUsedRegisters) >= manyRegisters {
+			return true
+		}
+		for _, c := range p.FunctionPrototypes {
+			if many(c) {
+				return true
+			}
+		}
+		return false
+	}
+	return many(proto)
+}
+
 func patchCode(context *funcContext) { // {{{
 	maxreg := 1
 	if np := int(context.Proto.NumParameters); np > 1 {
@@ -2471,7 +2508,7 @@ func patchCode(context *funcContext) { // {{{
 	maxreg++
 	if maxreg >= maxRegisters {
 		// go-moonscript patch: luaK_checkstack's message
-		raiseCompileError(context, overflowLine, "function or expression too complex")
+		raiseCompileError(context, overflowLine, registerOverflow)
 	}
 	context.Proto.NumUsedRegisters = uint8(maxreg)
 } // }}}

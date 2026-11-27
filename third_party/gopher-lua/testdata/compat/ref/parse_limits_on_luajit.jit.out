@@ -1,0 +1,31 @@
+call 54	197: function or expression too complex near '1'
+call 53	198: function or expression too complex near '<eof>'
+call 52	ok
+call later	199: function or expression too complex near '1'
+call lines	251: function or expression too complex near '1'
+table	ok
+concat	197: function or expression too complex near 'v1'
+return	197: function or expression too complex near 'v1'
+args 247	ok
+args 248	1: function or expression too complex near '<eof>'
+method	ok
+before a syntax error	197: function or expression too complex near '1'
+while 16381	ok
+while 16382	1: control structure too long near 'end'
+if 16384	1: control structure too long near '<eof>'
+if else 16384	1: control structure too long near '('
+repeat 16383	1: control structure too long near '<eof>'
+goto 16384	1: control structure too long near '<eof>'
+break 16380	1: control structure too long near 'end'
+and 10922	1: control structure too long near '<eof>'
+fixup 16382	ok
+fixup 16383	1: function too long for return fixup near '<eof>'
+numbers 65536	ok
+numbers 65537	1: main function has more than 65536 constants
+strings 65536	1: main function has more than 65536 constants
+functions 65536	1: function at line 1 has more than 65536 constants
+vstack 65476	ok
+vstack 65477	655: chunk has more than 65476 local variables
+vstack break	656: chunk has more than 65476 local variables
+vstack function	655: chunk has more than 65476 local variables
+vstack after function	ok

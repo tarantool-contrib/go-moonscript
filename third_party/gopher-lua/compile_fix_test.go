@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
 )
 
 // From yuin/gopher-lua#556 (kimjooyoon), with Lua 5.1's limits: the parser
-// allows 200 local variables per function (LUAI_MAXVARS), the compiler
-// fewer than 250 registers (MAXSTACK). The errors are lua5.1's (luac
-// reports a register overflow near a token, one token later).
+// allows 200 local variables per function (LUAI_MAXVARS), and fewer than
+// 250 registers (MAXSTACK, found by the model of lua5.1's registers when
+// the compiler needs many). The errors are lua5.1's: a register overflow
+// is reported near the token luac is at (a *parse.Error), the other limits
+// near none (a *CompileError).
 func TestCompileRegisterLimitLocations(t *testing.T) {
 	locals := func(count int, initializer string) string {
 		var source strings.Builder
@@ -38,23 +42,25 @@ func TestCompileRegisterLimitLocations(t *testing.T) {
 		source      string
 		wantLine    int
 		wantMessage string
+		wantToken   string
 	}{
-		{"initialized_locals_in_main", mainPrefix + locals(210, " = 1"), 202, mainLocals},
-		{"initialized_locals_in_nested_function", nestedPrefix + locals(210, " = 1") + "end\n", 206, nestedLocals},
+		{"initialized_locals_in_main", mainPrefix + locals(210, " = 1"), 202, mainLocals, ""},
+		{"initialized_locals_in_nested_function", nestedPrefix + locals(210, " = 1") + "end\n", 206, nestedLocals, ""},
 		// the error is on the line of the token after the name
-		{"uninitialized_locals_in_main", mainPrefix + locals(210, ""), 203, mainLocals},
-		{"uninitialized_locals_in_nested_function", nestedPrefix + locals(210, "") + "end\n", 207, nestedLocals},
-		{"multiline_initializer", locals200 + "local overflow =\n1\n", 202, mainLocals},
-		{"local_function_declaration", locals200 + "local function overflow()\nend\n", 202, mainLocals},
-		// the function in register 195, 54 arguments: 250 registers
-		{"call_arguments_on_one_line", locals195 + call(54), 197, registerError},
-		// the 54th argument uses register 249, the first beyond the limit
-		{"multiline_call_uses_first_overflowing_argument", locals195 + multilineCall, 251, registerError},
-		{"later_larger_call_keeps_first_overflow_location", locals195 + call(20) + "\n" + call(60), 199, registerError},
-		{"accepted_200_locals", locals200 + "return v199\n", 0, ""},
-		{"accepted_call_below_register_limit", locals195 + call(53), 0, ""},
+		{"uninitialized_locals_in_main", mainPrefix + locals(210, ""), 203, mainLocals, ""},
+		{"uninitialized_locals_in_nested_function", nestedPrefix + locals(210, "") + "end\n", 207, nestedLocals, ""},
+		{"multiline_initializer", locals200 + "local overflow =\n1\n", 202, mainLocals, ""},
+		{"local_function_declaration", locals200 + "local function overflow()\nend\n", 202, mainLocals, ""},
+		// the function in register 195, 54 arguments: the last one, stored
+		// after the ')', needs register 249, the 250th
+		{"call_arguments_on_one_line", locals195 + call(54), 198, registerError, "<eof>"},
+		// the 54th argument is stored when the ',' after it is read
+		{"multiline_call_uses_first_overflowing_argument", locals195 + multilineCall, 252, registerError, "1"},
+		{"later_larger_call_keeps_first_overflow_location", locals195 + call(20) + "\n" + call(60), 199, registerError, "1"},
+		{"accepted_200_locals", locals200 + "return v199\n", 0, "", ""},
+		{"accepted_call_below_register_limit", locals195 + call(53), 0, "", ""},
 		{"accepted_locals_reused_after_scope_exit", "do\n" + locals(200, " = 1") + "end\n" +
-			"do\n" + locals(200, " = 1") + "end\nreturn 1\n", 0, ""},
+			"do\n" + locals(200, " = 1") + "end\nreturn 1\n", 0, "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -73,6 +79,17 @@ func TestCompileRegisterLimitLocations(t *testing.T) {
 			apiErr, ok := err.(*ApiError)
 			if !ok || apiErr.Type != ApiErrorSyntax {
 				t.Fatalf("Load error = %v (%T), want ApiErrorSyntax", err, err)
+			}
+			if tt.wantToken != "" {
+				pe, ok := apiErr.Cause.(*parse.Error)
+				if !ok {
+					t.Fatalf("Load error = %v (%T), want a *parse.Error", apiErr.Cause, apiErr.Cause)
+				}
+				if pe.Message != tt.wantMessage || pe.Pos.Line != tt.wantLine || pe.Token != tt.wantToken {
+					t.Errorf("Load error = %d: %q near %q, want %d: %q near %q", pe.Pos.Line, pe.Message, pe.Token,
+						tt.wantLine, tt.wantMessage, tt.wantToken)
+				}
+				return
 			}
 			compileErr, ok := apiErr.Cause.(*CompileError)
 			if !ok {

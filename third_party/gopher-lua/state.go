@@ -2325,8 +2325,19 @@ func (ls *LState) Load(reader io.Reader, name string) (*LFunction, error) {
 	if ls.Dialect() == DialectLuaJIT {
 		dialect = parse.LuaJIT
 	}
-	chunk, err := parse.ParseDialect(reader, name, dialect)
+	src, err := io.ReadAll(reader)
 	if err != nil {
+		return nil, newApiErrorE(ApiErrorSyntax, err)
+	}
+	chunk, err := parse.ParseBytes(src, name, dialect)
+	if err != nil {
+		// go-moonscript patch: a function that needs too many registers
+		// before the error, which lua5.1 finds while parsing (lua51Overflow)
+		if dialect == parse.Lua51 {
+			if pe := parse.Lua51Overflow(src, name); pe != nil {
+				err = pe
+			}
+		}
 		// go-moonscript patch: an error near no token (a limit) is reported
 		// like the compiler's limit errors, as "<chunk>:<line>: <message>"
 		if pe, ok := err.(*parse.Error); ok && pe.Token == "" && pe.Pos.Line != parse.NoLine {
@@ -2335,6 +2346,14 @@ func (ls *LState) Load(reader io.Reader, name string) (*LFunction, error) {
 		return nil, newApiErrorE(ApiErrorSyntax, err)
 	}
 	proto, err := Compile(chunk, name)
+	// go-moonscript patch: lua5.1 finds that a function needs too many
+	// registers while parsing, and reports it near the token it is at; the
+	// parser's model of its registers tells, if the compiler needed many
+	if dialect == parse.Lua51 && lua51Overflow(proto, err) {
+		if pe := parse.Lua51Overflow(src, name); pe != nil {
+			return nil, newApiErrorE(ApiErrorSyntax, pe)
+		}
+	}
 	if err != nil {
 		return nil, newApiErrorE(ApiErrorSyntax, err)
 	}

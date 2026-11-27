@@ -9,8 +9,10 @@ package parse
 // LUAI_MAXUPVALUES (60 upvalues per function), which are also LuaJIT's.
 // Under LuaJIT, it also emits LuaJIT's bytecode as lj_parse.c does
 // (jitcode.go, with the expression descriptors the expression functions
-// pass around, unused under Lua51), for the limits of LuaJIT's variable
-// stack and code generator.
+// pass around), for the limits of LuaJIT's variable stack and code
+// generator. Under Lua51, Lua51Overflow parses with a model of Lua 5.1's
+// register allocation instead (lua51regs.go, p.r51), for the chunks the
+// compiler needs many registers for.
 
 import (
 	"fmt"
@@ -43,6 +45,12 @@ func ParseDialect(reader io.Reader, name string, dialect Dialect) (chunk []ast.S
 	if err != nil {
 		return nil, err
 	}
+	return ParseBytes(src, name, dialect)
+}
+
+// ParseBytes parses a chunk of the dialect held in memory. A syntax error
+// is an *Error.
+func ParseBytes(src []byte, name string, dialect Dialect) (chunk []ast.Stmt, err error) {
 	p := &parser{jit: dialect == LuaJIT}
 	sc := scratchPool.Get().(*scratch)
 	p.fsCache, p.bcstack, p.lnstack = sc.fsCache, sc.bcstack, sc.lnstack
@@ -185,6 +193,7 @@ type parser struct {
 	ls     *lexer
 	fs     *funcState
 	jit    bool
+	r51    bool // the model of Lua 5.1's registers runs (Lua51Overflow)
 	level  int
 	nextID int
 	// LuaJIT's code generator: the bytecode of the functions being parsed,
@@ -317,6 +326,9 @@ func (p *parser) leaveBlock() {
 	bl := fs.bl
 	fs.actvar = fs.actvar[:bl.nactvar]
 	fs.bl = bl.prev
+	if p.r51 {
+		fs.freereg = fs.nactvar()
+	}
 	if p.jit {
 		fs.freereg = fs.nactvar()
 		if bl.upval && !bl.noClose {
@@ -477,7 +489,7 @@ func (p *parser) adjustLocalVars(n int) {
 // its block marks the block (fscope_uvmark).
 func (p *parser) singleVar(fs *funcState, name string, e *expDesc, first bool) (int, bool) {
 	if fs == nil {
-		if p.jit {
+		if p.jit || p.r51 {
 			e.init(vGlobal, 0)
 			e.sval = name
 		}
@@ -485,8 +497,10 @@ func (p *parser) singleVar(fs *funcState, name string, e *expDesc, first bool) (
 	}
 	for i := len(fs.actvar) - 1; i >= 0; i-- {
 		if fs.actvar[i].name == name {
-			if p.jit {
+			if p.jit || p.r51 {
 				e.init(vLocal, uint32(i))
+			}
+			if p.jit {
 				if !first {
 					bl := fs.bl
 					for bl != nil && bl.nactvar > i {
@@ -518,7 +532,7 @@ func (p *parser) singleVar(fs *funcState, name string, e *expDesc, first bool) (
 		idx = len(fs.upvals)
 		fs.upvals = append(fs.upvals, varInfo{name, id})
 	}
-	if p.jit {
+	if p.jit || p.r51 {
 		e.info, e.k = uint32(idx), vUpval
 	}
 	return id, true
@@ -540,7 +554,7 @@ func (p *parser) chunk() []ast.Stmt {
 	for islast := false; !islast && !blockFollow(p.ls.t.typ); {
 		islast = p.statement(&stmts)
 		p.testNext(';')
-		if p.jit {
+		if p.jit || p.r51 {
 			p.fs.freereg = p.fs.nactvar() // the registers are free after each statement
 		}
 	}
@@ -560,6 +574,12 @@ func (p *parser) block() []ast.Stmt {
 func (p *parser) cond() (ast.Expr, uint32) {
 	var v expDesc
 	e, _ := p.expr(&v)
+	if p.r51 {
+		if v.k == vKNil {
+			v.k = vKFalse
+		}
+		p.fs.rGoIfTrue(p, &v)
+	}
 	if !p.jit {
 		return e, 0
 	}
@@ -659,12 +679,17 @@ func (p *parser) statement(stmts *[]ast.Stmt) bool {
 			if p.jit {
 				lv.init(vLocal, fs.freereg)
 				fs.regReserve(p, 1)
+			} else if p.r51 {
+				lv.init(vLocal, fs.freereg)
+				fs.rReserve(p, 1)
 			}
 			p.adjustLocalVars(1)
 			fn := p.body(&b, false, ls.linenumber)
 			if p.jit {
 				fs.exprFree(&b)
 				fs.toReg(p, &b, lv.info)
+			} else if p.r51 {
+				fs.rStoreVar(p, &lv, &b)
 			}
 			st := &ast.LocalAssignStmt{Names: []string{name}, Exprs: []ast.Expr{fn}, IsFunction: true}
 			st.SetLine(tokLine)
@@ -740,6 +765,8 @@ func (p *parser) returnStat(line int) ast.Stmt {
 		exprs = p.exprList(&e)
 		if p.jit {
 			ins = p.returnIns(&e, len(exprs))
+		} else if p.r51 {
+			p.rReturn(&e, len(exprs))
 		}
 	}
 	if p.jit {
@@ -847,6 +874,8 @@ func (p *parser) forExp() ast.Expr {
 	e, _ := p.expr(&v)
 	if p.jit {
 		p.fs.toNextReg(p, &v)
+	} else if p.r51 {
+		p.fs.rExp2NextReg(p, &v)
 	}
 	return e
 }
@@ -869,6 +898,9 @@ func (p *parser) forNum(name string, line int) ast.Stmt {
 	} else if p.jit {
 		fs.emit(p, insAD(bcKSHORT, fs.freereg, 1)) // the default step
 		fs.regReserve(p, 1)
+	} else if p.r51 {
+		fs.rNumberK(1) // the default step
+		fs.rReserve(p, 1)
 	}
 	p.adjustLocalVars(3) // the control variables
 	p.checkNext(tkDo)
@@ -908,6 +940,9 @@ func (p *parser) forIter(name string) ast.Stmt {
 		p.assignAdjust(3, len(exprs), &e)
 		fs.regBump(p, 3+fr2) // the iterator takes another 3+1 slots
 		isnext = len(names) <= 2 && fs.pc > exprpc && p.predictNext(exprpc)
+	} else if p.r51 {
+		p.rAdjustAssign(3, len(exprs), &e)
+		fs.rCheckStack(p, 3) // to call the generator
 	}
 	p.adjustLocalVars(3) // the control variables
 	p.checkNext(tkDo)
@@ -966,6 +1001,8 @@ func (p *parser) forBody(nvars int) []ast.Stmt {
 	p.adjustLocalVars(nvars)
 	if p.jit {
 		p.fs.regReserve(p, uint32(nvars))
+	} else if p.r51 {
+		p.fs.rReserve(p, uint32(nvars))
 	}
 	stmts := p.block()
 	p.leaveBlock()
@@ -980,6 +1017,9 @@ func (p *parser) funcStat(line int) ast.Stmt {
 	// funcname: NAME {'.' NAME} [':' NAME]
 	name, nameLine := p.strCheckName()
 	p.singleVar(fs, name, &v, true)
+	if p.r51 && v.k == vGlobal {
+		v.info = fs.rStringK(name)
+	}
 	var fn ast.Expr = &ast.IdentExpr{Value: name}
 	fn.SetLine(nameLine)
 	for ls.t.typ == '.' {
@@ -999,6 +1039,8 @@ func (p *parser) funcStat(line int) ast.Stmt {
 	body := p.body(&b, needself, line)
 	if p.jit {
 		fs.store(p, &v, &b)
+	} else if p.r51 {
+		fs.rStoreVar(p, &v, &b)
 	}
 	st := &ast.FuncDefStmt{Name: funcname, Func: body}
 	st.SetLine(line)
@@ -1011,6 +1053,8 @@ func (p *parser) funcStat(line int) ast.Stmt {
 func (p *parser) field(v *expDesc) (string, int) {
 	if p.jit {
 		p.fs.toAnyReg(p, v)
+	} else if p.r51 {
+		p.fs.rExp2AnyReg(p, v)
 	}
 	p.next()
 	name, line := p.strCheckName()
@@ -1019,6 +1063,10 @@ func (p *parser) field(v *expDesc) (string, int) {
 		k.init(vKStr, 0)
 		k.sval = name
 		p.fs.index(p, v, &k)
+	} else if p.r51 {
+		var k expDesc
+		k.init(vKStr, p.fs.rStringK(name))
+		p.fs.rIndexed(p, v, &k)
 	}
 	return name, line
 }
@@ -1042,6 +1090,8 @@ func (p *parser) localStat(line int) ast.Stmt {
 	}
 	if p.jit {
 		p.assignAdjust(len(names), len(exprs), &e)
+	} else if p.r51 {
+		p.rAdjustAssign(len(names), len(exprs), &e)
 	}
 	p.adjustLocalVars(len(names))
 	st := &ast.LocalAssignStmt{Names: names, Exprs: exprs}
@@ -1124,7 +1174,7 @@ func (p *parser) exprStat() ast.Stmt {
 		return st
 	}
 	base := len(p.lhs)
-	if p.jit {
+	if p.jit || p.r51 {
 		p.lhs = append(p.lhs, v)
 	}
 	lhs := []ast.Expr{e}
@@ -1145,8 +1195,16 @@ func (p *parser) exprStat() ast.Stmt {
 			if p.level+nvars >= maxLevels {
 				p.errorLimit(p.fs, maxLevels, "variable names")
 			}
-		} else if limit := maxLevels - p.level; nvars > limit {
-			p.errorLimit(p.fs, limit, "variables in assignment")
+		} else {
+			if p.r51 {
+				p.lhs = append(p.lhs, v)
+				if v.k == vLocal {
+					p.rCheckConflict(base, &v)
+				}
+			}
+			if limit := maxLevels - p.level; nvars > limit {
+				p.errorLimit(p.fs, limit, "variables in assignment")
+			}
 		}
 		lhs = append(lhs, e)
 	}
@@ -1155,8 +1213,10 @@ func (p *parser) exprStat() ast.Stmt {
 	rhs := p.exprList(&ev)
 	if p.jit {
 		p.assignStore(base, len(rhs), &ev)
-		p.lhs = p.lhs[:base]
+	} else if p.r51 {
+		p.rAssignStore(base, len(rhs), &ev)
 	}
+	p.lhs = p.lhs[:base]
 	st := &ast.AssignStmt{Lhs: lhs, Rhs: rhs}
 	st.SetLine(lhs[0].Line())
 	return st
@@ -1269,6 +1329,8 @@ func (p *parser) body(e *expDesc, needself bool, line int) *ast.FunctionExpr {
 	if p.jit {
 		fs.numparams = fs.nactvar()
 		fs.regReserve(p, fs.numparams)
+	} else if p.r51 {
+		fs.rReserve(p, fs.nactvar())
 	}
 	p.checkNext(')')
 	if p.jit {
@@ -1279,6 +1341,10 @@ func (p *parser) body(e *expDesc, needself bool, line int) *ast.FunctionExpr {
 	if !p.jit {
 		p.checkMatch(tkEnd, tkFunction, line)
 		p.closeFunc()
+		if p.r51 { // pushclosure
+			e.init(vRelocable, 0)
+			e.aux = opOther51
+		}
 	} else {
 		// fs_finish runs at the 'end', which is skipped after the closure
 		if ls.t.typ != tkEnd {
@@ -1321,6 +1387,8 @@ func (p *parser) funcArgs(e *expDesc) (args []ast.Expr, line, endLine int) {
 			args = p.exprList(&a)
 			if p.jit && a.k == vCall { // f(a, b, g()) or f(a, b, ...)
 				p.fs.bc[a.info].setB(0) // all the results
+			} else if p.r51 {
+				p.fs.rSetReturns(p, &a) // luaK_setmultret
 			}
 		}
 		endLine = ls.t.line
@@ -1334,6 +1402,8 @@ func (p *parser) funcArgs(e *expDesc) (args []ast.Expr, line, endLine int) {
 		if p.jit {
 			a.init(vKStr, 0)
 			a.sval = ls.t.sem
+		} else if p.r51 {
+			a.init(vKStr, p.fs.rStringK(ls.t.sem))
 		}
 		p.next()
 		args, line, endLine = []ast.Expr{s}, s.Line(), s.Line()
@@ -1355,6 +1425,15 @@ func (p *parser) funcArgs(e *expDesc) (args []ast.Expr, line, endLine int) {
 		e.init(vCall, fs.emit(p, ins))
 		e.aux = base
 		fs.freereg = base + 1 // one result by default
+	} else if p.r51 {
+		fs := p.fs
+		base := e.info
+		if !hasMultRet51(a.k) && a.k != vVoid {
+			fs.rExp2NextReg(p, &a)
+		}
+		e.init(vCall, 0)
+		e.aux = base
+		fs.freereg = base + 1
 	}
 	return args, line, endLine
 }
@@ -1377,6 +1456,8 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 		p.checkMatch(')', '(', where)
 		if p.jit {
 			fs.discharge(p, v)
+		} else if p.r51 {
+			fs.rDischargeVars(v)
 		}
 		if call, ok := e.(*ast.FuncCallExpr); ok && k == kindCall {
 			call.AdjustRet = true
@@ -1390,6 +1471,9 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 	case p.isName():
 		name, line := p.strCheckName()
 		p.singleVar(fs, name, v, true)
+		if p.r51 && v.k == vGlobal {
+			v.info = fs.rStringK(name)
+		}
 		e = &ast.IdentExpr{Value: name}
 		e.SetLine(line)
 		kind = kindVar
@@ -1408,10 +1492,14 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 		case '[':
 			if p.jit {
 				fs.toAnyReg(p, v)
+			} else if p.r51 {
+				fs.rExp2AnyReg(p, v)
 			}
 			key := p.bracket(&kv)
 			if p.jit {
 				fs.index(p, v, &kv)
+			} else if p.r51 {
+				fs.rIndexed(p, v, &kv)
 			}
 			a := &ast.AttrGetExpr{Object: e, Key: key}
 			a.SetLine(e.Line())
@@ -1421,6 +1509,8 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 			method, _ := p.strCheckName()
 			if p.jit {
 				fs.method(p, v, method)
+			} else if p.r51 {
+				fs.rSelf(p, v, method)
 			}
 			args, line, endLine := p.funcArgs(v)
 			c := &ast.FuncCallExpr{Method: method, Receiver: e, Args: args, ArgsLine: line, ArgsEndLine: endLine}
@@ -1430,6 +1520,8 @@ func (p *parser) primaryExp(v *expDesc) (ast.Expr, int) {
 			if p.jit {
 				fs.toNextReg(p, v)
 				fs.regReserve(p, fr2)
+			} else if p.r51 {
+				fs.rExp2NextReg(p, v)
 			}
 			args, line, endLine := p.funcArgs(v)
 			c := &ast.FuncCallExpr{Func: e, Args: args, ArgsLine: line, ArgsEndLine: endLine}
@@ -1447,6 +1539,8 @@ func (p *parser) bracket(v *expDesc) ast.Expr {
 	e, _ := p.expr(v)
 	if p.jit {
 		p.fs.toVal(p, v)
+	} else if p.r51 {
+		p.fs.rExp2Val(p, v)
 	}
 	p.checkNext(']')
 	return e
@@ -1464,11 +1558,17 @@ func (p *parser) simpleExp(v *expDesc) (ast.Expr, int) {
 			e = &ast.NumberExpr{Value: ls.t.sem}
 			v.init(vKNum, 0)
 			v.nval = ls.t.num
+			if p.r51 {
+				v.nval = lua51Number(ls.t.sem)
+			}
 		}
 	case tkString:
 		e = &ast.StringExpr{Value: ls.t.sem}
 		v.init(vKStr, 0)
 		v.sval = ls.t.sem
+		if p.r51 { // codestring
+			v.info = p.fs.rStringK(ls.t.sem)
+		}
 	case tkNil:
 		e = &ast.NilExpr{}
 		v.init(vKNil, 0)
@@ -1489,6 +1589,8 @@ func (p *parser) simpleExp(v *expDesc) (ast.Expr, int) {
 			base := fs.freereg - 1
 			v.init(vCall, fs.emit(p, insABC(bcVARG, base, 2, fs.numparams)))
 			v.aux = base
+		} else if p.r51 {
+			v.init(vVararg, 0)
 		}
 	case '{':
 		return p.constructor(v), kindOther
@@ -1516,6 +1618,10 @@ type tableCons struct {
 	template bool   // a template table holds the constant items
 	vcall    bool   // the last item is a call or "..." in the array part
 	narr     uint32 // the next array index
+	// Lua 5.1's ConsControl (lua51regs.go): the last list item, the
+	// number of those not stored yet
+	v51     expDesc
+	tostore int
 }
 
 func (p *parser) constructor(v *expDesc) *ast.TableExpr {
@@ -1533,6 +1639,10 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 		v.init(vNonReloc, c.freg)
 		fs.regReserve(p, 1)
 		c.freg++
+	} else if p.r51 {
+		fs.rReserve(p, 1) // the NEWTABLE
+		v.init(vNonReloc, fs.freereg-1)
+		c.v51.init(vVoid, 0)
 	}
 	p.checkNext('{')
 	fields := []*ast.Field{}
@@ -1542,6 +1652,10 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 	for ls.t.typ != '}' {
 		var k ast.Expr
 		c.vcall = false
+		if p.r51 {
+			p.rCloseListField(&c, v)
+		}
+		reg := fs.freereg // recfield's
 		switch {
 		case ls.t.typ == '[':
 			k = p.bracket(&key)
@@ -1549,6 +1663,9 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 				fs.index(p, v, &key)
 			}
 			p.checkNext('=')
+			if p.r51 {
+				fs.rExp2RK(p, &key)
+			}
 		case p.isName() && ls.lookahead() == '=':
 			name, nameLine := p.strCheckName()
 			s := &ast.StringExpr{Value: name}
@@ -1556,7 +1673,13 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 			k = s
 			key.init(vKStr, 0)
 			key.sval = name
+			if p.r51 {
+				key.info = fs.rStringK(name)
+			}
 			p.checkNext('=')
+			if p.r51 {
+				fs.rExp2RK(p, &key)
+			}
 		default:
 			key.init(vKNum, 0)
 			key.nval = float64(c.narr)
@@ -1568,6 +1691,14 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 		if p.jit {
 			p.tableItem(&c, v, &key, &val)
 			fs.freereg = c.freg
+		} else if p.r51 {
+			if k != nil { // recfield
+				fs.rExp2RK(p, &val)
+				fs.freereg = reg
+			} else { // listfield
+				c.v51 = val
+				c.tostore++
+			}
 		}
 		if !p.testNext(',') && !p.testNext(';') {
 			break
@@ -1577,6 +1708,8 @@ func (p *parser) constructor(v *expDesc) *ast.TableExpr {
 	p.checkMatch('}', '{', where)
 	if p.jit {
 		p.tableEnd(&c, v)
+	} else if p.r51 {
+		p.rLastListField(&c, v)
 	}
 	t := &ast.TableExpr{Fields: fields, PrevLine: prevLine}
 	t.SetLine(line)
@@ -1680,6 +1813,8 @@ func (p *parser) subExpr(v *expDesc, limit int) (ast.Expr, int, int) {
 		}
 		if p.jit {
 			p.fs.unop(p, bc, v)
+		} else if p.r51 {
+			p.fs.rPrefix(p, op, v)
 		}
 		e.SetLine(operand.Line())
 	default:
@@ -1695,11 +1830,15 @@ func (p *parser) subExpr(v *expDesc, limit int) (ast.Expr, int, int) {
 		p.next()
 		if p.jit {
 			p.fs.binopLeft(p, b.jit, v)
+		} else if p.r51 {
+			p.fs.rInfix(p, binOps51[op], v)
 		}
 		line := e.Line()
 		rhs, _, nextop := p.subExpr(&v2, b.right)
 		if p.jit {
 			p.fs.binop(p, b.jit, v, &v2)
+		} else if p.r51 {
+			p.fs.rPosfix(p, binOps51[op], v, &v2)
 		}
 		switch op {
 		case tkOr, tkAnd:
@@ -1727,6 +1866,8 @@ func (p *parser) exprList(v *expDesc) []ast.Expr {
 	for p.testNext(',') {
 		if p.jit {
 			p.fs.toNextReg(p, v)
+		} else if p.r51 {
+			p.fs.rExp2NextReg(p, v)
 		}
 		e, _ = p.expr(v)
 		list = append(list, e)

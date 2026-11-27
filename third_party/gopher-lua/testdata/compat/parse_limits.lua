@@ -1,18 +1,17 @@
 -- The compiler limits are Lua 5.1's: 200 local variables per function
 -- (LUAI_MAXVARS), 60 upvalues (LUAI_MAXUPVALUES), 200 syntax levels
--- (LUAI_MAXCCALLS, from 2 C calls on), fewer than 250 registers
--- (MAXSTACK), whose errors give no token. gopher-lua had 200 registers,
--- which included temporaries (a function with 200 locals Lua 5.1 compiles
--- failed with "register overflow"), 255 upvalues, and errors in its own
--- words. luac reports a register overflow near a token; only whether it
--- is one is printed for those.
+-- (LUAI_MAXCCALLS, from 2 C calls on), whose errors give no token, and
+-- fewer than 250 registers (MAXSTACK), whose error luac reports near the
+-- token it is at when the registers run out, before a syntax error after
+-- it. gopher-lua had 200 registers, which included temporaries (a function
+-- with 200 locals Lua 5.1 compiles failed with "register overflow"), 255
+-- upvalues, and errors in its own words. parse_limits_on_luajit.jit.lua
+-- has LuaJIT's limits.
 local r = string.rep
 local function try(name, src)
   local f, err = loadstring(src, "=src")
   if f then
     print(name, "ok")
-  elseif err:find("function or expression too complex", 1, true) then
-    print(name, "too complex")
   else
     print(name, (err:gsub("^[^:]*:", "")))
   end
@@ -55,6 +54,16 @@ try("return", main .. locals(195, " = 1") .. "return " .. r("v1, ", 60) .. "v1\n
 try("assign 54", main .. locals(195, " = 1") .. r("v1, ", 53) .. "v1 = " .. r("v2, ", 53) .. "v2\n")
 try("assign 55", main .. locals(195, " = 1") .. r("v1, ", 54) .. "v1 = " .. r("v2, ", 54) .. "v2\n")
 try("assign index", "local t, k, v " .. r("t[k], ", 124) .. "t[k] = " .. r("v, ", 124) .. "v")
+try("closures", main .. locals(190, " = 1") .. "f(" .. r("function() end, ", 58) .. "function() end)\n")
+try("closures 58", main .. locals(190, " = 1") .. "f(" .. r("function() end, ", 57) .. "function() end)\n")
+try("vararg call", "local function f(...)\n" .. locals(190, " = 1") .. "g(" .. r("x, ", 57) .. "...)\nend\n")
+try("vararg return", "local function f(...)\n" .. locals(190, " = 1") .. "return " .. r("x, ", 58) .. "...\nend\n")
+try("conflict copies", main .. locals(190, " = 1") .. r("v2[v3], ", 58) .. "v2 = " .. r("g, ", 58) .. "g\n")
+try("method key", main .. locals(190, " = 1") .. "for i = 1, 300 do end\n" ..
+  (function() local b = {} for i = 1, 260 do b[#b+1] = "k" .. i .. " = 1\n" end return table.concat(b) end)() ..
+  "f(" .. r("o:m(), ", 57) .. "o:m())\n")
+try("before a syntax error", main .. locals(195, " = 1") .. call(60) .. "x = = 1\n")
+try("after a syntax error", main .. locals(195, " = 1") .. "x = = 1\n" .. call(60))
 -- upvalues
 for _, n in ipairs{60, 61, 300} do
   local b = {"local function outer()\n"}
