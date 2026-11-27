@@ -2,12 +2,15 @@
 // allow-list of globals and modules, and loads chunks into it.
 //
 // This is a first, minimal version: it decides what the code can reach by
-// name, and nothing more. It sets no limits (use the state's context,
+// name, and gives it library tables it cannot change (frozen copies,
+// lua.LTable.Freeze), and nothing more. It sets no limits (use the state's context,
 // Options.MemoryLimit and CallStackSize), does not restrict the file system
 // or the language, and shares the state with the host: getmetatable("")
 // returns the state's string metatable, whose __index is the state's real
-// string table. Give sandboxed code a state of its own. See the design issue
-// for the full mechanism. (go-moonscript)
+// string table, not the environment's copy. FreezeLibraries freezes those
+// of the state, so that sandboxed code cannot change them for the host;
+// better, give sandboxed code a state of its own. See the design issue for
+// the full mechanism. (go-moonscript)
 package sandbox
 
 import (
@@ -60,9 +63,15 @@ func isRisky(name string) bool {
 }
 
 // Env returns a new environment table holding what rules allow, taken from
-// the globals of L. Library tables are copied, so code changing env.string
-// does not change the host's string table. env._G is env. A name that
-// L's globals do not have, or a mask that matches nothing, is an error.
+// the globals of L. Library tables are copied, with the fields rules allow,
+// and the copies are frozen: assigning to string.format, rawset(string, ...)
+// or setmetatable(string, ...) raises "attempt to modify a read-only
+// table", so that code cannot change the library for other code sharing the
+// environment, and the host's library tables are not the environment's.
+// The copies are shallow: a field that is a table (only package has some)
+// is the host's. The environment itself is not frozen: code may set
+// globals. env._G is env. A name that L's globals do not have, or a mask
+// that matches nothing, is an error.
 func Env(L *lua.LState, rules Rules) (*lua.LTable, error) {
 	globals := L.G.Global
 	env := L.NewTable()
@@ -87,8 +96,52 @@ func Env(L *lua.LState, rules Rules) (*lua.LTable, error) {
 			env.RawSetString(name, textLoader(L, fn, env))
 		}
 	}
+	for _, v := range env.All() {
+		if lib, ok := v.(*lua.LTable); ok {
+			lib.Freeze() // a copy made by add
+		}
+	}
 	env.RawSetString("_G", env)
 	return env, nil
+}
+
+// libraries are the library tables FreezeLibraries freezes.
+var libraries = []string{
+	lua.StringLibName, lua.TabLibName, lua.MathLibName, lua.OsLibName,
+	lua.IoLibName, lua.CoroutineLibName, lua.DebugLibName,
+	lua.ChannelLibName, lua.BitLibName, lua.JitLibName,
+}
+
+// FreezeLibraries freezes the library tables of L that its globals have
+// (string, table, math, os, io, coroutine, debug, channel, and LuaJIT's
+// bit and jit), the metatable of strings (getmetatable(""), whose __index
+// is the string table) and the metatable of files: code
+// running in L, sandboxed or not, can no longer change string.format or
+// the string methods for the host and for other code. The libraries work
+// as before, as they do not change their tables once opened. Call it once
+// the state is set up: from then on, the host cannot change these tables
+// either (lua.LTable.Freeze is for good).
+//
+// The globals table and package are not frozen: package.path,
+// package.preload and package.loaded are the state's configuration and
+// module cache, which require and programs write. debug.setmetatable can
+// still replace the metatable of strings, as it is not a change to a
+// table; the sandbox does not give the debug library by mask.
+func FreezeLibraries(L *lua.LState) {
+	globals := L.G.Global
+	for _, name := range libraries {
+		if lib, ok := globals.RawGetString(name).(*lua.LTable); ok {
+			lib.Freeze()
+		}
+	}
+	if mt, ok := L.GetMetatable(lua.LString("")).(*lua.LTable); ok {
+		mt.Freeze()
+	}
+	if io, ok := globals.RawGetString(lua.IoLibName).(*lua.LTable); ok {
+		if mt, ok := L.GetMetatable(io.RawGetString("stdout")).(*lua.LTable); ok {
+			mt.Freeze()
+		}
+	}
 }
 
 // add adds what pattern names to env and returns how many values it added.
@@ -147,11 +200,11 @@ func add(L *lua.LState, env, globals *lua.LTable, pattern string) (int, error) {
 
 func sortedKeys(t *lua.LTable) []string {
 	var keys []string
-	t.ForEach(func(k, _ lua.LValue) {
+	for k := range t.All() {
 		if s, ok := k.(lua.LString); ok {
 			keys = append(keys, string(s))
 		}
-	})
+	}
 	sort.Strings(keys)
 	return keys
 }

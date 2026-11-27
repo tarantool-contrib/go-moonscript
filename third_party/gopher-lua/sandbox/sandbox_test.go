@@ -53,8 +53,9 @@ func TestEnv(t *testing.T) {
 			`return type(os.getenv), type(os.time)`, "function nil"},
 		{"_G is the environment", sandbox.Rules{Globals: []string{"type"}},
 			`x = 1; return _G.x, _G._G == _G`, "1 true"},
-		{"library tables are copies", sandbox.Rules{Globals: []string{"string.*"}},
-			`string.format = nil; return string.format`, "nil"},
+		{"library tables are frozen copies", sandbox.Rules{Globals: []string{"pcall", "type", "string.*"}},
+			`local ok, err = pcall(function() string.format = nil end); return ok, err, type(string.format)`,
+			"false sandboxed:1: attempt to modify a read-only table function"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, err := run(t, L, c.rules, c.code)
@@ -170,5 +171,136 @@ func TestEnvLuaJIT(t *testing.T) {
 	}
 	if _, err := sandbox.Env(L, sandbox.Rules{Globals: []string{"jit.*"}}); err == nil {
 		t.Error(`"jit.*" matched risky functions`)
+	}
+}
+
+// Sandboxed code cannot change the library tables of its environment, by
+// any means, in either dialect; it can still set globals.
+func TestEnvFrozenLibraries(t *testing.T) {
+	for _, dialect := range []lua.Dialect{lua.DialectLua51, lua.DialectLuaJIT} {
+		L := lua.NewState(lua.Options{Dialect: dialect})
+		globals := []string{"*", "string.*", "table.*", "math.*", "os.time", "os.clock", "coroutine.*"}
+		libs := []string{"string", "table", "math", "os", "coroutine"}
+		if dialect == lua.DialectLuaJIT {
+			globals = append(globals, "bit.*")
+			libs = append(libs, "bit")
+		}
+		rules := sandbox.Rules{Globals: globals}
+		for _, lib := range libs {
+			for _, code := range []string{
+				lib + ".x = 1",
+				lib + "[1] = 1",
+				"for k in pairs(" + lib + ") do " + lib + "[k] = nil end",
+				"rawset(" + lib + ", 'x', 1)",
+				"setmetatable(" + lib + ", {})",
+				"table.insert(" + lib + ", 1)",
+				"table.remove(" + lib + ")",
+				"table.sort(" + lib + ")",
+			} {
+				got, err := run(t, L, rules, "local ok, err = pcall(function() "+code+" end) return ok, err")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if want := "false sandboxed:1: attempt to modify a read-only table"; got != want {
+					t.Errorf("%s: got %q, want %q", code, got, want)
+				}
+			}
+		}
+		got, err := run(t, L, rules, `x = 1; string = "mine"; return x, string, _G.string`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "1 mine mine"; got != want {
+			t.Errorf("globals: got %q, want %q", got, want)
+		}
+		if err := L.DoString(`assert(type(string.format) == "function" and string.x == nil and x == nil)
+			assert(getmetatable(string) == nil and table.x == nil)
+			string.x = 1 -- the host's tables are not frozen
+			assert(string.x == 1)`); err != nil {
+			t.Errorf("the host's libraries: %v", err)
+		}
+		L.Close()
+	}
+}
+
+// Without FreezeLibraries, sandboxed code reaches the state's string table
+// through the string metatable; with it, it cannot change it, nor the
+// other libraries of the state, which still work.
+func TestFreezeLibraries(t *testing.T) {
+	for _, dialect := range []lua.Dialect{lua.DialectLua51, lua.DialectLuaJIT} {
+		L := lua.NewState(lua.Options{Dialect: dialect})
+		rules := sandbox.Rules{Globals: []string{"*"}}
+		got, err := run(t, L, rules, `return pcall(function() getmetatable("").__index.upper = function() return "patched" end end)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "true" {
+			t.Fatalf("without FreezeLibraries: got %q", got)
+		}
+		if err := L.DoString(`assert(("x"):upper() == "patched")`); err != nil {
+			t.Fatalf("without FreezeLibraries: %v", err)
+		}
+		L.Close()
+
+		L = lua.NewState(lua.Options{Dialect: dialect})
+		if err := L.DoString(`package.preload.mod = function(...) return {name = ...} end`); err != nil {
+			t.Fatal(err)
+		}
+		sandbox.FreezeLibraries(L)
+		for _, code := range []string{
+			`getmetatable("").__index.upper = nil`,
+			`getmetatable("").__index = {}`,
+			`getmetatable("").__call = print`,
+			`rawset(getmetatable(""), "__index", {})`,
+			`setmetatable(getmetatable(""), {})`,
+		} {
+			got, err := run(t, L, rules, "return pcall(function() "+code+" end)")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := "false sandboxed:1: attempt to modify a read-only table"; got != want {
+				t.Errorf("%s: got %q, want %q", code, got, want)
+			}
+		}
+		// the host cannot change them either, and the libraries work
+		if err := L.DoString(`
+			for _, lib in ipairs{"string", "table", "math", "os", "io", "coroutine", "debug"} do
+				local ok, err = pcall(function() _G[lib].x = 1 end)
+				assert(not ok and err:find("read-only", 1, true), lib)
+			end
+			assert(not pcall(function() getmetatable(io.stdout).write = nil end))
+			assert(not pcall(rawset, getmetatable(io.stdout), "x", 1))
+			assert(("abc"):upper() == "ABC" and string.format("%5.1f", 1.5) == "  1.5")
+			assert(("a,b"):gsub(",", ";") == "a;b" and select(2, ("aaa"):gsub("a", "b")) == 3)
+			assert(("x"):rep(3) == "xxx" and ("hello"):find("l") == 3)
+			for w in ("a b"):gmatch("%a") do end
+			local t = {3, 1, 2}
+			table.sort(t) table.insert(t, 4) table.remove(t, 1)
+			assert(table.concat(t, ",") == "2,3,4")
+			math.randomseed(42) assert(math.random(10) >= 1 and math.floor(math.pi) == 3)
+			assert(type(os.time()) == "number" and type(os.date("*t")) == "table")
+			local co = coroutine.wrap(function(a) local b = coroutine.yield(a + 1) return b * 2 end)
+			assert(co(1) == 2 and co(5) == 10)
+			assert(type(debug.traceback()) == "string" and debug.getinfo(1, "S").what == "main")
+			assert(require("mod").name == "mod" and package.loaded.mod)
+			package.path = "./?.lua"
+			local f = io.tmpfile() f:write("data") f:seek("set") assert(f:read("*a") == "data") f:close()
+			x = 1
+			assert(x == 1)
+		`); err != nil {
+			t.Errorf("libraries after FreezeLibraries: %v", err)
+		}
+		if dialect == lua.DialectLuaJIT {
+			if err := L.DoString(`
+				assert(bit.band(6, 3) == 2 and type(jit.version) == "string")
+				assert(not pcall(function() bit.x = 1 end) and not pcall(function() jit.x = 1 end))
+				local new, clear = require("table.new"), require("table.clear")
+				local t = new(4, 0) t[1] = 1 clear(t) assert(next(t) == nil)
+				t = table.move({1, 2}, 1, 2, 1, {}) assert(t[2] == 2)
+			`); err != nil {
+				t.Errorf("LuaJIT libraries after FreezeLibraries: %v", err)
+			}
+		}
+		L.Close()
 	}
 }
