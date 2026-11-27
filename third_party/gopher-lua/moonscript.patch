@@ -654,6 +654,30 @@ that change.
       lines; FuzzSpans); internal/luasuites/load_test.go
       BenchmarkParseArchives: go-moonscript
 
+  - Name resolution over the syntax tree (go-moonscript):
+    - scope/doc.go, scope/scope.go, scope/resolve.go: package scope
+      resolves the names of a tree of package ast, parsed or built by other
+      code (it imports neither the parser nor the compiler). scope.Resolve
+      (chunk, dialect) and ResolveStmts return an Info: every declared
+      variable (Var: kind - local, local function, parameter, for variable,
+      the implicit self of a method, the implicit arg of a Lua51 vararg
+      function, label -, declaring node, name span, scope, reads and writes,
+      captured or not, the variable it shadows); every occurrence of a name
+      (Ref: the IdentExpr or GotoStmt node, the Var or global it refers to,
+      read, write or jump), found by node (RefOf) or offset (RefAt, VarAt,
+      ScopeAt); the scope tree with spans and each function's upvalues in the
+      compiler's order; the globals read and written; the shadowing; the
+      problems of the labels of a built tree. The rules are Lua's (local x =
+      x, local function, repeat-until, for scopes, self, arg) and, under
+      LuaJIT, lj_parse.c's for goto and labels.
+    - Tests: scope/resolve_test.go (each rule in both dialects, built trees,
+      label errors), scope/oracle_test.go (the compiler as oracle: per
+      function the upvalue names and order, GETGLOBAL, SETGLOBAL, GETUPVAL,
+      SETUPVAL operands and debug locals, over testdata and the luasuites
+      archives in both dialects), scope/fuzz_test.go (invariants,
+      FuzzResolve), scope/example_test.go (unused locals, global writes,
+      shadowing), scope/bench_test.go (BenchmarkResolveArchives): go-moonscript
+
   Performance, numbers (go-moonscript):
     - LNumber2I builds the interface value in a local, without a scratch
       LValue (a write barrier per boxed number) or reflect.SliceHeader;
@@ -28393,6 +28417,2826 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		L.Close()
 +	}
++}
+--- a/scope/bench_test.go
++++ b/scope/bench_test.go
+@@ -0,0 +1,64 @@
++package scope_test
++
++import (
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// benchSources returns the sources of the archives that parse in the
++// dialect, with their chunks.
++func benchSources(b *testing.B, d scope.Dialect) (srcs [][]byte, chunks []*ast.Chunk, total int) {
++	b.Helper()
++	files := archiveFiles(b)
++	for _, name := range sortedKeys(files) {
++		c, err := parse.ParseChunk(files[name], name, parse.Options{Dialect: parseDialect(d)})
++		if err != nil {
++			continue
++		}
++		srcs = append(srcs, files[name])
++		chunks = append(chunks, c)
++		total += len(files[name])
++	}
++	return srcs, chunks, total
++}
++
++// BenchmarkParseArchives is what parsing the archives costs, for comparison
++// with BenchmarkResolveArchives.
++func BenchmarkParseArchives(b *testing.B) {
++	for _, d := range dialects {
++		b.Run(d.String(), func(b *testing.B) {
++			srcs, _, total := benchSources(b, d)
++			b.SetBytes(int64(total))
++			b.ReportAllocs()
++			for b.Loop() {
++				for i, src := range srcs {
++					if _, err := parse.ParseChunk(src, "bench", parse.Options{Dialect: parseDialect(d)}); err != nil {
++						b.Fatal(i, err)
++					}
++				}
++			}
++		})
++	}
++}
++
++// BenchmarkResolveArchives is what Resolve costs over the trees of the
++// archives, parsed once.
++func BenchmarkResolveArchives(b *testing.B) {
++	for _, d := range dialects {
++		b.Run(d.String(), func(b *testing.B) {
++			_, chunks, total := benchSources(b, d)
++			b.SetBytes(int64(total))
++			b.ReportAllocs()
++			for b.Loop() {
++				for i, c := range chunks {
++					if _, err := scope.Resolve(c, d); err != nil {
++						b.Fatal(i, err)
++					}
++				}
++			}
++		})
++	}
++}
+--- a/scope/doc.go
++++ b/scope/doc.go
+@@ -0,0 +1,129 @@
++// Package scope resolves the names of a Lua syntax tree: for every
++// occurrence of a name, the local variable it refers to, or the global it
++// reads or writes, with the scopes, the upvalues, the shadowing and, under
++// LuaJIT, the labels and gotos. go-moonscript patch.
++//
++// The package reads a tree of package ast and nothing else: it imports
++// neither the parser nor the compiler, so it works on a tree from
++// parse.ParseChunk as well as on one that other code built or transformed
++// (a bundler, a compiler to Lua), with spans or without. It resolves names
++// as Lua's and LuaJIT's parsers do (lparser.c, lj_parse.c) and as the
++// compiler of package lua does. Its tests check it against the compiler's
++// debug information (the upvalues, the globals and the locals of every
++// function) over the compatibility scripts, the luasuites archives and the
++// fork's other test scripts, and against go-luascope's resolution.
++//
++//	chunk, err := parse.ParseChunk(src, "name", parse.Options{Dialect: parse.LuaJIT})
++//	info, err := scope.Resolve(chunk, scope.LuaJIT)
++//	for _, g := range info.Globals { ... } // names read and written, with their occurrences
++//	for _, v := range info.Vars { ... }    // every declared variable
++//
++// # Keys
++//
++// An occurrence of a name in the tree is a node, an *ast.IdentExpr, or the
++// label of a goto; a declared name is a string with a span next to it (the
++// names of a local statement, of a for loop, the parameters, labels). The
++// result is keyed as follows, without a map unless one is asked for:
++//
++//   - An occurrence is a Ref, in Info.Refs in source order (the order of
++//     ast.Walk). Its identity is its node: Ref.Ident for a name,
++//     Ref.Goto for a goto. Info.RefOf(ident) finds the Ref of a node (a
++//     map built on first use), Info.RefAt(offset) that of the name at a byte
++//     offset of the source (a binary search of the spans; a tree without
++//     spans has no offsets). The Ref says what the name refers to: Ref.Var,
++//     nil for a global.
++//   - A declaration is a Var, in Info.Vars in the order the names appear in
++//     the source. Its identity is the pointer. It knows its declaring node
++//     (Var.Decl), the index of the name in that node's list of names
++//     (Var.Index, in LocalAssignStmt.Names, GenericForStmt.Names or
++//     ParList.Names) and the span of the name (Var.NameSpan);
++//     Info.VarAt(offset) finds the variable whose name is at an offset.
++//   - The implicit variables have no name in the source, so no span (the
++//     zero Span): the "self" of a method (KindSelf: of "function a.b:c()"
++//     and of nothing else) and the "arg" of a vararg function under Lua51
++//     (KindArg). Their Decl is the *ast.FunctionExpr and their Index is -1.
++//     They are declared with the parameters: self first, arg after them
++//     (Scope.Vars). Their occurrences in the body are Refs like any other.
++//   - A scope is a Scope: Info.Scopes in the order they open (a scope
++//     before its children), Info.ScopeAt(offset) the innermost one at an
++//     offset, Info.ScopeOf(node) the one of a node.
++//
++// # Occurrences
++//
++// Ref.Kind is Read (a name in an expression, which includes the object of
++// "a.b = 1" and of "function a.b()"), Write (a name that is assigned: a
++// target of an assignment, the name of "function f()") or Jump (the label
++// of a goto; its Var is the label, nil if there is none). A Ref whose Var
++// is nil and that is no Jump is a global; Info.Globals groups them by name.
++// A Ref in a function other than the one of its Var is an upvalue
++// (Ref.IsUpvalue): the Var is Captured, and the function and those
++// between it and the Var's function have it in Scope.Upvalues, in the
++// order of the first reference, which is the order of the function
++// prototype's upvalue names.
++//
++// # Scoping rules
++//
++// They are Lua's, which the parsers and the compiler follow:
++//
++//   - "local x = x": the right side sees the outer x; the new x is
++//     visible after the statement. "local function f" sees f in its body,
++//     "local f = function" does not. "local a, b = b, a" reads the outer a
++//     and b; "local a, a" declares two, the second hides the first.
++//   - A function has one scope for its parameters and the locals of its
++//     body, so "function(x) local x end" declares a second x in the same
++//     scope. A method has "self" before the parameters, a Lua51 vararg
++//     function "arg" after them (not the main chunk, not under LuaJIT, not
++//     with ParList.NoArg; Lua51 assumes LUA_COMPAT_VARARG, as
++//     lua.CompatVarArg's default does). "function f()" without a local f is
++//     a write of the global f, "function t.x()" and "function t:m()" read t.
++//   - "repeat ... until c": c sees the locals of the body (ScopeRepeat's
++//     span ends with it).
++//   - A numeric or generic for: its variables are in a scope of their own
++//     (ScopeFor, with the span of the body), around the scope of the body
++//     (ScopeForBody), so a local of the body with the name of a variable
++//     shadows it; the expressions of the loop are outside both. The hidden
++//     control variables are no names and not in the result.
++//   - The other blocks, the bodies of do and while and the then and else
++//     blocks of if, are scopes. An "elseif" is an IfStmt alone in the Else
++//     of the one before; an else block that holds only an IfStmt has no
++//     scope of its own.
++//   - Labels, under LuaJIT, as lj_parse.c has them: a label is visible in
++//     its whole block, before and after it, and in the blocks, not the
++//     functions, inside the block. A goto binds to the label of the
++//     innermost block that has one. A block has a label once; one of the
++//     same name in a block inside it is another label. A goto may not jump
++//     forward into the scope of a local, but to a label at the end of a
++//     block, with the labels right before it, which is out of the block's
++//     locals' scope, unless the block is the body of a repeat, which
++//     "until" follows. The ";" the source may have after such a label is not
++//     in the tree: "::l:: ;" is taken as at the end of its block. A label is
++//     a Var of KindLabel in the scope of its block, its Reads the gotos
++//     that bind to it.
++//
++// A parsed tree has no label problems (the parser rejects them); a tree
++// that other code built can have them: a duplicate label, an undefined
++// label, a jump into the scope of a local, labels and gotos under Lua51.
++// Resolve returns them as Info.Problems, with LuaJIT's messages, in an
++// *Error, together with the Info of the rest of the tree.
++//
++// # Shadowing
++//
++// A Var shadows another if the variable that a lookup of its name finds
++// just before it takes effect is a Var of the same function or of an
++// enclosing one: Var.Shadows. So the parameter hidden by a local of the
++// body, the outer x of "local x = x", the first of "local a, a" and the
++// loop variable hidden by a local of the body are shadowed, a global is
++// not. Info.Shadowing lists the Vars that shadow. Whether that is wrong is
++// for the tool that uses the package (a "_" hiding another "_", a
++// parameter "self" of a method).
++//
++// # Limits
++//
++// The limits of the number of locals and of upvalues are not checked: a tree
++// that the compiler rejects for them resolves. What is not about names
++// is not checked either (a break outside a loop, "..." outside a vararg
++// function). A nil node, also a nil pointer in an interface, is skipped.
++// A tree more than 100000 levels deep (the compiler's limit) stops the
++// resolution with a Problem, so that a cycle in a tree doesn't loop. An
++// Info is read only and safe for concurrent use.
++package scope
+--- a/scope/example_test.go
++++ b/scope/example_test.go
+@@ -0,0 +1,122 @@
++package scope_test
++
++import (
++	"fmt"
++	"sort"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// lint lists what a lint pass over the result would report: locals that are
++// never read, global writes and shadowed variables. It is the use of the
++// API, not a lint framework.
++func lint(src string) ([]string, error) {
++	chunk, err := parse.ParseChunk([]byte(src), "example", parse.Options{Dialect: parse.LuaJIT})
++	if err != nil {
++		return nil, err
++	}
++	info, err := scope.Resolve(chunk, scope.LuaJIT)
++	if err != nil {
++		return nil, err
++	}
++	type finding struct {
++		offset int
++		text   string
++	}
++	var found []finding
++	add := func(offset int, format string, args ...any) {
++		found = append(found, finding{offset, fmt.Sprintf("%s: %s", chunk.Pos(offset), fmt.Sprintf(format, args...))})
++	}
++	for _, v := range info.Vars {
++		if v.Implicit() || v.Name == "_" {
++			continue
++		}
++		switch {
++		case v.Kind == scope.KindLabel:
++		case v.Kind == scope.KindParam || v.Kind == scope.KindForNum || v.Kind == scope.KindForIn:
++		case len(v.Reads) == 0 && len(v.Writes) == 0:
++			add(v.NameSpan.Start, "unused %s %s", v.Kind, v.Name)
++		case len(v.Reads) == 0:
++			add(v.NameSpan.Start, "%s %s is assigned but never read", v.Kind, v.Name)
++		}
++		if s := v.Shadows; s != nil {
++			add(v.NameSpan.Start, "%s %s shadows the one at %s", v.Kind, v.Name, chunk.Pos(s.NameSpan.Start))
++		}
++	}
++	for _, g := range info.Globals {
++		for _, w := range g.Writes {
++			add(w.Span().Start, "global write %s", g.Name)
++		}
++	}
++	sort.SliceStable(found, func(i, j int) bool { return found[i].offset < found[j].offset })
++	out := make([]string, len(found))
++	for i, f := range found {
++		out[i] = f.text
++	}
++	return out, nil
++}
++
++// A lint pass over the result of Resolve: unused locals, global writes
++// and shadowing, each at its line and column.
++func Example() {
++	src := `local used, unused = 1, 2
++local function helper() end
++local written = 0
++written = used
++function setup(used)
++  counter = used
++  return print(undefined_name)
++end
++`
++	report, err := lint(src)
++	if err != nil {
++		fmt.Println(err)
++		return
++	}
++	for _, line := range report {
++		fmt.Println(line)
++	}
++	// Output:
++	// 1:13: unused local unused
++	// 2:16: unused local function helper
++	// 3:7: local written is assigned but never read
++	// 5:10: global write setup
++	// 5:16: parameter used shadows the one at 1:7
++	// 6:3: global write counter
++}
++
++// Names are found by their node (RefOf) or by an offset of the source
++// (RefAt, VarAt).
++func ExampleInfo_RefAt() {
++	src := "local n = 1\nreturn n + m"
++	chunk, _ := parse.ParseChunk([]byte(src), "example", parse.Options{Dialect: parse.Lua51})
++	info, _ := scope.Resolve(chunk, scope.Lua51)
++	for _, off := range []int{19, len(src) - 1} { // the n and the m
++		r := info.RefAt(off)
++		if r.Var != nil {
++			fmt.Printf("%s at %s: %s declared at %s\n", r.Name(), chunk.Pos(r.Span().Start), r.Var.Kind, chunk.Pos(r.Var.NameSpan.Start))
++		} else {
++			fmt.Printf("%s at %s: global %s\n", r.Name(), chunk.Pos(r.Span().Start), r.Kind)
++		}
++	}
++	// Output:
++	// n at 2:8: local declared at 1:7
++	// m at 2:12: global read
++}
++
++// A tree built or transformed by other code resolves too, keyed by its
++// nodes rather than by spans.
++func ExampleResolveStmts() {
++	chunk, _ := parse.ParseChunk([]byte("local a = 1; return a + b"), "example", parse.Options{Dialect: parse.Lua51})
++	info, _ := scope.ResolveStmts(chunk.Stmts, scope.Lua51) // as a transformer holding statements does
++	for _, g := range info.Globals {
++		fmt.Println("global:", g.Name, len(g.Reads), "read")
++	}
++	for _, v := range info.Vars {
++		fmt.Println("local:", v.Name, len(v.Reads), "read")
++	}
++	// Output:
++	// global: b 1 read
++	// local: a 1 read
++}
+--- a/scope/fuzz_test.go
++++ b/scope/fuzz_test.go
+@@ -0,0 +1,270 @@
++package scope_test
++
++import (
++	"fmt"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// checkInvariants checks what holds for the Info of any parsed chunk,
++// whatever the oracle says: the lists agree with each other.
++func checkInvariants(chunk *ast.Chunk, info *scope.Info) error {
++	if info.Root == nil || len(info.Scopes) == 0 || info.Scopes[0] != info.Root || info.Root.Parent != nil {
++		return fmt.Errorf("root")
++	}
++	if len(info.Problems) > 0 {
++		return fmt.Errorf("problems in a parsed tree: %v", info.Problems)
++	}
++	for i, s := range info.Scopes {
++		if s.ID != i {
++			return fmt.Errorf("scope %d has ID %d", i, s.ID)
++		}
++		if s.Parent != nil {
++			if s.Parent.ID >= s.ID {
++				return fmt.Errorf("scope %d before its parent", i)
++			}
++			if s.Span.Start < s.Parent.Span.Start || s.Span.End > s.Parent.Span.End {
++				return fmt.Errorf("scope %d (%v) %v outside its parent's %v", i, s.Kind, s.Span, s.Parent.Span)
++			}
++			found := false
++			for _, c := range s.Parent.Children {
++				found = found || c == s
++			}
++			if !found {
++				return fmt.Errorf("scope %d not in its parent's children", i)
++			}
++		}
++		if s.IsFunction() != (s.Func == s) {
++			return fmt.Errorf("scope %d Func", i)
++		}
++		for j, c := range s.Children {
++			if c.Parent != s || j > 0 && c.Span.Start < s.Children[j-1].Span.Start {
++				return fmt.Errorf("scope %d child %d", i, j)
++			}
++		}
++		for _, u := range s.Upvalues {
++			if !s.IsFunction() || u.Scope.Func == s || !u.Captured {
++				return fmt.Errorf("scope %d upvalue %s", i, u.Name)
++			}
++		}
++	}
++	lastNamed := 0
++	for i, v := range info.Vars {
++		if v.ID != i || v.Scope == nil {
++			return fmt.Errorf("variable %d", i)
++		}
++		if !v.Implicit() {
++			if v.NameSpan.Start < lastNamed {
++				return fmt.Errorf("variable %d (%s) out of order", i, v.Name)
++			}
++			lastNamed = v.NameSpan.Start
++		}
++		if v.Implicit() == (v.NameSpan != ast.Span{}) {
++			return fmt.Errorf("variable %s: implicit %v, span %v", v.Name, v.Implicit(), v.NameSpan)
++		}
++		found := false
++		for _, u := range v.Scope.Vars {
++			found = found || u == v
++		}
++		if !found {
++			return fmt.Errorf("variable %s not in its scope", v.Name)
++		}
++		captured := false
++		for _, rs := range [][]*scope.Ref{v.Reads, v.Writes} {
++			for _, r := range rs {
++				if r.Var != v || r.Name() != v.Name {
++					return fmt.Errorf("variable %s: a use of %s", v.Name, r.Name())
++				}
++				captured = captured || r.IsUpvalue()
++			}
++		}
++		for _, r := range v.Writes {
++			if r.Kind != scope.Write {
++				return fmt.Errorf("variable %s: write of kind %v", v.Name, r.Kind)
++			}
++		}
++		if captured != v.Captured {
++			return fmt.Errorf("variable %s: captured %v, uses say %v", v.Name, v.Captured, captured)
++		}
++		// the variable is visible where it is used: its scope contains the use
++		for _, r := range append(append([]*scope.Ref(nil), v.Reads...), v.Writes...) {
++			if !inScope(r.Scope, v.Scope) {
++				return fmt.Errorf("variable %s used outside its scope", v.Name)
++			}
++		}
++		if v.Shadows != nil && (v.Shadows.Name != v.Name || v.Shadows.ID >= v.ID && v.Kind != scope.KindParam) {
++			return fmt.Errorf("variable %s shadows %s", v.Name, v.Shadows.Name)
++		}
++	}
++	prev := -1
++	reads, writes, globalRefs := 0, 0, 0
++	for i := range info.Refs {
++		r := &info.Refs[i]
++		if s := r.Span().Start; s < prev {
++			return fmt.Errorf("occurrence %d (%s) out of order", i, r.Name())
++		} else {
++			prev = s
++		}
++		if r.Scope == nil || (r.Ident == nil) == (r.Goto == nil) {
++			return fmt.Errorf("occurrence %d", i)
++		}
++		if r.Var == nil && r.Kind != scope.Jump {
++			globalRefs++
++		}
++		if (r.Kind == scope.Jump) != (r.Goto != nil) {
++			return fmt.Errorf("occurrence %d kind %v", i, r.Kind)
++		}
++		if r.Var != nil {
++			if r.Kind == scope.Write {
++				writes++
++			} else {
++				reads++
++			}
++		}
++		if info.RefOf(r.Ident) != nil && r.Ident != nil && info.RefOf(r.Ident) != r {
++			return fmt.Errorf("RefOf %d", i)
++		}
++	}
++	nr, nw := 0, 0
++	for _, v := range info.Vars {
++		nr += len(v.Reads)
++		nw += len(v.Writes)
++	}
++	if nr != reads || nw != writes {
++		return fmt.Errorf("uses: %d/%d reads, %d/%d writes", nr, reads, nw, writes)
++	}
++	ng := 0
++	seen := map[string]bool{}
++	for _, g := range info.Globals {
++		if seen[g.Name] || len(g.Reads)+len(g.Writes) == 0 {
++			return fmt.Errorf("global %s", g.Name)
++		}
++		seen[g.Name] = true
++		ng += len(g.Reads) + len(g.Writes)
++	}
++	if ng != globalRefs {
++		return fmt.Errorf("globals: %d of %d", ng, globalRefs)
++	}
++	return nil
++}
++
++// inScope reports whether s is inner or the same as outer.
++func inScope(s, outer *scope.Scope) bool {
++	for ; s != nil; s = s.Parent {
++		if s == outer {
++			return true
++		}
++	}
++	return false
++}
++
++// checkResolve parses and resolves src in a dialect, checks the invariants
++// and the compiler oracle; it returns an error for what is wrong.
++func checkResolve(src []byte, d scope.Dialect) error {
++	chunk, err := parse.ParseChunk(src, "fuzz", parse.Options{Dialect: parseDialect(d)})
++	if err != nil {
++		return nil
++	}
++	info, err := scope.Resolve(chunk, d)
++	if err != nil {
++		return fmt.Errorf("resolve: %w", err)
++	}
++	if err := checkInvariants(chunk, info); err != nil {
++		return err
++	}
++	if _, diffs := compilerOracle(src, d); len(diffs) > 0 {
++		return fmt.Errorf("the compiler: %s", strings.Join(diffs, "\n"))
++	}
++	return nil
++}
++
++// fuzzSeeds are sources that exercise the scoping rules.
++var fuzzSeeds = []string{
++	"local x = x; local x = x; return x",
++	"local function f() return f end local g = function() return g end",
++	"repeat local a = 1 until a",
++	"for i = i, i do local i = i end for k, v in k, v do return k, v end",
++	"function a.b:c(p, ...) return self, arg, ... end",
++	"local f; function f() end function g() end function t.x() end function f:m() end",
++	"goto l; ::l:: do goto m; local a; ::m:: end ::n:: goto n",
++	"local a, b, c; return function() return function() return a, b, c end end",
++	"while x do if y then goto continue end ::continue:: end",
++	"if a then local x elseif b then local y else local z end",
++	"local t = {f = function(self) return self end, [k] = v, w}",
++	"return function(...) local arg = arg return ..., arg end",
++	"local a <const> = 1",
++	"::a:: ::b:: do ::a:: goto b end",
++	"local x; local function f(x) local x = x; return function() return x end end",
++}
++
++func addSeeds(f *testing.F) {
++	for _, s := range fuzzSeeds {
++		f.Add([]byte(s))
++	}
++	for name, src := range luaFiles(f, filepath.Join("..", "testdata", "compat")) {
++		if len(src) < 3000 && !strings.Contains(name, "limits") {
++			f.Add(src)
++		}
++	}
++}
++
++// FuzzResolve resolves random sources in both dialects: it must not panic,
++// must satisfy the invariants and agree with the compiler (see
++// oracle_test.go).
++func FuzzResolve(f *testing.F) {
++	addSeeds(f)
++	f.Fuzz(func(t *testing.T, src []byte) {
++		for _, d := range dialects {
++			if err := checkResolve(src, d); err != nil {
++				t.Fatalf("%v: %v", d, err)
++			}
++		}
++	})
++}
++
++// TestResolveSeeds runs the fuzz target on its seeds, and the invariants on
++// the archives.
++func TestResolveSeeds(t *testing.T) {
++	for _, s := range fuzzSeeds {
++		for _, d := range dialects {
++			if err := checkResolve([]byte(s), d); err != nil {
++				t.Errorf("%v: %q: %v", d, s, err)
++			}
++		}
++	}
++}
++
++// TestInvariantsArchives checks the invariants of the Info of every file of
++// the archives and of the testdata.
++func TestInvariantsArchives(t *testing.T) {
++	if testing.Short() {
++		t.Skip("short")
++	}
++	files := archiveFiles(t)
++	for k, v := range luaFiles(t, filepath.Join("..", "testdata")) {
++		files[k] = v
++	}
++	n := 0
++	for _, name := range sortedKeys(files) {
++		for _, d := range dialects {
++			chunk, err := parse.ParseChunk(files[name], name, parse.Options{Dialect: parseDialect(d)})
++			if err != nil {
++				continue
++			}
++			n++
++			info, err := scope.Resolve(chunk, d)
++			if err == nil {
++				err = checkInvariants(chunk, info)
++			}
++			if err != nil {
++				t.Errorf("%s (%v): %v", name, d, err)
++			}
++		}
++	}
++	t.Logf("%d trees", n)
++}
+--- a/scope/helpers_test.go
++++ b/scope/helpers_test.go
+@@ -0,0 +1,153 @@
++package scope_test
++
++import (
++	"archive/tar"
++	"compress/gzip"
++	"errors"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"sort"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++var dialects = []scope.Dialect{scope.Lua51, scope.LuaJIT}
++
++func parseDialect(d scope.Dialect) parse.Dialect {
++	if d == scope.LuaJIT {
++		return parse.LuaJIT
++	}
++	return parse.Lua51
++}
++
++// mustResolve parses and resolves src.
++func mustResolve(t testing.TB, src string, d scope.Dialect) (*ast.Chunk, *scope.Info) {
++	t.Helper()
++	chunk, err := parse.ParseChunk([]byte(src), "test", parse.Options{Dialect: parseDialect(d)})
++	if err != nil {
++		t.Fatalf("%v: parse %q: %v", d, src, err)
++	}
++	info, err := scope.Resolve(chunk, d)
++	if err != nil {
++		t.Fatalf("%v: resolve %q: %v", d, src, err)
++	}
++	return chunk, info
++}
++
++// refs lists the occurrences of names in source order as
++// "x:read->global y:write->local#0", without positions.
++func refs(info *scope.Info, chunk *ast.Chunk) string {
++	var parts []string
++	for i := range info.Refs {
++		r := &info.Refs[i]
++		to := "global"
++		if r.Var != nil {
++			to = fmt.Sprintf("%s#%d", r.Var.Kind, declOrdinal(info, r.Var))
++		}
++		parts = append(parts, fmt.Sprintf("%s:%s->%s", r.Name(), r.Kind, to))
++	}
++	return strings.Join(parts, " ")
++}
++
++// declOrdinal is the index of the variable among the variables of its name.
++func declOrdinal(info *scope.Info, v *scope.Var) int {
++	n := 0
++	for _, u := range info.Vars {
++		if u.Name == v.Name {
++			if u == v {
++				return n
++			}
++			n++
++		}
++	}
++	return -1
++}
++
++// luaFiles returns the Lua files under dir (and its subdirectories), by
++// path.
++func luaFiles(tb testing.TB, dir string) map[string][]byte {
++	tb.Helper()
++	files := map[string][]byte{}
++	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
++		if err != nil {
++			return err
++		}
++		if !d.IsDir() && strings.HasSuffix(path, ".lua") {
++			b, err := os.ReadFile(path)
++			if err != nil {
++				return err
++			}
++			files[path] = b
++		}
++		return nil
++	})
++	if err != nil {
++		tb.Fatal(err)
++	}
++	return files
++}
++
++// archivesDir holds go-moonscript's archives of Lua test suites and
++// projects (internal/luasuites).
++var archivesDir = filepath.Join("..", "..", "..", "internal", "luasuites", "testdata", "archives")
++
++// archiveFiles returns the Lua files of the luasuites archives.
++func archiveFiles(tb testing.TB) map[string][]byte {
++	tb.Helper()
++	paths, _ := filepath.Glob(filepath.Join(archivesDir, "*.tar.gz"))
++	if len(paths) == 0 {
++		tb.Skip("no archives in", archivesDir)
++	}
++	files := map[string][]byte{}
++	for _, p := range paths {
++		if err := readTarGz(p, files); err != nil {
++			tb.Fatal(err)
++		}
++	}
++	return files
++}
++
++func readTarGz(path string, files map[string][]byte) error {
++	f, err := os.Open(path)
++	if err != nil {
++		return err
++	}
++	defer func() { _ = f.Close() }()
++	zr, err := gzip.NewReader(f)
++	if err != nil {
++		return err
++	}
++	tr := tar.NewReader(zr)
++	for {
++		hdr, err := tr.Next()
++		if errors.Is(err, io.EOF) {
++			return nil
++		}
++		if err != nil {
++			return err
++		}
++		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(hdr.Name, ".lua") && !strings.HasSuffix(hdr.Name, ".t") {
++			continue
++		}
++		b, err := io.ReadAll(tr)
++		if err != nil {
++			return err
++		}
++		files[filepath.Base(path)+"/"+hdr.Name] = b
++	}
++}
++
++func sortedKeys[V any](m map[string]V) []string {
++	keys := make([]string, 0, len(m))
++	for k := range m {
++		keys = append(keys, k)
++	}
++	sort.Strings(keys)
++	return keys
++}
+--- a/scope/oracle_test.go
++++ b/scope/oracle_test.go
+@@ -0,0 +1,267 @@
++package scope_test
++
++// The compiler is the oracle: it resolves names as the parsers do, and
++// leaves what it resolved in the function prototypes it builds: the upvalues
++// by name and in order (DbgUpvalues), the locals (DbgLocals), and the
++// globals and upvalues each instruction uses (GETGLOBAL, SETGLOBAL,
++// GETUPVAL, SETUPVAL). For every function of every source, the resolver's
++// answer must be the compiler's:
++//
++//   - the upvalues of the function are the names the compiler lists, in its
++//     order, and each is a variable captured by the function;
++//   - the names of the globals read and written directly in the function
++//     are the constants of its GETGLOBAL and SETGLOBAL, as many times;
++//   - the upvalues read and written are the operands of its GETUPVAL and
++//     SETUPVAL, as many times;
++//   - the variables declared in the function are its debug locals (the
++//     hidden control variables of for loops left out).
++
++import (
++	"fmt"
++	"path/filepath"
++	"sort"
++	"strings"
++	"testing"
++
++	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++func luaDialect(d scope.Dialect) lua.Dialect {
++	if d == scope.LuaJIT {
++		return lua.DialectLuaJIT
++	}
++	return lua.DialectLua51
++}
++
++// oracleStats counts what an oracle run compared.
++type oracleStats struct {
++	sources, parseErrors, compileErrors int
++	functions, upvalues, globalRefs     int
++	upvalueRefs, locals                 int
++}
++
++func (s *oracleStats) add(o oracleStats) {
++	s.sources += o.sources
++	s.parseErrors += o.parseErrors
++	s.compileErrors += o.compileErrors
++	s.functions += o.functions
++	s.upvalues += o.upvalues
++	s.globalRefs += o.globalRefs
++	s.upvalueRefs += o.upvalueRefs
++	s.locals += o.locals
++}
++
++// compilerOracle parses, resolves and compiles src, and returns the
++// differences between the resolver and the compiler, with counts of what it
++// compared.
++func compilerOracle(src []byte, d scope.Dialect) (stats oracleStats, diffs []string) {
++	stats.sources = 1
++	chunk, err := parse.ParseChunk(src, "oracle", parse.Options{Dialect: parseDialect(d)})
++	if err != nil {
++		stats.parseErrors = 1
++		return stats, nil
++	}
++	proto, err := lua.CompileAST(chunk.Stmts, "=oracle", luaDialect(d))
++	if err != nil {
++		stats.compileErrors = 1
++		return stats, nil
++	}
++	info, err := scope.Resolve(chunk, d)
++	if err != nil {
++		return stats, []string{"resolve: " + err.Error()}
++	}
++	var funcs []*scope.Scope
++	for _, s := range info.Scopes {
++		if s.IsFunction() {
++			funcs = append(funcs, s)
++		}
++	}
++	var protos []*lua.FunctionProto
++	var collect func(*lua.FunctionProto)
++	collect = func(p *lua.FunctionProto) {
++		protos = append(protos, p)
++		for _, c := range p.FunctionPrototypes {
++			collect(c)
++		}
++	}
++	collect(proto)
++	if len(funcs) != len(protos) {
++		return stats, []string{fmt.Sprintf("%d function scopes, %d prototypes", len(funcs), len(protos))}
++	}
++	// per function: the references made directly in it
++	globalReads := map[*scope.Scope]map[string]int{}
++	globalWrites := map[*scope.Scope]map[string]int{}
++	upReads := map[*scope.Scope]map[string]int{}
++	upWrites := map[*scope.Scope]map[string]int{}
++	bump := func(m map[*scope.Scope]map[string]int, s *scope.Scope, name string) {
++		if m[s] == nil {
++			m[s] = map[string]int{}
++		}
++		m[s][name]++
++	}
++	for i := range info.Refs {
++		r := &info.Refs[i]
++		f := r.Scope.Func
++		switch {
++		case r.Kind == scope.Jump:
++		case r.Var == nil && r.Kind == scope.Read:
++			bump(globalReads, f, r.Name())
++		case r.Var == nil:
++			bump(globalWrites, f, r.Name())
++		case r.IsUpvalue() && r.Kind == scope.Read:
++			bump(upReads, f, r.Name())
++		case r.IsUpvalue():
++			bump(upWrites, f, r.Name())
++		}
++	}
++	for i, s := range funcs {
++		p := protos[i]
++		stats.functions++
++		where := fmt.Sprintf("function %d (line %d)", i, p.LineDefined)
++		if fe, ok := s.Node.(*ast.FunctionExpr); ok && p.LineDefined != fe.Line() {
++			diffs = append(diffs, fmt.Sprintf("%s: scope's function is at line %d", where, fe.Line()))
++			continue
++		}
++		// upvalues
++		var ups []string
++		for _, u := range s.Upvalues {
++			ups = append(ups, u.Name)
++			if !u.Captured {
++				diffs = append(diffs, fmt.Sprintf("%s: upvalue %s of a variable not captured", where, u.Name))
++			}
++			if u.Scope.Func == s {
++				diffs = append(diffs, fmt.Sprintf("%s: upvalue %s is its own variable", where, u.Name))
++			}
++		}
++		if !equal(ups, p.DbgUpvalues) {
++			diffs = append(diffs, fmt.Sprintf("%s: upvalues %v, compiler %v", where, ups, p.DbgUpvalues))
++		}
++		stats.upvalues += len(ups)
++		// the operands of the instructions
++		gets, sets := map[string]int{}, map[string]int{}
++		upgets, upsets := map[string]int{}, map[string]int{}
++		for pc := 0; pc < len(p.Code); pc++ {
++			ins := p.Code[pc]
++			op := int(ins >> 26)
++			b := int(ins & 0x1ff)
++			bx := int(ins & 0x3ffff)
++			switch op {
++			case lua.OP_GETGLOBAL:
++				gets[string(p.Constants[bx].(lua.LString))]++
++			case lua.OP_SETGLOBAL:
++				sets[string(p.Constants[bx].(lua.LString))]++
++			case lua.OP_GETUPVAL:
++				upgets[p.DbgUpvalues[b]]++
++			case lua.OP_SETUPVAL:
++				upsets[p.DbgUpvalues[b]]++
++			case lua.OP_CLOSURE:
++				// the MOVE and GETUPVAL after it say what the closure captures
++				pc += len(p.FunctionPrototypes[bx].DbgUpvalues)
++			}
++		}
++		diffs = compareCounts(diffs, where, "global reads", globalReads[s], gets)
++		diffs = compareCounts(diffs, where, "global writes", globalWrites[s], sets)
++		diffs = compareCounts(diffs, where, "upvalue reads", upReads[s], upgets)
++		diffs = compareCounts(diffs, where, "upvalue writes", upWrites[s], upsets)
++		for _, n := range gets {
++			stats.globalRefs += n
++		}
++		for _, n := range sets {
++			stats.globalRefs += n
++		}
++		for _, n := range upgets {
++			stats.upvalueRefs += n
++		}
++		for _, n := range upsets {
++			stats.upvalueRefs += n
++		}
++		// locals
++		var locals, dbg []string
++		for _, v := range info.Vars {
++			if v.Scope.Func == s && v.Kind != scope.KindLabel {
++				locals = append(locals, v.Name)
++			}
++		}
++		for _, l := range p.DbgLocals {
++			if !strings.HasPrefix(l.Name, "(") {
++				dbg = append(dbg, l.Name)
++			}
++		}
++		sort.Strings(locals)
++		sort.Strings(dbg)
++		if !equal(locals, dbg) {
++			diffs = append(diffs, fmt.Sprintf("%s: locals %v, compiler %v", where, locals, dbg))
++		}
++		stats.locals += len(locals)
++	}
++	return stats, diffs
++}
++
++func equal(a, b []string) bool {
++	if len(a) != len(b) {
++		return false
++	}
++	for i := range a {
++		if a[i] != b[i] {
++			return false
++		}
++	}
++	return true
++}
++
++func compareCounts(diffs []string, where, what string, got, want map[string]int) []string {
++	for name, n := range got {
++		if want[name] != n {
++			diffs = append(diffs, fmt.Sprintf("%s: %s of %q: %d, compiler %d", where, what, name, n, want[name]))
++		}
++	}
++	for name, n := range want {
++		if _, ok := got[name]; !ok {
++			diffs = append(diffs, fmt.Sprintf("%s: %s of %q: 0, compiler %d", where, what, name, n))
++		}
++	}
++	return diffs
++}
++
++// runOracle runs the compiler oracle over files in both dialects.
++func runOracle(t *testing.T, label string, files map[string][]byte) {
++	t.Helper()
++	for _, d := range dialects {
++		var total oracleStats
++		failed := 0
++		for _, name := range sortedKeys(files) {
++			stats, diffs := compilerOracle(files[name], d)
++			total.add(stats)
++			if len(diffs) > 0 {
++				failed++
++				if failed <= 10 {
++					t.Errorf("%s (%v): %d differences, first: %s", name, d, len(diffs), diffs[0])
++				}
++			}
++		}
++		t.Logf("%s, %v: %d sources (%d do not parse, %d do not compile), %d functions, %d upvalues, %d global refs, %d upvalue refs, %d locals compared; %d sources differ",
++			label, d, total.sources, total.parseErrors, total.compileErrors, total.functions, total.upvalues, total.globalRefs, total.upvalueRefs, total.locals, failed)
++	}
++}
++
++// TestOracleCompat runs the compiler oracle over the compatibility
++// scripts and the other Lua files of the fork's testdata.
++func TestOracleCompat(t *testing.T) {
++	files := luaFiles(t, filepath.Join("..", "testdata"))
++	if len(files) == 0 {
++		t.Fatal("no scripts")
++	}
++	runOracle(t, "testdata", files)
++}
++
++// TestOracleArchives runs the compiler oracle over the Lua files of the
++// luasuites archives.
++func TestOracleArchives(t *testing.T) {
++	if testing.Short() {
++		t.Skip("short")
++	}
++	runOracle(t, "archives", archiveFiles(t))
++}
+--- a/scope/resolve.go
++++ b/scope/resolve.go
+@@ -0,0 +1,755 @@
++package scope
++
++import (
++	"fmt"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++)
++
++// maxDepth is how deep Resolve recurses into a tree: the compiler's limit
++// (maxCompileDepth), which also stops a tree with a cycle.
++const maxDepth = 100000
++
++// Resolve resolves the names of a chunk. The tree is not modified. It
++// returns the Info of what it resolved, and an *Error if the tree has
++// problems with its labels (a parsed tree has none).
++func Resolve(chunk *ast.Chunk, dialect Dialect) (*Info, error) {
++	if chunk == nil {
++		return ResolveStmts(nil, dialect)
++	}
++	return resolve(chunk, chunk.Stmts, dialect)
++}
++
++// ResolveStmts resolves the names of the statements of a chunk, a tree
++// that the parser built or other code did. The root scope has no node and
++// no span.
++func ResolveStmts(stmts []ast.Stmt, dialect Dialect) (*Info, error) {
++	return resolve(nil, stmts, dialect)
++}
++
++func resolve(chunk *ast.Chunk, stmts []ast.Stmt, dialect Dialect) (*Info, error) {
++	in := &Info{Dialect: dialect, chunk: chunk}
++	r := &resolver{info: in, dialect: dialect}
++	var node ast.Element
++	var span ast.Span
++	if chunk != nil {
++		node, span = chunk, chunk.Span()
++		// the sizes the archives have: a name occurrence per 42 bytes of
++		// source, a variable per 144, a scope per 250
++		n := span.End
++		in.Refs = make([]Ref, 0, n/36+1)
++		in.Vars = make([]*Var, 0, n/140+1)
++		in.Scopes = make([]*Scope, 0, n/240+1)
++		r.varHint, r.scopeHint = n/140+1, n/240+1
++	}
++	r.act = make([]*Var, 0, 32)
++	root := r.openFunc(node, span)
++	r.stmtList(stmts, true)
++	r.closeFunc(root)
++	in.Root = root.scope
++	r.finish()
++	if len(in.Problems) > 0 {
++		return in, &Error{Problems: in.Problems}
++	}
++	return in, nil
++}
++
++// resolver is the state of a resolution: the active variables, the
++// function and the blocks being resolved, the labels and gotos.
++type resolver struct {
++	info    *Info
++	dialect Dialect
++
++	act    []*Var // the active variables of all enclosing functions
++	fn     *funcState
++	cur    *Scope
++	blocks []blockState
++	gola   []golaEntry
++
++	depth   int
++	aborted bool
++
++	varSlab   []Var
++	scopeSlab []Scope
++	// the capacity of the first slab of each
++	varHint, scopeHint int
++}
++
++// funcState is a function being resolved.
++type funcState struct {
++	parent    *funcState
++	scope     *Scope
++	actBase   int // len(act) at its start
++	golaBase  int
++	blockBase int // len(blocks) at its start
++}
++
++// blockState is a block of the function being resolved (lj_parse.c's
++// FuncScope, for the labels).
++type blockState struct {
++	nact    int // the function's active variables at its start
++	vstart  int // where its gotos and labels start in gola
++	hasGola bool
++}
++
++// golaEntry is a pending goto or a label (lj_parse.c's VarInfo).
++type golaEntry struct {
++	name    string
++	isLabel bool
++	valid   bool
++	slot    int  // the function's active variables there
++	ref     int  // for a goto, its index in Info.Refs
++	label   *Var // for a label
++}
++
++// slabSize is the capacity of the next slab: hint for the first, then
++// twice the last up to limit.
++func slabSize(last, hint, limit int) int {
++	if last == 0 {
++		return max(hint, 8)
++	}
++	return min(2*last, limit)
++}
++
++func (r *resolver) newVar() *Var {
++	if len(r.varSlab) == cap(r.varSlab) {
++		r.varSlab = make([]Var, 0, slabSize(cap(r.varSlab), r.varHint, 1024))
++	}
++	r.varSlab = r.varSlab[:len(r.varSlab)+1]
++	v := &r.varSlab[len(r.varSlab)-1]
++	v.ID = len(r.info.Vars)
++	r.info.Vars = append(r.info.Vars, v)
++	return v
++}
++
++func (r *resolver) newScope(kind ScopeKind, node ast.Element, span ast.Span) *Scope {
++	if len(r.scopeSlab) == cap(r.scopeSlab) {
++		r.scopeSlab = make([]Scope, 0, slabSize(cap(r.scopeSlab), r.scopeHint, 512))
++	}
++	r.scopeSlab = r.scopeSlab[:len(r.scopeSlab)+1]
++	s := &r.scopeSlab[len(r.scopeSlab)-1]
++	s.Kind, s.Node, s.Span, s.Parent = kind, node, span, r.cur
++	s.ID = len(r.info.Scopes)
++	s.Func = s
++	if r.cur != nil {
++		s.Func = r.cur.Func
++	}
++	r.info.Scopes = append(r.info.Scopes, s)
++	return s
++}
++
++// declare makes a variable, not yet active.
++func (r *resolver) declare(name string, kind VarKind, decl ast.Element, index int, span ast.Span) *Var {
++	v := r.newVar()
++	v.Name, v.Kind, v.Decl, v.Index, v.NameSpan = name, kind, decl, index, span
++	return v
++}
++
++// activate makes a declared variable visible, in the current scope.
++func (r *resolver) activate(v *Var) {
++	v.Scope = r.cur
++	v.Shadows = r.lookup(v.Name)
++	r.act = append(r.act, v)
++}
++
++// lookup finds the variable a name refers to, nil for a global.
++func (r *resolver) lookup(name string) *Var {
++	act := r.act
++	for i := len(act) - 1; i >= 0; i-- {
++		if v := act[i]; v.Name == name {
++			return v
++		}
++	}
++	return nil
++}
++
++func (r *resolver) nact() int { return len(r.act) - r.fn.actBase }
++
++func (r *resolver) problem(node ast.Element, span ast.Span, format string, args ...any) {
++	r.info.Problems = append(r.info.Problems, Problem{Node: node, Span: span, Msg: fmt.Sprintf(format, args...)})
++}
++
++// ref records an occurrence of a name.
++func (r *resolver) ref(id *ast.IdentExpr, kind RefKind) {
++	v := r.lookup(id.Value)
++	r.info.Refs = append(r.info.Refs, Ref{Kind: kind, Ident: id, Var: v, Scope: r.cur})
++	if v != nil {
++		if kind == Write {
++			v.nw++
++		} else {
++			v.nr++
++		}
++		if v.Scope.Func != r.cur.Func {
++			r.capture(v)
++		}
++	}
++}
++
++// capture makes v an upvalue of the current function and of those between
++// it and the function declaring v.
++func (r *resolver) capture(v *Var) {
++	v.Captured = true
++	for f := r.fn; f != nil && f.scope != v.Scope.Func; f = f.parent {
++		s := f.scope
++		found := false
++		for _, u := range s.Upvalues {
++			if u == v {
++				found = true
++				break
++			}
++		}
++		if !found {
++			s.Upvalues = append(s.Upvalues, v)
++		}
++	}
++}
++
++/* functions and blocks */
++
++// openFunc starts a function: its scope and its outermost block.
++func (r *resolver) openFunc(node ast.Element, span ast.Span) *funcState {
++	fs := &funcState{parent: r.fn, actBase: len(r.act), golaBase: len(r.gola), blockBase: len(r.blocks)}
++	s := r.newScope(ScopeFunction, node, span)
++	s.Func = s
++	fs.scope = s
++	r.cur = s
++	r.fn = fs
++	r.blocks = append(r.blocks, blockState{vstart: len(r.gola)})
++	return fs
++}
++
++func (r *resolver) closeFunc(fs *funcState) {
++	r.leaveBlock()
++	r.gola = r.gola[:fs.golaBase]
++	r.blocks = r.blocks[:fs.blockBase]
++	r.act = r.act[:fs.actBase]
++	r.cur = fs.scope.Parent
++	r.fn = fs.parent
++}
++
++// openScope starts a block with a scope of its own.
++func (r *resolver) openScope(kind ScopeKind, node ast.Element, span ast.Span) *Scope {
++	s := r.newScope(kind, node, span)
++	r.cur = s
++	r.blocks = append(r.blocks, blockState{nact: r.nact(), vstart: len(r.gola)})
++	return s
++}
++
++func (r *resolver) closeScope() {
++	r.leaveBlock()
++	r.cur = r.cur.Parent
++}
++
++// leaveBlock ends the current block: its variables go out of scope, its
++// labels are resolved and its gotos passed on (fscope_end).
++func (r *resolver) leaveBlock() {
++	i := len(r.blocks) - 1
++	bl := r.blocks[i]
++	r.act = r.act[:r.fn.actBase+bl.nact]
++	if bl.hasGola {
++		r.golaFixup(&bl, i > r.fn.blockBase)
++	}
++	r.blocks = r.blocks[:i]
++}
++
++// golaFixup resolves the gotos back to the labels of the block going out
++// of scope and passes the others on to the enclosing block, if there is
++// one in the function; it is an error in the function's (gola_fixup).
++func (r *resolver) golaFixup(bl *blockState, hasParent bool) {
++	for i := bl.vstart; i < len(r.gola); i++ {
++		v := &r.gola[i]
++		if !v.valid {
++			continue
++		}
++		switch {
++		case v.isLabel:
++			v.valid = false
++			for j := i + 1; j < len(r.gola); j++ {
++				if g := &r.gola[j]; g.valid && !g.isLabel && g.name == v.name {
++					r.bind(g, v.label)
++				}
++			}
++		case hasParent:
++			r.blocks[len(r.blocks)-2].hasGola = true
++			v.slot = bl.nact
++		default:
++			v.valid = false
++			ref := &r.info.Refs[v.ref]
++			r.problem(ref.Goto, ref.Span(), "undefined label '%s'", v.name)
++		}
++	}
++}
++
++// bind makes a goto jump to a label.
++func (r *resolver) bind(g *golaEntry, label *Var) {
++	g.valid = false
++	ref := &r.info.Refs[g.ref]
++	ref.Var = label
++	label.nr++
++}
++
++/* statements */
++
++// stmtList resolves the statements of a block; trailing says whether the
++// labels at its end are out of its locals' scope (it is not for the body
++// of a repeat, which "until" follows).
++func (r *resolver) stmtList(list []ast.Stmt, trailing bool) {
++	// the labels from tail on are at the end of the block
++	tail := len(list)
++	if r.dialect == LuaJIT && trailing {
++		for tail > 0 {
++			if l, ok := list[tail-1].(*ast.LabelStmt); !ok || l == nil {
++				break
++			}
++			tail--
++		}
++	} else {
++		tail = len(list) + 1
++	}
++	for i, s := range list {
++		if r.aborted {
++			return
++		}
++		if l, ok := s.(*ast.LabelStmt); ok && l != nil {
++			r.label(l, i >= tail)
++			continue
++		}
++		r.stmt(s)
++	}
++}
++
++// block resolves a block with a scope of its own.
++func (r *resolver) block(kind ScopeKind, node ast.Element, span ast.Span, list []ast.Stmt) {
++	r.openScope(kind, node, span)
++	r.stmtList(list, true)
++	r.closeScope()
++}
++
++func (r *resolver) stmt(s ast.Stmt) {
++	if r.depth >= maxDepth {
++		r.tooDeep(s)
++		return
++	}
++	r.depth++
++	r.stmt1(s)
++	r.depth--
++}
++
++func (r *resolver) tooDeep(n ast.Element) {
++	if !r.aborted {
++		r.aborted = true
++		r.problem(n, ast.Span{}, "syntax tree too deep")
++	}
++}
++
++func (r *resolver) stmt1(s ast.Stmt) {
++	switch st := s.(type) {
++	case *ast.AssignStmt:
++		if st == nil {
++			return
++		}
++		for _, e := range st.Lhs {
++			if id, ok := e.(*ast.IdentExpr); ok && id != nil {
++				r.ref(id, Write)
++			} else {
++				r.expr(e)
++			}
++		}
++		r.exprs(st.Rhs)
++	case *ast.LocalAssignStmt:
++		if st == nil {
++			return
++		}
++		r.localAssign(st)
++	case *ast.FuncCallStmt:
++		if st == nil {
++			return
++		}
++		r.expr(st.Expr)
++	case *ast.DoBlockStmt:
++		if st == nil {
++			return
++		}
++		r.block(ScopeDo, st, st.StmtsSpan, st.Stmts)
++	case *ast.WhileStmt:
++		if st == nil {
++			return
++		}
++		r.expr(st.Condition)
++		r.block(ScopeWhile, st, st.StmtsSpan, st.Stmts)
++	case *ast.RepeatStmt:
++		if st == nil {
++			return
++		}
++		span := st.StmtsSpan
++		if end := outerEnd(st.Condition); end > span.End {
++			span.End = end
++		}
++		r.openScope(ScopeRepeat, st, span)
++		r.stmtList(st.Stmts, false)
++		r.expr(st.Condition) // sees the locals of the body
++		r.closeScope()
++	case *ast.IfStmt:
++		for st != nil {
++			r.expr(st.Condition)
++			r.block(ScopeThen, st, st.ThenSpan, st.Then)
++			if len(st.Else) == 1 {
++				if ei, ok := st.Else[0].(*ast.IfStmt); ok && ei != nil { // an elseif
++					st = ei
++					continue
++				}
++			}
++			if len(st.Else) > 0 {
++				r.block(ScopeElse, st, st.ElseSpan, st.Else)
++			}
++			break
++		}
++	case *ast.NumberForStmt:
++		if st == nil {
++			return
++		}
++		v := r.declare(st.Name, KindForNum, st, 0, st.NameSpan)
++		r.expr(st.Init)
++		r.expr(st.Limit)
++		r.expr(st.Step)
++		r.openScope(ScopeFor, st, st.StmtsSpan)
++		r.activate(v)
++		r.block(ScopeForBody, st, st.StmtsSpan, st.Stmts)
++		r.closeScope()
++	case *ast.GenericForStmt:
++		if st == nil {
++			return
++		}
++		var buf [8]*Var
++		vars := buf[:0]
++		for i, name := range st.Names {
++			vars = append(vars, r.declare(name, KindForIn, st, i, spanAt(st.NameSpans, i)))
++		}
++		r.exprs(st.Exprs)
++		r.openScope(ScopeFor, st, st.StmtsSpan)
++		for _, v := range vars {
++			r.activate(v)
++		}
++		r.block(ScopeForBody, st, st.StmtsSpan, st.Stmts)
++		r.closeScope()
++	case *ast.FuncDefStmt:
++		if st == nil || st.Name == nil {
++			if st != nil {
++				r.function(st.Func, false)
++			}
++			return
++		}
++		method := false
++		switch {
++		case st.Name.Func != nil:
++			if id, ok := st.Name.Func.(*ast.IdentExpr); ok && id != nil {
++				r.ref(id, Write)
++			} else {
++				r.expr(st.Name.Func)
++			}
++		case st.Name.Receiver != nil:
++			r.expr(st.Name.Receiver)
++			method = true
++		}
++		r.function(st.Func, method)
++	case *ast.ReturnStmt:
++		if st == nil {
++			return
++		}
++		r.exprs(st.Exprs)
++	case *ast.GotoStmt:
++		if st == nil {
++			return
++		}
++		r.goto_(st)
++	}
++}
++
++func spanAt(spans []ast.Span, i int) ast.Span {
++	if i < len(spans) {
++		return spans[i]
++	}
++	return ast.Span{}
++}
++
++func (r *resolver) localAssign(st *ast.LocalAssignStmt) {
++	var buf [8]*Var
++	vars := buf[:0]
++	fn := st.IsFunction && len(st.Names) == 1 && len(st.Exprs) == 1
++	if fn {
++		_, fn = st.Exprs[0].(*ast.FunctionExpr)
++	}
++	kind := KindLocal
++	if fn {
++		kind = KindLocalFunction
++	}
++	for i, name := range st.Names {
++		vars = append(vars, r.declare(name, kind, st, i, spanAt(st.NameSpans, i)))
++	}
++	if fn { // "local function f": f is visible in its body
++		r.activate(vars[0])
++		r.expr(st.Exprs[0])
++		return
++	}
++	r.exprs(st.Exprs)
++	for _, v := range vars {
++		r.activate(v)
++	}
++}
++
++func (r *resolver) goto_(st *ast.GotoStmt) {
++	if r.dialect != LuaJIT {
++		r.problem(st, st.LabelSpan, "goto needs LuaJIT")
++		return
++	}
++	r.info.Refs = append(r.info.Refs, Ref{Kind: Jump, Goto: st, Scope: r.cur})
++	r.gola = append(r.gola, golaEntry{name: st.Label, valid: true, slot: r.nact(), ref: len(r.info.Refs) - 1})
++	r.blocks[len(r.blocks)-1].hasGola = true
++}
++
++// label declares a label (parse_label); trailing says whether it is at the
++// end of its block.
++func (r *resolver) label(st *ast.LabelStmt, trailing bool) {
++	if r.dialect != LuaJIT {
++		r.problem(st, st.NameSpan, "labels need LuaJIT")
++		return
++	}
++	bl := &r.blocks[len(r.blocks)-1]
++	v := r.declare(st.Name, KindLabel, st, 0, st.NameSpan)
++	v.Scope = r.cur
++	for i := bl.vstart; i < len(r.gola); i++ {
++		if g := &r.gola[i]; g.valid && g.isLabel && g.name == st.Name {
++			r.problem(st, st.NameSpan, "duplicate label '%s'", st.Name)
++			return
++		}
++	}
++	slot := r.nact()
++	if trailing { // a label at the end of a block is out of the scope of its locals
++		slot = bl.nact
++	}
++	bl.hasGola = true
++	idx := len(r.gola)
++	r.gola = append(r.gola, golaEntry{name: st.Name, isLabel: true, valid: true, slot: slot, label: v})
++	// the pending gotos of the block before it (gola_resolve)
++	for i := bl.vstart; i < idx; i++ {
++		g := &r.gola[i]
++		if !g.valid || g.isLabel || g.name != st.Name {
++			continue
++		}
++		if g.slot < slot {
++			ref := &r.info.Refs[g.ref]
++			local := "?"
++			if k := r.fn.actBase + g.slot; k < len(r.act) {
++				local = r.act[k].Name
++			}
++			r.problem(ref.Goto, ref.Span(), "<goto %s> jumps into the scope of local '%s'", g.name, local)
++		}
++		r.bind(g, v)
++	}
++}
++
++/* expressions */
++
++// outerEnd returns the end of an expression with its parentheses, 0 for a
++// nil one (also a nil pointer).
++func outerEnd(e ast.Expr) (end int) {
++	if e == nil {
++		return 0
++	}
++	defer func() {
++		if recover() != nil {
++			end = 0
++		}
++	}()
++	return e.OuterSpan().End
++}
++
++func (r *resolver) exprs(list []ast.Expr) {
++	for _, e := range list {
++		r.expr(e)
++	}
++}
++
++func (r *resolver) expr(e ast.Expr) {
++	if r.depth >= maxDepth {
++		if e != nil {
++			r.tooDeep(e)
++		}
++		return
++	}
++	r.depth++
++	r.expr1(e)
++	r.depth--
++}
++
++func (r *resolver) expr1(e ast.Expr) {
++	switch x := e.(type) {
++	case *ast.IdentExpr:
++		if x != nil {
++			r.ref(x, Read)
++		}
++	case *ast.AttrGetExpr:
++		if x != nil {
++			r.expr(x.Object)
++			r.expr(x.Key)
++		}
++	case *ast.FuncCallExpr:
++		if x != nil {
++			if x.Func != nil {
++				r.expr(x.Func)
++			} else {
++				r.expr(x.Receiver)
++			}
++			r.exprs(x.Args)
++		}
++	case *ast.TableExpr:
++		if x != nil {
++			for _, f := range x.Fields {
++				if f != nil {
++					r.expr(f.Key)
++					r.expr(f.Value)
++				}
++			}
++		}
++	case *ast.LogicalOpExpr:
++		if x != nil {
++			r.expr(x.Lhs)
++			r.expr(x.Rhs)
++		}
++	case *ast.RelationalOpExpr:
++		if x != nil {
++			r.expr(x.Lhs)
++			r.expr(x.Rhs)
++		}
++	case *ast.ArithmeticOpExpr:
++		if x != nil {
++			r.expr(x.Lhs)
++			r.expr(x.Rhs)
++		}
++	case *ast.StringConcatOpExpr:
++		if x != nil {
++			r.expr(x.Lhs)
++			r.expr(x.Rhs)
++		}
++	case *ast.UnaryMinusOpExpr:
++		if x != nil {
++			r.expr(x.Expr)
++		}
++	case *ast.UnaryNotOpExpr:
++		if x != nil {
++			r.expr(x.Expr)
++		}
++	case *ast.UnaryLenOpExpr:
++		if x != nil {
++			r.expr(x.Expr)
++		}
++	case *ast.FunctionExpr:
++		r.function(x, false)
++	}
++}
++
++// function resolves a function; method gives it the implicit "self".
++func (r *resolver) function(fe *ast.FunctionExpr, method bool) {
++	if fe == nil {
++		return
++	}
++	if r.depth >= maxDepth {
++		r.tooDeep(fe)
++		return
++	}
++	r.depth++
++	fs := r.openFunc(fe, fe.Span())
++	if method {
++		r.activate(r.declare("self", KindSelf, fe, -1, ast.Span{}))
++	}
++	pl := fe.ParList
++	if pl != nil {
++		for i, name := range pl.Names {
++			r.activate(r.declare(name, KindParam, fe, i, spanAt(pl.NameSpans, i)))
++		}
++		if pl.HasVargs && r.dialect == Lua51 && !pl.NoArg && fs.parent != nil { // not the main function
++			r.activate(r.declare("arg", KindArg, fe, -1, ast.Span{}))
++		}
++	}
++	r.stmtList(fe.Stmts, true)
++	r.closeFunc(fs)
++	r.depth--
++}
++
++/* the result */
++
++// finish builds what the lists of a variable and a scope are carved from.
++func (r *resolver) finish() {
++	in := r.info
++	// the occurrences of each variable
++	total := 0
++	for _, v := range in.Vars {
++		total += int(v.nr + v.nw)
++	}
++	backing := make([]*Ref, total)
++	off := 0
++	for _, v := range in.Vars {
++		n, w := int(v.nr), int(v.nw)
++		v.Reads = backing[off : off : off+n]
++		v.Writes = backing[off+n : off+n : off+n+w]
++		off += n + w
++	}
++	var globals map[string]*Global
++	for i := range in.Refs {
++		ref := &in.Refs[i]
++		switch {
++		case ref.Var != nil && ref.Kind == Write:
++			ref.Var.Writes = append(ref.Var.Writes, ref)
++		case ref.Var != nil:
++			ref.Var.Reads = append(ref.Var.Reads, ref)
++		case ref.Kind != Jump:
++			if globals == nil {
++				globals = map[string]*Global{}
++			}
++			name := ref.Ident.Value
++			g := globals[name]
++			if g == nil {
++				g = &Global{Name: name}
++				globals[name] = g
++				in.Globals = append(in.Globals, g)
++			}
++			if ref.Kind == Write {
++				g.Writes = append(g.Writes, ref)
++			} else {
++				g.Reads = append(g.Reads, ref)
++			}
++		}
++	}
++	// the variables and children of each scope
++	for _, v := range in.Vars {
++		v.Scope.nv++
++		if v.Shadows != nil {
++			in.Shadowing = append(in.Shadowing, v)
++		}
++	}
++	nv, nc := 0, 0
++	for _, s := range in.Scopes {
++		nv += s.nv
++		if s.Parent != nil {
++			s.Parent.nc++
++			nc++
++		}
++	}
++	vb := make([]*Var, nv)
++	cb := make([]*Scope, nc)
++	nv, nc = 0, 0
++	for _, s := range in.Scopes {
++		s.Vars = vb[nv : nv : nv+s.nv]
++		nv += s.nv
++		s.Children = cb[nc : nc : nc+s.nc]
++		nc += s.nc
++	}
++	for _, v := range in.Vars {
++		v.Scope.Vars = append(v.Scope.Vars, v)
++	}
++	for _, s := range in.Scopes {
++		if s.Parent != nil {
++			s.Parent.Children = append(s.Parent.Children, s)
++		}
++	}
++}
+--- a/scope/resolve_test.go
++++ b/scope/resolve_test.go
+@@ -0,0 +1,558 @@
++package scope_test
++
++import (
++	"fmt"
++	"strings"
++	"sync"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// wantRefs checks the occurrences of names in src, in both dialects (or
++// only in the dialect given): "name:kind->what" in source order, what being
++// "global" or the kind of the variable and its index among the variables of
++// the name, "local#1" for the second local of that name.
++func wantRefs(t *testing.T, src, want string, only ...scope.Dialect) {
++	t.Helper()
++	ds := dialects
++	if len(only) > 0 {
++		ds = only
++	}
++	for _, d := range ds {
++		chunk, info := mustResolve(t, src, d)
++		if got := refs(info, chunk); got != want {
++			t.Errorf("%v: %s\n got: %s\nwant: %s", d, src, got, want)
++		}
++	}
++}
++
++func TestLocalSeesOuter(t *testing.T) {
++	wantRefs(t, "local x = x", "x:read->global")
++	wantRefs(t, "local x = 1; local x = x; return x", "x:read->local#0 x:read->local#1")
++	wantRefs(t, "local a, b = 1, 2; local a, b = b, a", "b:read->local#0 a:read->local#0")
++	wantRefs(t, "local a, a = 1, 2; return a", "a:read->local#1")
++	wantRefs(t, "local x; do local x = x end", "x:read->local#0")
++	wantRefs(t, "local x = function() return x end", "x:read->global")
++}
++
++func TestLocalFunction(t *testing.T) {
++	wantRefs(t, "local function f() return f end", "f:read->local function#0")
++	wantRefs(t, "local f = function() return f end", "f:read->global")
++	wantRefs(t, "local f; local function f() return f end", "f:read->local function#1")
++	wantRefs(t, "local function f() end; f()", "f:read->local function#0")
++}
++
++func TestRepeatUntil(t *testing.T) {
++	wantRefs(t, "repeat local a = 1 until a", "a:read->local#0")
++	wantRefs(t, "repeat local a = 1; local b = a until a == b", "a:read->local#0 a:read->local#0 b:read->local#0")
++	wantRefs(t, "repeat local a = a until a", "a:read->global a:read->local#0")
++	// the condition is not in the body's scope after the loop
++	wantRefs(t, "repeat local a until true; return a", "a:read->global")
++	// a closure in the condition sees the body's locals
++	wantRefs(t, "repeat local a until (function() return a end)()", "a:read->local#0")
++}
++
++func TestFor(t *testing.T) {
++	wantRefs(t, "for i = i, i, i do local i = i end", "i:read->global i:read->global i:read->global i:read->for variable#0")
++	wantRefs(t, "for i = 1, 2 do end; return i", "i:read->global")
++	wantRefs(t, "for k, v in k, v do return k, v end", "k:read->global v:read->global k:read->for variable#0 v:read->for variable#0")
++	wantRefs(t, "for k, v in pairs(t) do local k = k end return k", "pairs:read->global t:read->global k:read->for variable#0 k:read->global")
++	// the hidden control variables are no names, and no variables
++	for _, d := range dialects {
++		_, info := mustResolve(t, "for i = 1, 2 do end for k, v in next do end", d)
++		var names []string
++		for _, v := range info.Vars {
++			names = append(names, v.Name)
++		}
++		if got := strings.Join(names, " "); got != "i k v" {
++			t.Errorf("%v: variables %q", d, got)
++		}
++	}
++	// each variable is a new one per iteration for closures: still one Var
++	wantRefs(t, "for i = 1, 2 do f(function() return i end) end", "f:read->global i:read->for variable#0")
++}
++
++func TestMethods(t *testing.T) {
++	src := "function a.b:c(p, ...) return self, p, arg end"
++	wantRefs(t, src, "a:read->global self:read->self#0 p:read->parameter#0 arg:read->arg#0", scope.Lua51)
++	wantRefs(t, src, "a:read->global self:read->self#0 p:read->parameter#0 arg:read->global", scope.LuaJIT)
++	for _, d := range dialects {
++		_, info := mustResolve(t, src, d)
++		var kinds []string
++		for _, v := range info.Vars {
++			kinds = append(kinds, fmt.Sprintf("%s/%s/%d/%v", v.Name, v.Kind, v.Index, v.NameSpan != ast.Span{}))
++		}
++		want := "self/self/-1/false p/parameter/0/true"
++		if d == scope.Lua51 {
++			want += " arg/arg/-1/false"
++		}
++		if got := strings.Join(kinds, " "); got != want {
++			t.Errorf("%v: variables %q, want %q", d, got, want)
++		}
++	}
++	// not a method: no self
++	wantRefs(t, "function a.b.c() return self end", "a:read->global self:read->global")
++	wantRefs(t, "function a:b() return function() return self end end", "a:read->global self:read->self#0")
++	// a method call's receiver is read; its name is no variable
++	wantRefs(t, "local o; o:m(o)", "o:read->local#0 o:read->local#0")
++	// an explicit parameter self hides the implicit one
++	wantRefs(t, "function a:b(self) return self end", "a:read->global self:read->parameter#1")
++}
++
++func TestArg(t *testing.T) {
++	wantRefs(t, "return arg", "arg:read->global")
++	wantRefs(t, "return ...; ", "")
++	wantRefs(t, "return function(...) return arg end", "arg:read->arg#0", scope.Lua51)
++	wantRefs(t, "return function(...) return arg end", "arg:read->global", scope.LuaJIT)
++	wantRefs(t, "return function(a, ...) return arg end", "arg:read->arg#0", scope.Lua51)
++	wantRefs(t, "return function(a) return arg end", "arg:read->global")
++	wantRefs(t, "return function(arg, ...) return arg end", "arg:read->arg#1", scope.Lua51)
++	wantRefs(t, "return function(arg, ...) return arg end", "arg:read->parameter#0", scope.LuaJIT)
++	wantRefs(t, "local arg = 1; return function(...) return arg end", "arg:read->arg#1", scope.Lua51)
++	wantRefs(t, "local arg = 1; return function(...) return arg end", "arg:read->local#0", scope.LuaJIT)
++	// a tree built without NoArg, resolved for LuaJIT, has no arg either
++	stmts := []ast.Stmt{&ast.ReturnStmt{Exprs: []ast.Expr{&ast.FunctionExpr{
++		ParList: &ast.ParList{HasVargs: true},
++		Stmts:   []ast.Stmt{&ast.ReturnStmt{Exprs: []ast.Expr{&ast.IdentExpr{Value: "arg"}}}},
++	}}}}
++	for _, d := range dialects {
++		info, err := scope.ResolveStmts(stmts, d)
++		if err != nil {
++			t.Fatal(err)
++		}
++		if got := info.Refs[0].Var != nil; got != (d == scope.Lua51) {
++			t.Errorf("%v: arg resolved: %v", d, got)
++		}
++	}
++	// ParList.NoArg turns it off under Lua51
++	stmts[0].(*ast.ReturnStmt).Exprs[0].(*ast.FunctionExpr).ParList.NoArg = true
++	info, _ := scope.ResolveStmts(stmts, scope.Lua51)
++	if info.Refs[0].Var != nil {
++		t.Error("NoArg: arg resolved")
++	}
++}
++
++func TestFunctionStatements(t *testing.T) {
++	wantRefs(t, "function f() end", "f:write->global")
++	wantRefs(t, "local f; function f() end", "f:write->local#0")
++	wantRefs(t, "function t.x() end", "t:read->global")
++	wantRefs(t, "local t; function t.x.y() end", "t:read->local#0")
++	wantRefs(t, "local t; function t:m() end", "t:read->local#0")
++	wantRefs(t, "function f() return f end", "f:write->global f:read->global")
++	wantRefs(t, "local f; function f() return f end", "f:write->local#0 f:read->local#0")
++	wantRefs(t, "x = 1; x, y.z = 2, x", "x:write->global x:write->global y:read->global x:read->global")
++}
++
++func TestGlobals(t *testing.T) {
++	for _, d := range dialects {
++		_, info := mustResolve(t, "a = b; function c() end; print(a, a.x); a.y = z", d)
++		var got []string
++		for _, g := range info.Globals {
++			got = append(got, fmt.Sprintf("%s r%d w%d", g.Name, len(g.Reads), len(g.Writes)))
++		}
++		if g := strings.Join(got, "; "); g != "a r3 w1; b r1 w0; c r0 w1; print r1 w0; z r1 w0" {
++			t.Errorf("%v: globals %s", d, g)
++		}
++		if g := info.Global("a"); g == nil || g.Writes[0].Span().Start != 0 {
++			t.Errorf("%v: Global(a) = %+v", d, g)
++		}
++		if info.Global("nope") != nil {
++			t.Error("Global(nope)")
++		}
++	}
++}
++
++func TestUpvalues(t *testing.T) {
++	src := `
++local a, b, c
++local function f()
++  local d = b
++  return function() return c, a, d, b end
++end
++return function() return a end`
++	for _, d := range dialects {
++		_, info := mustResolve(t, src, d)
++		var got []string
++		for _, s := range info.Scopes {
++			if s.IsFunction() {
++				var names []string
++				for _, u := range s.Upvalues {
++					names = append(names, u.Name)
++				}
++				got = append(got, strings.Join(names, ","))
++			}
++		}
++		if g := strings.Join(got, "|"); g != "|b,c,a|c,a,d,b|a" {
++			t.Errorf("%v: upvalues %q", d, g)
++		}
++		captured := ""
++		for _, v := range info.Vars {
++			if v.Captured {
++				captured += v.Name
++			}
++		}
++		if captured != "abcd" {
++			t.Errorf("%v: captured %q", d, captured)
++		}
++	}
++	// reads and writes
++	for _, d := range dialects {
++		_, info := mustResolve(t, "local x = 1; x = x + 1; local function f() x = 2; return x end", d)
++		x := info.Vars[0]
++		if len(x.Reads) != 2 || len(x.Writes) != 2 || !x.Captured {
++			t.Errorf("%v: x reads %d writes %d captured %v", d, len(x.Reads), len(x.Writes), x.Captured)
++		}
++		if !x.Writes[1].IsUpvalue() || x.Writes[0].IsUpvalue() {
++			t.Errorf("%v: upvalue writes", d)
++		}
++		if f := info.Vars[1]; f.Used() || f.Name != "f" {
++			t.Errorf("%v: f used: %v", d, f.Used())
++		}
++	}
++}
++
++func TestShadowing(t *testing.T) {
++	src := "local x = 1; local x = x; do local x end; function f(p) local p = p end; local y; local function g(y) end; return z"
++	for _, d := range dialects {
++		chunk, info := mustResolve(t, src, d)
++		var got []string
++		for _, v := range info.Shadowing {
++			got = append(got, fmt.Sprintf("%s@%s>%s@%s", v.Name, chunk.Pos(v.NameSpan.Start), v.Shadows.Name, chunk.Pos(v.Shadows.NameSpan.Start)))
++		}
++		if g := strings.Join(got, " "); g != "x@1:20>x@1:7 x@1:36>x@1:20 p@1:63>p@1:54 y@1:100>y@1:80" {
++			t.Errorf("%v: shadowing %s", d, g)
++		}
++		for i, v := range info.Shadowing {
++			if v.Shadows == nil || v.Shadows.Name != v.Name {
++				t.Errorf("%v: %d: %v shadows %v", d, i, v.Name, v.Shadows)
++			}
++		}
++	}
++	// shadowing a global is none; the variable of an enclosing function is
++	for _, d := range dialects {
++		_, info := mustResolve(t, "print = 1; local print; return function() local print end", d)
++		if len(info.Shadowing) != 1 || info.Shadowing[0].Scope.Func == info.Root {
++			t.Errorf("%v: %d shadowing", d, len(info.Shadowing))
++		}
++	}
++	// a loop variable and a local of the body
++	for _, d := range dialects {
++		_, info := mustResolve(t, "for i = 1, 2 do local i = i end", d)
++		if len(info.Shadowing) != 1 || info.Shadowing[0].Shadows.Kind != scope.KindForNum ||
++			info.Shadowing[0].Scope.Kind != scope.ScopeForBody {
++			t.Errorf("%v: shadowing %v", d, info.Shadowing)
++		}
++	}
++}
++
++func TestScopes(t *testing.T) {
++	src := `local a
++do local b end
++while a do local c end
++repeat local d until d
++if a then local e elseif b then local f else local g end
++for i = 1, 2 do local h end
++for k, v in pairs(a) do local j end
++return function(p) local q end`
++	for _, d := range dialects {
++		chunk, info := mustResolve(t, src, d)
++		var kinds []string
++		for _, s := range info.Scopes {
++			var vars []string
++			for _, v := range s.Vars {
++				vars = append(vars, v.Name)
++			}
++			kinds = append(kinds, fmt.Sprintf("%s(%s)", s.Kind, strings.Join(vars, ",")))
++			if s.Parent != nil && (s.Span.Start < s.Parent.Span.Start || s.Span.End > s.Parent.Span.End) {
++				t.Errorf("%v: scope %v %v outside its parent %v", d, s.Kind, s.Span, s.Parent.Span)
++			}
++			if s.Func == nil || (s.IsFunction() && s.Func != s) || (!s.IsFunction() && s.Func != s.Parent.Func) {
++				t.Errorf("%v: scope %v Func", d, s.Kind)
++			}
++		}
++		want := "function(a) do(b) while(c) repeat(d) then(e) then(f) else(g) for(i) for body(h) for(k,v) for body(j) function(p,q)"
++		if got := strings.Join(kinds, " "); got != want {
++			t.Errorf("%v: scopes\n got: %s\nwant: %s", d, got, want)
++		}
++		if info.Root.Span != chunk.Span() || info.Root.Node != ast.Element(chunk) {
++			t.Errorf("%v: root %v", d, info.Root.Span)
++		}
++		// ScopeAt: the innermost scope at the "c"
++		off := strings.Index(src, "local c") + 6
++		if s := info.ScopeAt(off); s.Kind != scope.ScopeWhile {
++			t.Errorf("%v: ScopeAt %v", d, s.Kind)
++		}
++		// the until condition is in the repeat's scope
++		off = strings.Index(src, "until d") + 6
++		if s := info.ScopeAt(off); s.Kind != scope.ScopeRepeat {
++			t.Errorf("%v: ScopeAt(until) %v", d, s.Kind)
++		}
++		if s := info.ScopeOf(info.Scopes[1].Node); s != info.Scopes[1] {
++			t.Errorf("%v: ScopeOf", d)
++		}
++		if info.ScopeOf(chunk) != info.Root {
++			t.Errorf("%v: ScopeOf(chunk)", d)
++		}
++	}
++	// an elseif chain has no else scopes of its own
++	for _, d := range dialects {
++		_, info := mustResolve(t, "if a then elseif b then elseif c then else end", d)
++		n := 0
++		for _, s := range info.Scopes {
++			if s.Kind == scope.ScopeElse {
++				n++
++			}
++		}
++		if n != 0 {
++			t.Errorf("%v: %d else scopes", d, n)
++		}
++	}
++}
++
++func TestOccurrenceLookups(t *testing.T) {
++	src := "local abc = 1\nfunction f(xyz) return abc + xyz + g end"
++	for _, d := range dialects {
++		chunk, info := mustResolve(t, src, d)
++		off := func(s string, n int) int {
++			i := -1
++			for ; n > 0; n-- {
++				i += strings.Index(src[i+1:], s) + 1
++			}
++			return i
++		}
++		r := info.RefAt(off("abc", 2) + 1)
++		if r == nil || r.Name() != "abc" || r.Var == nil || r.Var != info.Vars[0] {
++			t.Errorf("%v: RefAt(abc) = %v", d, r)
++		}
++		if r := info.RefAt(off("g", 1)); r == nil || !r.IsGlobal() {
++			t.Errorf("%v: RefAt(g) = %v", d, r)
++		}
++		if info.RefAt(off("return", 1)) != nil {
++			t.Errorf("%v: RefAt(return)", d)
++		}
++		if v := info.VarAt(off("xyz", 1) + 2); v == nil || v.Kind != scope.KindParam {
++			t.Errorf("%v: VarAt(xyz) = %v", d, v)
++		}
++		if v := info.VarAt(off("abc", 1)); v != info.Vars[0] {
++			t.Errorf("%v: VarAt(abc) = %v", d, v)
++		}
++		if info.VarAt(off("abc", 2)) != nil {
++			t.Errorf("%v: VarAt(use) is a declaration", d)
++		}
++		for i := range info.Refs {
++			if info.RefOf(info.Refs[i].Ident) != &info.Refs[i] {
++				t.Errorf("%v: RefOf %d", d, i)
++			}
++			if got := info.RefAt(info.Refs[i].Span().Start); got != &info.Refs[i] {
++				t.Errorf("%v: RefAt %d", d, i)
++			}
++		}
++		if info.RefOf(&ast.IdentExpr{Value: "abc"}) != nil || info.VarOf(&ast.IdentExpr{}) != nil {
++			t.Errorf("%v: RefOf a foreign node", d)
++		}
++		if info.VarOf(info.Refs[1].Ident) != info.Vars[0] {
++			t.Errorf("%v: VarOf", d)
++		}
++		if chunk.Pos(info.Vars[1].NameSpan.Start).String() != "2:12" {
++			t.Errorf("%v: position %v", d, chunk.Pos(info.Vars[1].NameSpan.Start))
++		}
++	}
++}
++
++func TestGotoLabels(t *testing.T) {
++	// forward, backward, out of blocks, into no block
++	wantRefs(t, "goto l; ::l::", "l:jump->label#0", scope.LuaJIT)
++	wantRefs(t, "::l:: goto l", "l:jump->label#0", scope.LuaJIT)
++	wantRefs(t, "do goto l end ::l::", "l:jump->label#0", scope.LuaJIT)
++	wantRefs(t, "::l:: do goto l end", "l:jump->label#0", scope.LuaJIT)
++	wantRefs(t, "while x do if y then goto continue end ::continue:: end", "x:read->global y:read->global continue:jump->label#0", scope.LuaJIT)
++	// the innermost block with the label
++	wantRefs(t, "::l:: do goto l; ::l:: end goto l", "l:jump->label#1 l:jump->label#0", scope.LuaJIT)
++	wantRefs(t, "::l:: do ::l:: goto l end goto l", "l:jump->label#1 l:jump->label#0", scope.LuaJIT)
++	// gotos and labels do not cross functions: a label is a block's
++	wantRefs(t, "::l:: ::m:: goto m goto l", "m:jump->label#0 l:jump->label#0", scope.LuaJIT)
++	// a label is no local, a local is no label
++	wantRefs(t, "local l; ::l:: goto l; return l", "l:jump->label#1 l:read->local#0", scope.LuaJIT)
++	// goto, a label past a local at the end of the block is fine
++	wantRefs(t, "do goto done; local x; ::done:: end", "done:jump->label#0", scope.LuaJIT)
++	wantRefs(t, "do goto a; local x; ::a:: ::b:: end", "a:jump->label#0", scope.LuaJIT)
++	// the labels and gotos are vars and refs
++	_, info := mustResolve(t, "do ::a:: goto a; goto a end", scope.LuaJIT)
++	a := info.Vars[0]
++	if a.Kind != scope.KindLabel || len(a.Reads) != 2 || len(a.Writes) != 0 || !a.Used() || a.Scope.Kind != scope.ScopeDo {
++		t.Errorf("label %+v", a)
++	}
++	if info.Refs[0].Goto == nil || info.Refs[0].Ident != nil || info.Refs[0].IsGlobal() || info.Refs[0].Name() != "a" {
++		t.Errorf("goto ref %+v", info.Refs[0])
++	}
++	if len(info.Globals) != 0 {
++		t.Errorf("globals %v", info.Globals)
++	}
++}
++
++// lbl and the others build statements as other code would.
++func lbl(name string) ast.Stmt  { return &ast.LabelStmt{Name: name} }
++func jump(name string) ast.Stmt { return &ast.GotoStmt{Label: name} }
++func local(name string) ast.Stmt {
++	return &ast.LocalAssignStmt{Names: []string{name}}
++}
++func do(stmts ...ast.Stmt) ast.Stmt { return &ast.DoBlockStmt{Stmts: stmts} }
++func rep(cond string, stmts ...ast.Stmt) ast.Stmt {
++	return &ast.RepeatStmt{Stmts: stmts, Condition: &ast.IdentExpr{Value: cond}}
++}
++
++func TestLabelProblems(t *testing.T) {
++	cases := []struct {
++		name  string
++		stmts []ast.Stmt
++		want  string // problems, "; "-separated
++	}{
++		{"undefined", []ast.Stmt{jump("l")}, "undefined label 'l'"},
++		{"undefined in a block", []ast.Stmt{do(jump("l"))}, "undefined label 'l'"},
++		{"label of another block", []ast.Stmt{do(lbl("l")), jump("l")}, "undefined label 'l'"},
++		{"label of another function", []ast.Stmt{lbl("l"), &ast.FuncCallStmt{Expr: &ast.FuncCallExpr{
++			Func: &ast.FunctionExpr{ParList: &ast.ParList{}, Stmts: []ast.Stmt{jump("l")}}}}}, "undefined label 'l'"},
++		{"duplicate", []ast.Stmt{lbl("l"), lbl("l")}, "duplicate label 'l'"},
++		{"duplicate in a block", []ast.Stmt{lbl("l"), do(lbl("l")), local("x"), lbl("l")}, "duplicate label 'l'"},
++		{"into the scope of a local", []ast.Stmt{jump("l"), local("x"), lbl("l"), local("y")}, "<goto l> jumps into the scope of local 'x'"},
++		{"from a block", []ast.Stmt{local("a"), do(jump("l")), local("x"), lbl("l"), &ast.ReturnStmt{}}, "<goto l> jumps into the scope of local 'x'"},
++		{"backward over locals", []ast.Stmt{lbl("l"), local("x"), jump("l")}, ""},
++		{"at the end of the block", []ast.Stmt{do(jump("l"), local("x"), lbl("l"))}, ""},
++		{"at the end, before labels", []ast.Stmt{do(jump("l"), local("x"), lbl("l"), lbl("m"))}, ""},
++		{"label then statement", []ast.Stmt{do(jump("l"), local("x"), lbl("l"), lbl("m"), jump("m"))}, "<goto l> jumps into the scope of local 'x'"},
++		{"end of a function", []ast.Stmt{&ast.FuncCallStmt{Expr: &ast.FuncCallExpr{Func: &ast.FunctionExpr{ParList: &ast.ParList{},
++			Stmts: []ast.Stmt{jump("l"), local("x"), lbl("l")}}}}}, ""},
++		{"end of the main chunk", []ast.Stmt{jump("l"), local("x"), lbl("l")}, ""},
++		{"end of a repeat body", []ast.Stmt{rep("c", jump("l"), local("x"), lbl("l"))}, "<goto l> jumps into the scope of local 'x'"},
++		{"end of a repeat's inner block", []ast.Stmt{rep("c", do(jump("l"), local("x"), lbl("l")))}, ""},
++		{"backward in a repeat", []ast.Stmt{rep("c", lbl("l"), local("x"), jump("l"))}, ""},
++	}
++	for _, tc := range cases {
++		info, err := scope.ResolveStmts(tc.stmts, scope.LuaJIT)
++		var got []string
++		for _, p := range info.Problems {
++			got = append(got, p.Msg)
++		}
++		if g := strings.Join(got, "; "); g != tc.want {
++			t.Errorf("%s: problems %q, want %q", tc.name, g, tc.want)
++		}
++		if (err != nil) != (tc.want != "") {
++			t.Errorf("%s: error %v", tc.name, err)
++		}
++		if err != nil && !strings.Contains(err.Error(), tc.want) {
++			t.Errorf("%s: error %q", tc.name, err)
++		}
++	}
++	// Lua51 has no labels
++	info, err := scope.ResolveStmts([]ast.Stmt{lbl("l"), jump("l")}, scope.Lua51)
++	if err == nil || len(info.Problems) != 2 {
++		t.Errorf("Lua51: %v", err)
++	}
++}
++
++func TestBuiltTrees(t *testing.T) {
++	// a tree without spans or lines resolves; the spans are zero
++	stmts := []ast.Stmt{
++		&ast.LocalAssignStmt{Names: []string{"x"}, Exprs: []ast.Expr{&ast.IdentExpr{Value: "x"}}},
++		&ast.AssignStmt{Lhs: []ast.Expr{&ast.IdentExpr{Value: "x"}, &ast.IdentExpr{Value: "y"}},
++			Rhs: []ast.Expr{&ast.NilExpr{}, &ast.IdentExpr{Value: "x"}}},
++		&ast.FuncDefStmt{Name: &ast.FuncName{Receiver: &ast.IdentExpr{Value: "x"}, Method: "m"},
++			Func: &ast.FunctionExpr{ParList: &ast.ParList{Names: []string{"p"}}, Stmts: []ast.Stmt{
++				&ast.ReturnStmt{Exprs: []ast.Expr{&ast.IdentExpr{Value: "self"}, &ast.IdentExpr{Value: "p"}}}}}},
++	}
++	info, err := scope.ResolveStmts(stmts, scope.LuaJIT)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if got, want := fmt.Sprint(len(info.Refs), len(info.Vars), len(info.Globals), info.Root.Node == nil, info.Root.Span),
++		"7 3 2 true 0-0"; got != want {
++		t.Errorf("got %s, want %s", got, want)
++	}
++	if info.Chunk() != nil {
++		t.Error("Chunk()")
++	}
++	if info.RefAt(0) != nil || info.VarAt(0) != nil {
++		t.Error("lookup by offset in a tree without spans")
++	}
++	if r := info.RefOf(stmts[0].(*ast.LocalAssignStmt).Exprs[0].(*ast.IdentExpr)); r == nil || !r.IsGlobal() {
++		t.Errorf("RefOf %v", r)
++	}
++	// the same tree without a chunk, nil chunk
++	if info, err := scope.Resolve(nil, scope.LuaJIT); err != nil || info.Root == nil || len(info.Scopes) != 1 {
++		t.Errorf("Resolve(nil): %v", err)
++	}
++}
++
++func TestNilNodes(t *testing.T) {
++	var nilIdent *ast.IdentExpr
++	var nilFunc *ast.FunctionExpr
++	var nilLocal *ast.LocalAssignStmt
++	stmts := []ast.Stmt{
++		nil, nilLocal, (*ast.IfStmt)(nil), (*ast.GotoStmt)(nil),
++		&ast.AssignStmt{Lhs: []ast.Expr{nilIdent, nil}, Rhs: []ast.Expr{nil, nilFunc}},
++		&ast.FuncDefStmt{}, &ast.FuncDefStmt{Name: &ast.FuncName{}, Func: nilFunc},
++		&ast.FuncDefStmt{Name: &ast.FuncName{Func: nilIdent}, Func: &ast.FunctionExpr{}},
++		&ast.NumberForStmt{Name: "i"}, &ast.GenericForStmt{Names: []string{"k"}},
++		&ast.RepeatStmt{Condition: nilIdent}, &ast.WhileStmt{}, &ast.ReturnStmt{Exprs: []ast.Expr{nil}},
++		&ast.FuncCallStmt{Expr: &ast.FuncCallExpr{}}, &ast.FuncCallStmt{Expr: (*ast.FuncCallExpr)(nil)},
++		&ast.IfStmt{Then: []ast.Stmt{nil}, Else: []ast.Stmt{(*ast.IfStmt)(nil)}},
++		&ast.LocalAssignStmt{Names: []string{"a"}, Exprs: []ast.Expr{(*ast.TableExpr)(nil), &ast.TableExpr{Fields: []*ast.Field{nil, {}}}}},
++	}
++	for _, d := range dialects {
++		if _, err := scope.ResolveStmts(stmts, d); err != nil {
++			t.Errorf("%v: %v", d, err)
++		}
++	}
++}
++
++func TestDepth(t *testing.T) {
++	// a chain deeper than the compiler goes
++	var e ast.Expr = &ast.IdentExpr{Value: "a"}
++	for range 300000 {
++		e = &ast.AttrGetExpr{Object: e, Key: &ast.StringExpr{Value: "k"}}
++	}
++	info, err := scope.ResolveStmts([]ast.Stmt{&ast.ReturnStmt{Exprs: []ast.Expr{e}}}, scope.Lua51)
++	if err == nil || !strings.Contains(err.Error(), "too deep") || info == nil {
++		t.Errorf("deep tree: %v", err)
++	}
++	// a tree with a cycle
++	loop := &ast.DoBlockStmt{}
++	loop.Stmts = []ast.Stmt{loop, loop}
++	if _, err := scope.ResolveStmts([]ast.Stmt{loop}, scope.Lua51); err == nil {
++		t.Error("cyclic tree")
++	}
++	// a long chain that is not too deep resolves
++	e = &ast.IdentExpr{Value: "a"}
++	for range 50000 {
++		e = &ast.AttrGetExpr{Object: e, Key: &ast.StringExpr{Value: "k"}}
++	}
++	if _, err := scope.ResolveStmts([]ast.Stmt{&ast.ReturnStmt{Exprs: []ast.Expr{e}}}, scope.Lua51); err != nil {
++		t.Error(err)
++	}
++}
++
++// TestConcurrentLookups uses the lazily built indexes of one Info from
++// several goroutines (for go test -race).
++func TestConcurrentLookups(t *testing.T) {
++	src := "local a = 1\nfunction f(b) return a + b + c end"
++	chunk, info := mustResolve(t, src, scope.LuaJIT)
++	var wg sync.WaitGroup
++	for range 8 {
++		wg.Add(1)
++		go func() {
++			defer wg.Done()
++			for i := range info.Refs {
++				r := &info.Refs[i]
++				if info.RefOf(r.Ident) != r || info.RefAt(r.Span().Start) != r {
++					t.Error("lookup")
++				}
++			}
++			if info.VarAt(info.Vars[0].NameSpan.Start) != info.Vars[0] || info.ScopeOf(chunk) != info.Root {
++				t.Error("lookup")
++			}
++		}()
++	}
++	wg.Wait()
++}
+--- a/scope/scope.go
++++ b/scope/scope.go
+@@ -0,0 +1,475 @@
++package scope
++
++import (
++	"fmt"
++	"sort"
++	"sync"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++)
++
++// Dialect is the language of the tree: it decides the implicit "arg" of
++// Lua 5.1's vararg functions and whether labels and gotos exist. Its
++// values are those of lua.Dialect and parse.Dialect, so a conversion
++// (scope.Dialect(parse.LuaJIT)) is enough.
++type Dialect int
++
++const (
++	// Lua51 is PUC Lua 5.1: a vararg function (not the main chunk) has the
++	// implicit local "arg" unless its ParList has NoArg; no labels.
++	Lua51 Dialect = iota
++	// LuaJIT is LuaJIT 2.1: no implicit "arg"; goto and labels.
++	LuaJIT
++)
++
++func (d Dialect) String() string {
++	switch d {
++	case Lua51:
++		return "Lua51"
++	case LuaJIT:
++		return "LuaJIT"
++	}
++	return fmt.Sprintf("Dialect(%d)", int(d))
++}
++
++// VarKind says how a variable was declared.
++type VarKind uint8
++
++const (
++	// KindLocal is a name of "local a, b = ...".
++	KindLocal VarKind = iota
++	// KindLocalFunction is the name of "local function f".
++	KindLocalFunction
++	// KindParam is a named parameter of a function.
++	KindParam
++	// KindForNum is the variable of a numeric for.
++	KindForNum
++	// KindForIn is a variable of a generic for.
++	KindForIn
++	// KindSelf is the implicit "self" of a method ("function a.b:c()"); it
++	// has no name in the source.
++	KindSelf
++	// KindArg is the implicit "arg" of a Lua51 vararg function; it has no
++	// name in the source.
++	KindArg
++	// KindLabel is a label (LuaJIT).
++	KindLabel
++)
++
++var kindNames = [...]string{"local", "local function", "parameter", "for variable", "for variable", "self", "arg", "label"}
++
++func (k VarKind) String() string {
++	if int(k) < len(kindNames) {
++		return kindNames[k]
++	}
++	return fmt.Sprintf("VarKind(%d)", int(k))
++}
++
++// Var is a declared variable or a label.
++type Var struct {
++	// Name is the name.
++	Name string
++	// Kind is how it was declared.
++	Kind VarKind
++	// Decl is the node that declares it: the *ast.LocalAssignStmt (also
++	// for a local function), *ast.NumberForStmt, *ast.GenericForStmt,
++	// *ast.LabelStmt, or for a parameter and the implicit self and arg the
++	// *ast.FunctionExpr.
++	Decl ast.Element
++	// Index is the index of the name in the node's list of names (the
++	// LocalAssignStmt's, the GenericForStmt's, the ParList's); 0 for a
++	// numeric for's variable and a label, -1 for an implicit variable.
++	Index int
++	// NameSpan is the span of the name where it is declared; the zero Span
++	// for an implicit variable and for a tree built without spans.
++	NameSpan ast.Span
++	// Scope is the scope the variable is declared in.
++	Scope *Scope
++	// Shadows is the variable that this one hides, nil if none (see the
++	// package documentation).
++	Shadows *Var
++	// Reads and Writes are the occurrences of the name that refer to the
++	// variable, in source order: those that read it and those that assign
++	// it ("local x; x = 1" is a write). For a label they are the gotos
++	// that jump to it (Reads) and none (Writes).
++	Reads, Writes []*Ref
++	// Captured is set if a function other than the one that declares the
++	// variable refers to it: it is an upvalue of that function.
++	Captured bool
++	// ID is the index of the variable in Info.Vars.
++	ID int
++
++	nr, nw int32
++}
++
++// Implicit reports whether the variable has no name in the source: the
++// "self" of a method and the "arg" of a vararg function.
++func (v *Var) Implicit() bool { return v.Kind == KindSelf || v.Kind == KindArg }
++
++// Used reports whether the variable is read, or for a label jumped to.
++func (v *Var) Used() bool { return len(v.Reads) > 0 }
++
++// Func returns the scope of the function that declares the variable.
++func (v *Var) Func() *Scope { return v.Scope.Func }
++
++// ScopeKind says what a scope is of.
++type ScopeKind uint8
++
++const (
++	// ScopeFunction is a function: its parameters and its body's locals.
++	// The root scope, the main function, is one.
++	ScopeFunction ScopeKind = iota
++	// ScopeDo is the body of a "do" block.
++	ScopeDo
++	// ScopeWhile is the body of a while loop.
++	ScopeWhile
++	// ScopeRepeat is the body of a repeat loop and its condition.
++	ScopeRepeat
++	// ScopeThen is the block of an if or elseif.
++	ScopeThen
++	// ScopeElse is the block of an else.
++	ScopeElse
++	// ScopeFor holds the variables of a for loop; its span is the body's.
++	ScopeFor
++	// ScopeForBody is the body of a for loop.
++	ScopeForBody
++)
++
++var scopeNames = [...]string{"function", "do", "while", "repeat", "then", "else", "for", "for body"}
++
++func (k ScopeKind) String() string {
++	if int(k) < len(scopeNames) {
++		return scopeNames[k]
++	}
++	return fmt.Sprintf("ScopeKind(%d)", int(k))
++}
++
++// Scope is a function or a block.
++type Scope struct {
++	Kind ScopeKind
++	// Node is the element the scope is of: the *ast.FunctionExpr of a
++	// function (the *ast.Chunk of the root, nil for ResolveStmts), the
++	// statement of a block (an *ast.IfStmt for its then and else blocks;
++	// an elseif is the IfStmt in the else).
++	Node ast.Element
++	// Span is where the scope's names can be referred to: the function's
++	// span (the chunk's for the root), the block's span, the body of a
++	// for for both of its scopes, a repeat's body to the end of its
++	// condition. Zero for a tree built without spans.
++	Span ast.Span
++	// Parent is the enclosing scope, nil for the root.
++	Parent *Scope
++	// Children are the scopes directly inside, in order.
++	Children []*Scope
++	// Vars are the variables declared in the scope, in order of declaration:
++	// for a function, "self", the parameters and "arg" first.
++	Vars []*Var
++	// Func is the scope of the function this scope is in: itself for a
++	// function.
++	Func *Scope
++	// Upvalues, for a function, are the variables of enclosing functions that
++	// it or a function inside it refers to, in the order of first
++	// reference: the function prototype's upvalues, by name and order.
++	Upvalues []*Var
++	// ID is the index of the scope in Info.Scopes.
++	ID int
++
++	nv, nc int
++}
++
++// Contains reports whether the byte offset is in the scope's span.
++func (s *Scope) Contains(offset int) bool {
++	return s.Span.Start <= offset && offset < s.Span.End
++}
++
++// IsFunction reports whether the scope is a function.
++func (s *Scope) IsFunction() bool { return s.Kind == ScopeFunction }
++
++// RefKind says what an occurrence of a name does.
++type RefKind uint8
++
++const (
++	// Read is a use of the value of a name.
++	Read RefKind = iota
++	// Write is an assignment to a name: a target "x" of an assignment, the
++	// name of "function x()".
++	Write
++	// Jump is the label of a goto.
++	Jump
++)
++
++func (k RefKind) String() string {
++	switch k {
++	case Read:
++		return "read"
++	case Write:
++		return "write"
++	case Jump:
++		return "jump"
++	}
++	return fmt.Sprintf("RefKind(%d)", int(k))
++}
++
++// Ref is an occurrence of a name: a name in an expression or as the target
++// of an assignment (Ident), or the label of a goto (Goto).
++type Ref struct {
++	Kind RefKind
++	// Ident is the name's node; nil for a jump.
++	Ident *ast.IdentExpr
++	// Goto is the goto statement of a jump; nil for the others.
++	Goto *ast.GotoStmt
++	// Var is what the name refers to: nil for a global, and for the label
++	// of a goto that has no label.
++	Var *Var
++	// Scope is the innermost scope the occurrence is in.
++	Scope *Scope
++}
++
++// Name returns the name.
++func (r *Ref) Name() string {
++	if r.Ident != nil {
++		return r.Ident.Value
++	}
++	if r.Goto != nil {
++		return r.Goto.Label
++	}
++	return ""
++}
++
++// Span returns the span of the name (of a goto's label, not of the
++// statement); the zero Span without a position.
++func (r *Ref) Span() ast.Span {
++	if r.Ident != nil {
++		return r.Ident.Span()
++	}
++	if r.Goto != nil {
++		return r.Goto.LabelSpan
++	}
++	return ast.Span{}
++}
++
++// IsGlobal reports whether the occurrence is a global: a name that refers
++// to no variable, read or written.
++func (r *Ref) IsGlobal() bool { return r.Var == nil && r.Kind != Jump }
++
++// IsUpvalue reports whether the occurrence is in a function other than the
++// one of the variable it refers to.
++func (r *Ref) IsUpvalue() bool {
++	return r.Var != nil && r.Kind != Jump && r.Var.Scope.Func != r.Scope.Func
++}
++
++// Global is a global name of the tree.
++type Global struct {
++	Name string
++	// Reads and Writes are its occurrences, in source order.
++	Reads, Writes []*Ref
++}
++
++// Problem is a label error of a tree: what LuaJIT's parser rejects, which
++// a tree built by other code can have.
++type Problem struct {
++	// Node is the statement it is at.
++	Node ast.Element
++	// Span is the span of the name it is about.
++	Span ast.Span
++	// Msg is LuaJIT's message: "duplicate label 'x'", "undefined label
++	// 'x'", "<goto x> jumps into the scope of local 'y'"; or why the
++	// tree can't be resolved.
++	Msg string
++}
++
++func (p Problem) String() string { return p.Msg }
++
++// Error is what Resolve returns for a tree with problems.
++type Error struct {
++	Problems []Problem
++}
++
++func (e *Error) Error() string {
++	if len(e.Problems) == 1 {
++		return "scope: " + e.Problems[0].Msg
++	}
++	return fmt.Sprintf("scope: %s (and %d more problems)", e.Problems[0].Msg, len(e.Problems)-1)
++}
++
++// Info is the result of Resolve. All its fields are read only.
++type Info struct {
++	// Dialect is the dialect it was resolved for.
++	Dialect Dialect
++	// Root is the main function's scope.
++	Root *Scope
++	// Scopes are all scopes, the root first, a scope before its children,
++	// siblings in source order.
++	Scopes []*Scope
++	// Vars are all variables and labels in the order their names appear in
++	// the source (an implicit self before the parameters, an arg after
++	// them).
++	Vars []*Var
++	// Refs are all the occurrences of names and the gotos, in source order.
++	Refs []Ref
++	// Globals are the global names, in the order of their first
++	// occurrence.
++	Globals []*Global
++	// Shadowing are the variables that shadow another, in Vars' order.
++	Shadowing []*Var
++	// Problems are the errors in labels.
++	Problems []Problem
++
++	chunk *ast.Chunk
++
++	refIdxOnce sync.Once
++	refIdx     map[*ast.IdentExpr]int32
++	offOnce    sync.Once
++	refsByOff  []int32 // indices of Refs by span start, if Refs are not sorted
++	varsByOff  []*Var  // the Vars with a name span, by start
++	nodeOnce   sync.Once
++	nodeScope  map[ast.Element]*Scope
++}
++
++// Chunk returns the chunk that was resolved, nil for ResolveStmts.
++func (in *Info) Chunk() *ast.Chunk { return in.chunk }
++
++// RefOf returns the occurrence of the name node, nil if the node is not in
++// the tree. The first call builds an index.
++func (in *Info) RefOf(id *ast.IdentExpr) *Ref {
++	in.refIdxOnce.Do(func() {
++		in.refIdx = make(map[*ast.IdentExpr]int32, len(in.Refs))
++		for i := range in.Refs {
++			if id := in.Refs[i].Ident; id != nil {
++				in.refIdx[id] = int32(i)
++			}
++		}
++	})
++	if i, ok := in.refIdx[id]; ok {
++		return &in.Refs[i]
++	}
++	return nil
++}
++
++// VarOf returns the variable that the name node refers to, nil for a
++// global or a node that is not in the tree.
++func (in *Info) VarOf(id *ast.IdentExpr) *Var {
++	if r := in.RefOf(id); r != nil {
++		return r.Var
++	}
++	return nil
++}
++
++func (in *Info) buildOffsets() {
++	in.offOnce.Do(func() {
++		sorted := true
++		prev := -1
++		for i := range in.Refs {
++			s := in.Refs[i].Span().Start
++			if s < prev {
++				sorted = false
++				break
++			}
++			prev = s
++		}
++		if !sorted {
++			in.refsByOff = make([]int32, len(in.Refs))
++			for i := range in.refsByOff {
++				in.refsByOff[i] = int32(i)
++			}
++			sort.SliceStable(in.refsByOff, func(a, b int) bool {
++				return in.Refs[in.refsByOff[a]].Span().Start < in.Refs[in.refsByOff[b]].Span().Start
++			})
++		}
++		for _, v := range in.Vars {
++			if v.NameSpan.End > v.NameSpan.Start {
++				in.varsByOff = append(in.varsByOff, v)
++			}
++		}
++		sort.SliceStable(in.varsByOff, func(a, b int) bool {
++			return in.varsByOff[a].NameSpan.Start < in.varsByOff[b].NameSpan.Start
++		})
++	})
++}
++
++// RefAt returns the occurrence of a name whose span contains the byte
++// offset of the source, nil if there is none. It is for parsed trees (a
++// tree built without spans has no offsets).
++func (in *Info) RefAt(offset int) *Ref {
++	in.buildOffsets()
++	n := len(in.Refs)
++	start := func(i int) int {
++		if in.refsByOff != nil {
++			return in.Refs[in.refsByOff[i]].Span().Start
++		}
++		return in.Refs[i].Span().Start
++	}
++	i := sort.Search(n, func(i int) bool { return start(i) > offset }) - 1
++	for ; i >= 0; i-- { // spans don't overlap; skip the zero spans
++		j := i
++		if in.refsByOff != nil {
++			j = int(in.refsByOff[i])
++		}
++		sp := in.Refs[j].Span()
++		if sp.End > sp.Start && sp.Start <= offset && offset < sp.End {
++			return &in.Refs[j]
++		}
++		if sp.End > sp.Start {
++			break
++		}
++	}
++	return nil
++}
++
++// VarAt returns the variable whose declared name contains the byte
++// offset, nil if there is none (implicit variables have no span).
++func (in *Info) VarAt(offset int) *Var {
++	in.buildOffsets()
++	vs := in.varsByOff
++	i := sort.Search(len(vs), func(i int) bool { return vs[i].NameSpan.Start > offset }) - 1
++	if i >= 0 && offset < vs[i].NameSpan.End {
++		return vs[i]
++	}
++	return nil
++}
++
++// ScopeAt returns the innermost scope whose span contains the byte offset,
++// the root if there is none deeper.
++func (in *Info) ScopeAt(offset int) *Scope {
++	s := in.Root
++	for {
++		var next *Scope
++		for _, c := range s.Children {
++			if c.Contains(offset) {
++				next = c
++			}
++		}
++		if next == nil {
++			return s
++		}
++		s = next
++	}
++}
++
++// ScopeOf returns the scope of a node: a function's (*ast.FunctionExpr,
++// *ast.Chunk), a block statement's (the first of its scopes: a for's
++// ScopeFor, an if's then block), nil if the node has none. The first call
++// builds an index.
++func (in *Info) ScopeOf(n ast.Element) *Scope {
++	in.nodeOnce.Do(func() {
++		in.nodeScope = make(map[ast.Element]*Scope, len(in.Scopes))
++		for _, s := range in.Scopes {
++			if s.Node != nil {
++				if _, ok := in.nodeScope[s.Node]; !ok {
++					in.nodeScope[s.Node] = s
++				}
++			}
++		}
++	})
++	return in.nodeScope[n]
++}
++
++// Global returns the global of the name, nil if the tree has none.
++func (in *Info) Global(name string) *Global {
++	for _, g := range in.Globals {
++		if g.Name == name {
++			return g
++		}
++	}
++	return nil
 +}
 --- a/state.go
 +++ b/state.go
