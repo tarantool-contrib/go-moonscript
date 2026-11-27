@@ -382,6 +382,9 @@ func baseRawGet(L *LState) int {
 
 func baseRawSet(L *LState) int {
 	tb, key, value := L.CheckTable(1), L.CheckAny(2), L.CheckAny(3)
+	if tb.Frozen() { // go-moonscript patch (LTable.Freeze)
+		L.frozenTableError()
+	}
 	// go-moonscript patch: Lua 5.1 raises these errors without a position
 	// (yuin/gopher-lua#319), and rawset returns the table.
 	if key == LNil {

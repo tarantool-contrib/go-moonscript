@@ -93,6 +93,17 @@ func (ls *LState) CheckTable(n int) *LTable {
 	return nil
 }
 
+// checkWritableTable is CheckTable for a table the function changes: a
+// frozen table raises "attempt to modify a read-only table" (go-moonscript
+// patch: LTable.Freeze).
+func (ls *LState) checkWritableTable(n int) *LTable {
+	tb := ls.CheckTable(n)
+	if tb.Frozen() {
+		ls.frozenTableError()
+	}
+	return tb
+}
+
 func (ls *LState) CheckFunction(n int) *LFunction {
 	v := ls.Get(n)
 	if lv, ok := v.(*LFunction); ok {

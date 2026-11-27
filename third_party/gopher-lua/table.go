@@ -1,6 +1,7 @@
 package lua
 
 import (
+	"errors"
 	"iter"
 	"math/bits"
 	"unsafe"
@@ -154,6 +155,7 @@ func (tb *LTable) unboundSearch(j int) int {
 // go-moonscript patch: at Len()+1, as table.insert(t, v) does (it was after
 // the last non-nil element of the array part).
 func (tb *LTable) Append(value LValue) {
+	tb.checkWritable()
 	if value == LNil {
 		return
 	}
@@ -164,6 +166,7 @@ func (tb *LTable) Append(value LValue) {
 // go-moonscript patch: the elements i..Len() move up, as table.insert(t, i,
 // v) does; for i < 1 or past Len()+1, it only sets t[i].
 func (tb *LTable) Insert(i int, value LValue) {
+	tb.checkWritable()
 	if i < 1 {
 		tb.RawSetInt(i, value)
 		return
@@ -211,6 +214,7 @@ func (tb *LTable) MaxN() int {
 // move down; a position below 1 removes the element at Len(), one past
 // Len() removes nothing.
 func (tb *LTable) Remove(pos int) LValue {
+	tb.checkWritable()
 	e := tb.Len()
 	if pos < 1 {
 		pos = e
@@ -237,6 +241,7 @@ func (tb *LTable) Remove(pos int) LValue {
 // such a key went into the table, where it could not be found again; the
 // Lua functions raise "table index is nil" or "table index is NaN").
 func (tb *LTable) RawSet(key LValue, value LValue) {
+	tb.checkWritable()
 	switch k := key.(type) {
 	case LNumber:
 		tb.setNumber(k, value)
@@ -479,6 +484,7 @@ func (tb *LTable) resizeArray(n int) {
 
 // RawSetInt sets a given LValue at a position `key` without the __newindex metamethod.
 func (tb *LTable) RawSetInt(key int, value LValue) {
+	tb.checkWritable()
 	if uint(key-1) < uint(len(tb.array)) {
 		tb.array[key-1] = value
 		return
@@ -488,6 +494,7 @@ func (tb *LTable) RawSetInt(key int, value LValue) {
 
 // RawSetString sets a given LValue to a given string index without the __newindex metamethod.
 func (tb *LTable) RawSetString(key string, value LValue) {
+	tb.checkWritable()
 	tb.setString(nil, key, hashString(key), value)
 }
 
@@ -534,6 +541,96 @@ func (tb *LTable) RawGetH(key LValue) LValue {
 // RawGetString returns an LValue associated with a given key without __index metamethod.
 func (tb *LTable) RawGetString(key string) LValue {
 	return tb.hash.getString(key)
+}
+
+// Frozen (read-only) tables. (go-moonscript patch)
+//
+// A frozen table cannot be changed: its fields and its metatable stay as
+// they are. Freezing is for tables shared with code that must not change
+// them, such as the library tables of a sandbox (see the sandbox package).
+//
+// Every way Lua code has to change a table raises the Lua error
+// "attempt to modify a read-only table" (catchable by pcall, with the
+// position of the assignment, or of the caller of the library function):
+// an assignment t[k] = v, also through __newindex chains; rawset;
+// table.insert, table.remove, table.sort, LuaJIT's table.clear and
+// table.move into it (even when they would change nothing);
+// setmetatable and debug.setmetatable. The assignment raises the error
+// whether the key exists or not, and does not call a __newindex
+// metamethod of the frozen table: the table is read-only, not a proxy
+// (a table whose __newindex is a frozen table raises it when the chain
+// gets there). The LState functions follow Lua: SetField, SetTable,
+// SetGlobal, RawSet, RawSetInt and SetMetatable raise the same Lua error.
+//
+// The LTable methods that change the table (RawSet, RawSetInt,
+// RawSetString, RawSetH, Append, Insert, Remove) panic with
+// ErrFrozenTable instead: changing a frozen table from Go is a
+// programming error. (A panic in a Go function called by Lua becomes an
+// error of PCall, as every Go panic does.) Go code that assigns the
+// Metatable field directly is not checked.
+//
+// A frozen table is read and iterated as any other (next, pairs, ipairs,
+// All, Array), may be the metatable or the __index of other tables, and
+// is collected as any other. Freezing is shallow: the tables it holds are
+// not frozen (see FreezeDeep). The entries of a frozen weak table are
+// still cleared when their objects are collected, as weakness is not a
+// change to the table made by a program.
+
+// ErrFrozenTable is the panic value of the LTable methods that change a
+// frozen table; its text is the message of the Lua error.
+var ErrFrozenTable = errors.New(frozenTableMessage)
+
+const frozenTableMessage = "attempt to modify a read-only table"
+
+// Freeze makes the table read-only, for good. Its parts keep their size:
+// a frozen table never gets a new key, so it no longer needs the free
+// node pointer of its hash part, which marks it.
+func (tb *LTable) Freeze() {
+	tb.hash.lastfree = -1
+}
+
+// Frozen reports whether the table is read-only (Freeze).
+func (tb *LTable) Frozen() bool {
+	return tb.hash.lastfree < 0
+}
+
+// FreezeDeep freezes the table and, recursively, the tables that are its
+// keys, its values and its metatable, and theirs: all the tables a program
+// can reach from it without calling a function (the environments and
+// upvalues of functions are not followed). Use it for a tree of data, not
+// for a table that holds tables of the state, such as package (whose
+// package.loaded holds the globals).
+func (tb *LTable) FreezeDeep() {
+	seen := map[*LTable]bool{tb: true}
+	todo := []*LTable{tb}
+	add := func(v LValue) {
+		if t, ok := v.(*LTable); ok && !seen[t] {
+			seen[t] = true
+			todo = append(todo, t)
+		}
+	}
+	for len(todo) > 0 {
+		t := todo[len(todo)-1]
+		todo = todo[:len(todo)-1]
+		t.Freeze()
+		add(t.Metatable)
+		for k, v := range t.All() {
+			add(k)
+			add(v)
+		}
+	}
+}
+
+// checkWritable panics with ErrFrozenTable if the table is frozen.
+func (tb *LTable) checkWritable() {
+	if tb.Frozen() {
+		panicFrozen()
+	}
+}
+
+//go:noinline
+func panicFrozen() {
+	panic(ErrFrozenTable)
 }
 
 // ForEach iterates over this table of elements, yielding each in turn to a given function.

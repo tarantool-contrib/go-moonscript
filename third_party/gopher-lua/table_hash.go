@@ -41,12 +41,14 @@ type hnode struct {
 
 // hashPart is the hash part of an LTable. Its zero value is an empty hash
 // part of size 0 (Lua's dummynode).
+// (lastfree comes first, right after the table's array part, as the VM
+// tests it with the array part on assignments: see LTable.Frozen.)
 type hashPart struct {
-	nodes    []hnode // size nodes
-	lastfree int32   // the free nodes are below it
+	lastfree int32   // the free nodes are below it; -1: the table is frozen
 	ptrkeys  int32   // keys hashed by address (live or dead)
 	first    int32   // 1 + the first node in insertion order, 0 if none
 	last     int32   // 1 + the last one, 0 if none
+	nodes    []hnode // size nodes
 }
 
 // hashString is Lua 5.1's luaS_hash.

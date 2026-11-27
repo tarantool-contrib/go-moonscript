@@ -33,7 +33,7 @@ var tableFuncs = map[string]LGFunction{
 // order of equal elements and the "invalid order function for sorting"
 // errors are Lua 5.1's.
 func tableSort(L *LState) int {
-	tbl := L.CheckTable(1)
+	tbl := L.checkWritableTable(1) // go-moonscript patch: LTable.Freeze
 	var fn *LFunction
 	if L.Get(2) != LNil {
 		fn = L.CheckFunction(2)
@@ -144,7 +144,7 @@ func tableMaxN(L *LState) int {
 // and no value when the position is not in 1..#t (it removed the last
 // element of the array part for a position below 1).
 func tableRemove(L *LState) int {
-	tbl := L.CheckTable(1)
+	tbl := L.checkWritableTable(1) // go-moonscript patch: LTable.Freeze
 	e := tbl.Len()
 	pos := L.OptInt(2, e)
 	if pos < 1 || pos > e {
@@ -205,7 +205,7 @@ func tableConcat(L *LState) int {
 // up even for pos < 1, a nil value is stored, and an error for other
 // numbers of arguments.
 func tableInsert(L *LState) int {
-	tbl := L.CheckTable(1)
+	tbl := L.checkWritableTable(1) // go-moonscript patch: LTable.Freeze
 	e := tbl.Len() + 1
 	var pos int
 	switch L.GetTop() {

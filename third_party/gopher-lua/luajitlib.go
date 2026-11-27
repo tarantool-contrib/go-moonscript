@@ -584,7 +584,7 @@ func jitTableNew(L *LState) int {
 
 // jitTableClear is table.clear(t): removes every key of t (raw).
 func jitTableClear(L *LState) int {
-	tb := L.CheckTable(1)
+	tb := L.checkWritableTable(1) // LTable.Freeze
 	for k, _ := tb.Next(LNil); k != LNil; k, _ = tb.Next(k) {
 		tb.RawSet(k, LNil)
 	}
@@ -603,6 +603,9 @@ func jitTableMove(L *LState) int {
 	a2 := a1
 	if L.Get(5) != LNil {
 		a2 = L.CheckTable(5)
+	}
+	if a2.Frozen() { // LTable.Freeze
+		L.frozenTableError()
 	}
 	move := func(i, d float64) {
 		a2.RawSetInt(int(jitNum2Int(i+d)), a1.RawGetInt(int(jitNum2Int(i))))

@@ -277,7 +277,8 @@ func mainLoop(L *LState, baseframe *callFrame) {
 			B := int(inst & 0x1ff)    //GETB
 			if tb, ok := reg.Get(lbase + A).(*LTable); ok {
 				if k, isnum := rk(reg, consts, lbase, B).(LNumber); isnum {
-					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
+					// go-moonscript patch: a frozen table takes the slow path, which raises the error
+					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && !tb.Frozen() && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
 						C := int(inst>>9) & 0x1ff //GETC
 						tb.array[i-1] = rk(reg, consts, lbase, C)
 						continue
@@ -1683,9 +1684,10 @@ func init() {
 			C := int(inst>>9) & 0x1ff //GETC
 			obj := reg.Get(RA)
 			key := L.rkValue(B)
-			if tb, ok := obj.(*LTable); ok {
+			if tb, ok := obj.(*LTable); ok && !tb.Frozen() {
 				// go-moonscript patch: an existing key of the array part, or
 				// any key of a table without a metatable, without setField
+				// (a frozen table: setField raises the error)
 				if k, isnum := key.(LNumber); isnum {
 					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
 						tb.array[i-1] = L.rkValue(C)
@@ -1710,8 +1712,9 @@ func init() {
 			C := int(inst>>9) & 0x1ff      //GETC
 			lkey, key, h := L.rkStringK(B) // go-moonscript patch: with the key's hash
 			obj := reg.Get(RA)
-			if tb, ok := obj.(*LTable); ok {
+			if tb, ok := obj.(*LTable); ok && !tb.Frozen() {
 				// go-moonscript patch: setFieldStringK only for __newindex
+				// (and for a frozen table, to raise the error)
 				if j := tb.hash.findString(key, h); j >= 0 && tb.hash.nodes[j].val != LNil || tb.Metatable == LNil {
 					tb.setStringAt(j, lkey, key, h, L.rkValue(C))
 					return 0
@@ -3110,6 +3113,11 @@ func init() {
 			}
 			offset := (C - 1) * FieldsPerFlush
 			table := reg.Get(RA).(*LTable)
+			if table.Frozen() {
+				// go-moonscript patch: a constructor's table cannot be
+				// frozen yet, unless Go code that got it from the stack froze it
+				L.frozenTableError()
+			}
 			nelem := B
 			if B == 0 {
 				nelem = reg.Top() - RA - 1

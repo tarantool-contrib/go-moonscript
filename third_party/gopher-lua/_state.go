@@ -1367,6 +1367,9 @@ func (ls *LState) setFieldStringK(obj LValue, lkey LValue, skey string, h uint32
 		tb, istable := curobj.(*LTable)
 		j := int32(-1)
 		if istable {
+			if tb.Frozen() { // go-moonscript patch: before __newindex
+				ls.frozenTableError()
+			}
 			// go-moonscript patch: one lookup for the key
 			j = tb.hash.findString(skey, h)
 			if j >= 0 && tb.hash.nodes[j].val != LNil || tb.Metatable == LNil {
@@ -1401,6 +1404,9 @@ func (ls *LState) setField(obj LValue, key LValue, value LValue) {
 	for i := 0; i < MaxTableGetLoop; i++ {
 		tb, istable := curobj.(*LTable)
 		if istable {
+			if tb.Frozen() { // go-moonscript patch: before __newindex
+				ls.frozenTableError()
+			}
 			if tb.Metatable == LNil || tb.RawGet(key) != LNil { // go-moonscript patch
 				ls.RawSet(tb, key, value)
 				return
@@ -1433,6 +1439,9 @@ func (ls *LState) setFieldString(obj LValue, key string, value LValue) {
 	for i := 0; i < MaxTableGetLoop; i++ {
 		tb, istable := curobj.(*LTable)
 		if istable {
+			if tb.Frozen() { // go-moonscript patch: before __newindex
+				ls.frozenTableError()
+			}
 			if tb.Metatable == LNil || tb.RawGetString(key) != LNil { // go-moonscript patch
 				tb.RawSetString(key, value)
 				return
@@ -1813,6 +1822,15 @@ func (ls *LState) RaiseError(format string, args ...interface{}) {
 	ls.raiseError(1, format, args...)
 }
 
+// frozenTableError raises the error of a change to a frozen table, at the
+// running Lua function's line or the caller's of the running Go function
+// (go-moonscript patch: LTable.Freeze).
+//
+//go:noinline
+func (ls *LState) frozenTableError() {
+	ls.raiseError(1, frozenTableMessage)
+}
+
 // This function is equivalent to lua_error( http://www.lua.org/manual/5.1/manual.html#lua_error ).
 // A string value is prefixed with the position of the function at level,
 // as Lua 5.1's error function does (luaL_where: 1 is the caller of the
@@ -2011,7 +2029,12 @@ func (ls *LState) GetTable(obj LValue, key LValue) LValue {
 	return ls.getField(obj, key)
 }
 
+// RawSet is rawset: go-moonscript patch: a frozen table raises the Lua
+// error "attempt to modify a read-only table" (LTable.Freeze).
 func (ls *LState) RawSet(tb *LTable, key LValue, value LValue) {
+	if tb.Frozen() {
+		ls.frozenTableError()
+	}
 	if n, ok := key.(LNumber); ok && math.IsNaN(float64(n)) {
 		ls.RaiseError("table index is NaN")
 	} else if key == LNil {
@@ -2020,10 +2043,18 @@ func (ls *LState) RawSet(tb *LTable, key LValue, value LValue) {
 	tb.RawSet(key, value)
 }
 
+// RawSetInt is lua_rawseti: go-moonscript patch: a frozen table raises the
+// Lua error "attempt to modify a read-only table" (LTable.Freeze).
 func (ls *LState) RawSetInt(tb *LTable, key int, value LValue) {
+	if tb.Frozen() {
+		ls.frozenTableError()
+	}
 	tb.RawSetInt(key, value)
 }
 
+// SetField is t[key] = value, with __newindex. go-moonscript patch: a frozen
+// table raises the Lua error "attempt to modify a read-only table", before
+// any __newindex (LTable.Freeze); so do SetTable and SetGlobal.
 func (ls *LState) SetField(obj LValue, key string, value LValue) {
 	ls.setFieldString(obj, key, value)
 }
@@ -2274,6 +2305,9 @@ func (ls *LState) GetMetatable(obj LValue) LValue {
 	return ls.metatable(obj, false)
 }
 
+// SetMetatable sets the metatable of obj. go-moonscript patch: a frozen
+// table raises the Lua error "attempt to modify a read-only table"
+// (LTable.Freeze).
 func (ls *LState) SetMetatable(obj LValue, mt LValue) {
 	switch mt.(type) {
 	case *LNilType, *LTable:
@@ -2283,6 +2317,9 @@ func (ls *LState) SetMetatable(obj LValue, mt LValue) {
 
 	switch v := obj.(type) {
 	case *LTable:
+		if v.Frozen() { // go-moonscript patch (LTable.Freeze)
+			ls.frozenTableError()
+		}
 		v.Metatable = mt
 	case *LUserData:
 		v.Metatable = mt
