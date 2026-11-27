@@ -2998,3 +2998,303 @@
 2998	nil	nil	nil	"a1-a %_a",0	""
 2999	10,9	nil	""	"-_- - - --1--)-",9	""",nil;"",nil;"",nil;"",nil;"za",nil;"",nil;"a",nil;"",nil;"",nil"
 3000	1,8	nil	"x.b\0\0(-a"	"[x.b\0\0(-a|x.b\0\0(-a]",1	""x.b\0\0(-a",nil"
+3001	nil	nil	nil	"x_aBcb1 Bcb1 ",0	""
+3002	nil	nil	nil	"-b",1	E
+3003	nil	nil	nil	E	E
+3004	E	nil	E	"--%.%b",2	E
+3005	nil	nil	nil	"[3|_b ab]c\0.",1	E
+3006	E	nil	E	"c(aa(((acc)1_%xyaaa(((acc)1_%xy",2	E
+3007	nil	nil	nil	E	E
+3008	E	nil	E	E	E
+3009	E	nil	E	"(a [9|dc111]cb [17|dc111]",2	E
+3010	E	nil	E	E	E
+3011	E	nil	E	"bxb",1	E
+3012	nil	nil	nil	"\0..._%_ 1",0	""
+3013	nil	nil	nil	"bx a(.x ",0	""
+3014	E	nil	E	E	E
+3015	nil	nil	nil	"%a\0",1	E
+3016	nil	nil	nil	"(b",0	""
+3017	nil	nil	nil	E	E
+3018	nil	nil	nil	"bx11()x",0	""
+3019	nil	nil	nil	"(a[5| \1 %(]b[11| \1 ]",2	E
+3020	nil	nil	nil	"ba a.a c^.-",0	""
+3021	nil	nil	nil	"1x. ?11-Ba b%((___a",0	""
+3022	nil	nil	nil	"bb%aaaxxbb ",0	""
+3023	E	nil	E	"1 %",1	E
+3024	E	nil	E	"(a",1	E
+3025	nil	nil	nil	"-%a    bb)",0	""
+3026	nil	nil	nil	E	""
+3027	nil	nil	nil	"%x %b1a-c_(a",0	""
+3028	nil	nil	nil	"-_a(a",0	""
+3029	nil	nil	nil	"ba(ca)a__%+.-",0	""
+3030	nil	nil	nil	"x_a1(cx%1\0-.",0	""
+3031	nil	nil	nil	"",0	""
+3032	nil	nil	nil	"x_%(1 %) (",0	""
+3033	E	nil	E	"]\0a-b%",1	E
+3034	nil	nil	nil	"%bc11bxy",0	""
+3035	nil	nil	nil	E	E
+3036	nil	nil	nil	"(-\0b",1	E
+3037	nil	nil	nil	"-%b7ab(c7ab(c",0	""
+3038	nil	nil	nil	") (b ",0	""
+3039	E	nil	E	"a%a",2	E
+3040	nil	nil	nil	"- b1ab1c%1ab1c",1	E
+3041	E	nil	E	")b<a](bbbxac>](bbbxac",1	E
+3042	E	nil	E	" c",1	E
+3043	nil	nil	nil	"a1_a1",0	""
+3044	nil	nil	nil	"",1	E
+3045	nil	nil	nil	"b1%    %xa",0	""
+3046	E	nil	E	"a\0)",1	E
+3047	nil	nil	nil	")bc)(.",0	""
+3048	E	nil	E	".1g bddd11g bddd1",0	""
+3049	E	nil	E	E	E
+3050	E	nil	E	"xaa5%)8",2	E
+3051	nil	nil	nil	"% 1-a",0	""
+3052	nil	nil	nil	"__baxx%1yb1 a2baxx%1yb1 a2",0	""
+3053	nil	nil	nil	"aab",0	""
+3054	nil	nil	nil	"1)axxac",0	""
+3055	nil	nil	nil	"\0b_cb(b",0	""
+3056	nil	nil	nil	"",0	""
+3057	E	nil	E	")bc",1	E
+3058	E	nil	E	E	""
+3059	nil	nil	nil	"abx1a())bbb._)b",0	""
+3060	nil	nil	nil	"]ca(_",0	""
+3061	nil	nil	nil	E	E
+3062	nil	nil	nil	")axccc((a\91-b.",0	""
+3063	E	nil	E	"%%%%%%%%%",9	E
+3064	E	nil	E	E	E
+3065	E	nil	E	E	E
+3066	nil	nil	nil	"xxa.a.-",1	E
+3067	nil	nil	nil	"_-a   _$ab_\0b ",0	""
+3068	nil	nil	nil	"",0	""
+3069	E	nil	E	"b%a",1	E
+3070	E	nil	E	"a((_(",1	E
+3071	nil	nil	nil	")(x()cc]1",0	""
+3072	nil	nil	nil	".b..-\0\0\0.baa",0	""
+3073	nil	nil	nil	"a)_-b)a",0	""
+3074	nil	nil	nil	"a.b-c-a%",0	""
+3075	nil	nil	nil	"a-1bb\0 1%",0	""
+3076	nil	nil	nil	"aa)%_b_",0	""
+3077	E	nil	E	"--",2	E
+3078	nil	nil	nil	"1_b1c",0	""
+3079	E	nil	E	".< 1bab**c>",1	E
+3080	nil	nil	nil	"(-^11_xbba",0	""
+3081	nil	nil	nil	"a_1bba\0",0	""
+3082	E	nil	E	"1[2|ccb((]b__",1	E
+3083	nil	nil	nil	"a$b(%$b",0	""
+3084	nil	nil	nil	")%).a",0	""
+3085	E	nil	E	".\0<_$$$_xbaa \0(_a1)>%a",1	E
+3086	E	nil	E	"aa_\9c\0_1-",1	E
+3087	nil	nil	nil	"%\0",1	E
+3088	E	nil	E	E	E
+3089	E	nil	E	")-aa__1",0	""
+3090	nil	nil	nil	"",0	""
+3091	E	nil	E	E	E
+3092	nil	nil	nil	"a1bxcb-1bxc",0	""
+3093	nil	nil	nil	E	E
+3094	E	nil	E	"(ac.\0-ccA",1	E
+3095	nil	nil	nil	"\0ab(a",0	""
+3096	nil	nil	nil	"bba",0	""
+3097	nil	nil	nil	"a(_b",0	""
+3098	nil	nil	nil	"xaca. b",1	E
+3099	nil	nil	nil	"a1\0$(_)]]]_aa.1bx",0	""
+3100	nil	nil	nil	"bb(c1(xa11 a\0",0	""
+3101	nil	nil	nil	" (__",0	""
+3102	E	nil	E	"x% \0x1",1	E
+3103	E	nil	E	"-1 %_",1	""
+3104	E	nil	E	"[cbb|cbb1(.b ]_x",1	E
+3105	nil	nil	nil	"-x",0	""
+3106	nil	nil	nil	"abc__b",0	""
+3107	nil	nil	nil	"c.bax%-",0	""
+3108	nil	nil	nil	"cabb%",0	""
+3109	nil	nil	nil	")((5aaaxa-",1	E
+3110	E	nil	E	"ba[13| xxaz-zeb-]",1	E
+3111	nil	nil	nil	"%1%1",1	E
+3112	E	nil	E	"<a() (-b1>(",1	E
+3113	nil	nil	nil	"bb-%dd1 a",1	E
+3114	nil	nil	nil	"(\0a)c ",0	""
+3115	nil	nil	nil	"1\0aabb\0ab c.",0	""
+3116	nil	nil	nil	" x- b",0	""
+3117	E	nil	E	"_x)",1	E
+3118	E	nil	E	E	E
+3119	nil	nil	nil	E	E
+3120	nil	nil	nil	E	E
+3121	nil	nil	nil	".Bb Bb ",0	""
+3122	E	nil	E	"< a_a_bbx>",1	E
+3123	E	nil	E	E	E
+3124	nil	nil	nil	"-%1",1	E
+3125	nil	nil	nil	"1(_a",0	""
+3126	nil	nil	nil	"1baccb((a(xa1b(((-_b",0	""
+3127	E	nil	E	E	E
+3128	nil	nil	nil	"a___",1	""
+3129	E	nil	E	")\0%\0__b(",1	E
+3130	nil	nil	nil	"x11",0	""
+3131	nil	nil	nil	"1%__",1	E
+3132	E	nil	E	"_ g  1_x",10	E
+3133	nil	nil	nil	"a-%",1	E
+3134	nil	nil	nil	"1 _xba1c",0	""
+3135	nil	nil	nil	"aa\0aa_\0\0.(",0	""
+3136	nil	nil	nil	"_b?\0B_ab\01\0",0	""
+3137	nil	nil	nil	"%( %\0b1)",2	E
+3138	E	nil	E	"aa%",1	E
+3139	nil	nil	nil	"1a b1",0	""
+3140	E	nil	E	"\0[aBB11 | _aBB11 _]b ",1	E
+3141	nil	nil	nil	"(.a (.._-%a",0	""
+3142	E	nil	E	"a_a x",1	E
+3143	nil	nil	nil	E	E
+3144	nil	nil	nil	"c xa(]b\0_b]b\0_$) ]b\0_",0	""
+3145	nil	nil	nil	"aa(bc ",0	""
+3146	E	nil	E	E	E
+3147	nil	nil	nil	" bbb-\0\0\0aaab(xbbb-\0\0\0aaab",0	""
+3148	nil	nil	nil	"_ c\9b1",0	""
+3149	nil	nil	nil	"x\01\0)\0x%1a-",0	""
+3150	E	nil	E	"c%1",0	""
+3151	nil	nil	nil	"a)aa",0	""
+3152	E	nil	E	") -ac",1	E
+3153	E	nil	E	"b.<^\9]xab>",1	E
+3154	E	nil	E	") ",1	E
+3155	nil	nil	nil	" ",1	E
+3156	nil	nil	nil	"",0	""
+3157	nil	nil	nil	"x()-_ab ",0	""
+3158	E	nil	E	"bb1]a%",1	E
+3159	nil	nil	nil	"  (-)g   .ba1  (-)g   .b",0	""
+3160	nil	nil	nil	"abx.",0	""
+3161	nil	nil	nil	"\0a148",2	E
+3162	nil	nil	nil	"-c%)%b%.1a)",1	""
+3163	nil	nil	nil	")1_dxBBBb",0	""
+3164	nil	nil	nil	"c(--1)ab",0	""
+3165	nil	nil	nil	")Ba()_b1b ",0	""
+3166	nil	nil	nil	"-_.azax7 . )c((.",0	""
+3167	nil	nil	nil	E	E
+3168	nil	nil	nil	"-\0_(b )c.xx",0	""
+3169	nil	nil	nil	E	E
+3170	nil	nil	nil	"__\0a-",0	""
+3171	nil	nil	nil	"bzx\0.a",0	""
+3172	nil	nil	nil	".a( (1(a( (1(",0	""
+3173	nil	nil	nil	"a-(_1ac1c\0a",0	""
+3174	nil	nil	nil	E	E
+3175	nil	nil	nil	"ccaad_\0.",0	""
+3176	nil	nil	nil	"-)b1a",0	""
+3177	nil	nil	nil	"_1x\0_1ac.)(x",0	""
+3178	nil	nil	nil	"a.(ab(a",0	""
+3179	nil	nil	nil	" x-1_-c",1	E
+3180	nil	nil	nil	"%1]ca\0",0	""
+3181	nil	nil	nil	"a  bb(",0	""
+3182	nil	nil	nil	"-.[[[%xxby1\0 .ba",0	""
+3183	E	nil	E	"\0\0<(c)>(xa",1	E
+3184	nil	nil	nil	"acx(1cc_%)",0	""
+3185	E	nil	E	"1234ba7b9",6	E
+3186	nil	nil	nil	"-xc11xb y",1	""
+3187	nil	nil	nil	"<+ ca>-<+ ca>",2	E
+3188	nil	nil	nil	"acx.a",0	""
+3189	E	nil	E	"-c",1	E
+3190	nil	nil	nil	"((--\0-a",0	""
+3191	nil	nil	nil	"%.",0	""
+3192	nil	nil	nil	")\0b%b1-_xb",0	""
+3193	E	nil	E	E	E
+3194	E	nil	E	E	E
+3195	E	nil	E	E	E
+3196	nil	nil	nil	"1-",2	E
+3197	nil	nil	nil	"a\0_b",0	""
+3198	E	nil	E	E	E
+3199	E	nil	E	"a-c%x",1	E
+3200	nil	nil	nil	"1aa1_c1b_\0",0	""
+3201	nil	nil	nil	"a%a)bc.",0	""
+3202	E	nil	E	"_%1_%",2	E
+3203	E	nil	E	E	E
+3204	E	nil	E	E	E
+3205	nil	nil	nil	"bxbc(bc\0(-b%\1\0-c(bc\0(-b%\1\0-",0	""
+3206	nil	nil	nil	"1b",0	""
+3207	nil	nil	nil	"%xa11_",1	E
+3208	nil	nil	nil	"aa",2	E
+3209	E	nil	E	E	E
+3210	nil	nil	nil	"%----",3	E
+3211	E	nil	E	"(%. ccc*ccc",1	E
+3212	E	nil	E	"-",1	E
+3213	nil	nil	nil	"b(.ab xdax(",0	""
+3214	E	nil	E	"%-a%.%",2	E
+3215	nil	nil	nil	".cc%_",0	""
+3216	nil	nil	nil	"b% aa_(",0	""
+3217	nil	nil	nil	" axa(b_a(_(a",0	""
+3218	nil	nil	nil	"1cb)ab(.",0	""
+3219	E	nil	E	"((-%(--",1	E
+3220	nil	nil	nil	"c(b ",0	""
+3221	E	nil	E	E	E
+3222	nil	nil	nil	"%ab",1	E
+3223	nil	nil	nil	"aa)))? _a(+1b",0	""
+3224	nil	nil	nil	"b. xa\0$$$xxa",0	""
+3225	E	nil	E	"a___a 7%c.",1	E
+3226	nil	nil	nil	"b)\0x",0	""
+3227	E	nil	E	E	E
+3228	nil	nil	nil	"x ^aaa(a((a_ ^aaa(a((a",0	""
+3229	nil	nil	nil	"ab%x_x(xa-",0	""
+3230	nil	nil	nil	"]_???\9\9]](b_???\9\9. ",0	""
+3231	nil	nil	nil	"1%-.(-",1	E
+3232	E	nil	E	E	E
+3233	E	nil	E	E	""
+3234	nil	nil	nil	E	E
+3235	E	nil	E	E	E
+3236	nil	nil	nil	"\0%a \0a",0	""
+3237	E	nil	E	E	E
+3238	E	nil	E	E	E
+3239	E	nil	E	".ac[_ ])|x_ ])] _ ])]$$$1]%a",1	E
+3240	E	nil	E	"",1	E
+3241	E	nil	E	"-b(",1	""
+3242	nil	nil	nil	"x_7bbb-bbb-a1_",0	""
+3243	E	nil	E	E	E
+3244	E	nil	E	"<_(_-a-aax)by*>",1	E
+3245	nil	nil	nil	"-1b.c )",0	""
+3246	E	nil	E	"",6	E
+3247	E	nil	E	E	E
+3248	nil	nil	nil	"%%b_ \0_)1 a",0	""
+3249	nil	nil	nil	"b<bx\0bay x>xx",1	E
+3250	nil	nil	nil	"% c",1	E
+3251	nil	nil	nil	")b (.%)b %b",0	""
+3252	E	nil	E	"a_%xc",1	E
+3253	nil	nil	nil	"bb1 b  cabba-",0	""
+3254	nil	nil	nil	"daaa1b- ",0	""
+3255	nil	nil	nil	"(%_a",0	""
+3256	nil	nil	nil	"",0	""
+3257	nil	nil	nil	"[5|x_bycccx._%yxc\1].-%",1	E
+3258	nil	nil	nil	"_\0cx_(._b",0	""
+3259	E	nil	E	E	E
+3260	nil	nil	nil	"-",1	E
+3261	nil	nil	nil	E	E
+3262	nil	nil	nil	"x)ax\0bb[[[-1[23|acax\0bb[[[-1a]",1	E
+3263	nil	nil	nil	"a%c(x",0	""
+3264	E	nil	E	"-1a)(-",1	E
+3265	E	nil	E	E	E
+3266	E	nil	E	"(-a-",2	E
+3267	nil	nil	nil	" \1\0\0a\1 B.a%",0	""
+3268	nil	nil	nil	"..<xyc>c",1	E
+3269	nil	nil	nil	E	E
+3270	nil	nil	nil	"-c^aax1_c^aax",0	""
+3271	E	nil	E	"b<x1>",1	E
+3272	E	nil	E	E	E
+3273	nil	nil	nil	"a",0	""
+3274	nil	nil	nil	"(cxcbcy BB\0\0.",0	""
+3275	nil	nil	nil	" )b (c)   1xa(",0	""
+3276	E	nil	E	"a1%[7|xa_]b)a",1	E
+3277	nil	nil	nil	"",0	""
+3278	nil	nil	nil	E	E
+3279	E	nil	E	"xbc",1	E
+3280	nil	nil	nil	E	E
+3281	nil	nil	nil	"b a",0	""
+3282	E	nil	E	"<a)ba)b%>)) ",1	E
+3283	nil	nil	nil	"b1cc^bbb",0	""
+3284	nil	nil	nil	"baa*aa 1..a",0	""
+3285	nil	nil	nil	")a-",0	""
+3286	E	nil	E	".1abc%__bx<abc%__>",1	E
+3287	nil	nil	nil	"aa1+(.(__aa1+(.(__",0	""
+3288	nil	nil	nil	"bccab_1_c",0	""
+3289	E	nil	E	E	E
+3290	E	nil	E	"b (%",1	E
+3291	nil	nil	nil	"\0Baa-a [aba",0	""
+3292	nil	nil	nil	"_(bb)\0(. %-.",0	""
+3293	E	nil	E	"ab a -ab a ",2	E
+3294	nil	nil	nil	"\0\0)\0.11(.%) 1_\0.11(.%) 1",0	""
+3295	nil	nil	nil	"b1BBab%",1	E
+3296	nil	nil	nil	"(bbb)(b(\1",0	""
+3297	nil	nil	nil	"b\0aa",0	""
+3298	E	nil	E	E	E
+3299	E	nil	E	"cx<1bccb11bccb1>",1	E
+3300	nil	nil	nil	"_cB(.)%%",1	E

@@ -9,6 +9,7 @@
 --   lua5.1 pattern-fuzz-gen.lua [ncases [seed]] > lib_pattern_fuzz.lua
 
 local ncases = tonumber(arg and arg[1]) or 3000
+local nunclosed = math.floor(ncases / 10) -- after the others, which they leave as they were
 
 -- Park-Miller minimal standard generator (exact in doubles)
 local seed = tonumber(arg and arg[2]) or 20261126
@@ -141,6 +142,29 @@ local function matchercase()
   return p, s
 end
 
+-- patterns that end inside a capture, whose '(' is never closed: they
+-- match with the capture left open, which only some uses raise an error
+-- for
+local function unclosedcase()
+  local st = { ncap = 0, closed = {}, text = {} }
+  local p, smp = sequence(0, st)
+  local open = pick({ "(", "(", "(", "((", "(()", "()(" })
+  st.ncap = st.ncap + 2
+  local q, smq = "", ""
+  if chance(70) then q, smq = sequence(1, st) end
+  p = p .. open .. q
+  if chance(25) then p = p .. "$" end
+  if chance(15) then p = "^" .. p end
+  local s
+  if chance(20) then
+    s = randstr(noise, 0, 12)
+  else
+    s = randstr(noise, 0, 3) .. smp .. smq .. randstr(noise, 0, 3)
+    if chance(30) then s = s .. smp .. smq end
+  end
+  return p, s
+end
+
 local inits = { "nil", "1", "2", "3", "-1", "-2", "-30", "0", "100" }
 local ns = { "nil", "nil", "nil", "1", "2" }
 local nrepl = 9 -- R[1..nrepl] in the driver
@@ -150,7 +174,8 @@ io.write([[
 -- do not edit. Random patterns and subjects run through string.find, plain
 -- find, match, gsub and gmatch; the reference output is PUC Lua 5.1's.
 -- Errors print as "E" (gopher-lua's messages differ). Cases 1..]] .. ncases / 2 .. [[ are
--- literal patterns (pm's fast path), the rest are for the matcher.
+-- literal patterns (pm's fast path), the rest are for the matcher; cases
+-- ]] .. ncases + 1 .. [[.. end inside an unclosed capture.
 local function enc(...)
   local t = {}
   for i = 1, select("#", ...) do
@@ -183,9 +208,11 @@ local function gm(s, p)
 end
 local cases = {
 ]])
-for i = 1, ncases do
+for i = 1, ncases + nunclosed do
   local p, s
-  if i <= ncases / 2 then p, s = literalcase() else p, s = matchercase() end
+  if i <= ncases / 2 then p, s = literalcase()
+  elseif i <= ncases then p, s = matchercase()
+  else p, s = unclosedcase() end
   io.write(string.format("{%s,%s,%s,%d,%s},\n", quote(p), quote(s), pick(inits), rnd(nrepl), pick(ns)))
 end
 io.write([==[

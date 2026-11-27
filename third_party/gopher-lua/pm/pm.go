@@ -92,6 +92,20 @@ func (st *MatchData) IsPosCapture(idx int) bool { return (st.captures[idx] & 1) 
 
 func (st *MatchData) Capture(idx int) int { return int(st.captures[idx] >> 1) }
 
+// go-moonscript patch: capUnfinished is the end of a capture whose ')' the
+// pattern lacks (an odd end after an even start; a position capture has
+// both odd): the pattern ends inside the capture, which matches as in Lua
+// 5.1 with the capture left open (CAP_UNFINISHED).
+const capUnfinished = 1
+
+// IsUnfinished reports whether the capture at idx (its first slot, as for
+// Capture) is unfinished: an unclosed '(' runs to the end of the pattern.
+// Lua 5.1 raises "unfinished capture" when the value of such a capture is
+// asked for. go-moonscript patch.
+func (st *MatchData) IsUnfinished(idx int) bool {
+	return st.captures[idx]&1 == 0 && idx+1 < len(st.captures) && st.captures[idx+1]&1 == 1
+}
+
 /* }}} */
 
 /* scanner {{{ */
@@ -202,6 +216,9 @@ const (
 	opFrontier
 	// go-moonscript patch: opError raises patternErrors[Operand1].
 	opError
+	// go-moonscript patch: opUnfinished ends capture slot Operand1 (the
+	// second slot of a capture) as unfinished, then matches the rest.
+	opUnfinished
 )
 
 // go-moonscript patch: the errors of malformed items, which Lua 5.1 raises
@@ -344,6 +361,10 @@ type posCapPattern struct{}
 
 type capPattern struct {
 	Pattern pattern
+	// go-moonscript patch: the pattern ends before the capture's ')', so the
+	// capture stays open, as Lua 5.1's start_capture leaves it at the end of
+	// the pattern
+	Unfinished bool
 }
 
 type numberPattern struct {
@@ -514,13 +535,20 @@ func parsePattern(sc *scanner, toplevel bool) *seqPattern {
 				sc.Next()
 				pat.Patterns = append(pat.Patterns, &posCapPattern{})
 			} else {
-				ret := &capPattern{parsePattern(sc, false)}
+				ret := &capPattern{Pattern: parsePattern(sc, false)}
 				if sc.malformed != 0 { // go-moonscript patch: the pattern ends there
 					pat.Patterns = append(pat.Patterns, ret)
 					return pat
 				}
 				if sc.Peek() != ')' {
-					panic(newError(sc.CurrentPos(), "unfinished capture"))
+					// go-moonscript patch: the end of the pattern, not an
+					// error (it was "unfinished capture at EOS"): Lua 5.1's
+					// do_match matches at the end of the pattern whatever
+					// captures are open, and a '$' there is the anchor
+					ret.Unfinished = true
+					pat.Patterns = append(pat.Patterns, ret)
+					pat.MustTail = ret.Pattern.(*seqPattern).MustTail
+					goto exit
 				}
 				sc.Next()
 				pat.Patterns = append(pat.Patterns, ret)
@@ -537,7 +565,9 @@ func parsePattern(sc *scanner, toplevel bool) *seqPattern {
 			}
 			pat.Patterns = append(pat.Patterns, &singlePattern{&charClass{ch}})
 		case '$':
-			if toplevel && (sc.NextPos() == sc.Length()-1 || sc.NextPos() == EOS) {
+			// go-moonscript patch: the anchor at the end of the pattern, also
+			// inside a capture (which then is unfinished)
+			if sc.NextPos() == sc.Length()-1 || sc.NextPos() == EOS {
 				pat.MustTail = true
 			} else {
 				pat.Patterns = append(pat.Patterns, &singlePattern{&charClass{ch}})
@@ -621,6 +651,10 @@ func compilePattern(p pattern, ps ...*iptr) []inst {
 		ptr.kinds[c0] = captureOpen // go-moonscript patch
 		ptr.insts = append(ptr.insts, inst{opSave, nil, c0, -1})
 		compilePattern(pat.Pattern, ptr)
+		if pat.Unfinished { // go-moonscript patch: stays open (a %N to it is invalid)
+			ptr.insts = append(ptr.insts, inst{opUnfinished, nil, c1, -1})
+			break
+		}
 		ptr.insts = append(ptr.insts, inst{opSave, nil, c1, -1})
 		ptr.kinds[c0] = captureClosed
 	case *bracePattern:
@@ -776,6 +810,14 @@ redo:
 		goto redo
 	case opSave:
 		s := m.setCapture(inst.Operand1, sp)
+		if ok, nsp, _ := vm.recursiveVM(src, insts, pc+1, sp, recLevel, m); ok {
+			return true, nsp, m
+		}
+		m.restoreCapture(inst.Operand1, s)
+		return false, sp, m
+	case opUnfinished: // go-moonscript patch
+		s := m.setCapture(inst.Operand1, 0)
+		m.captures[inst.Operand1] = capUnfinished
 		if ok, nsp, _ := vm.recursiveVM(src, insts, pc+1, sp, recLevel, m); ok {
 			return true, nsp, m
 		}
@@ -960,7 +1002,7 @@ func compiledPattern(p string) *compiled {
 	}
 	for _, in := range cp.insts {
 		switch in.OpCode {
-		case opSave:
+		case opSave, opUnfinished:
 			cp.ncap = max(cp.ncap, in.Operand1+1)
 		case opPSave:
 			cp.ncap = max(cp.ncap, in.Operand1+2)

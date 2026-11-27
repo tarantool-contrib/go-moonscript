@@ -1,0 +1,932 @@
+gsub x ( abc	true,"xaxbxcx",4
+gsub %0 ( abc	true,"<>a<>b<>c<>",4
+gsub 1 ( abc	true,"xabc",1
+gsub %1 ( abc	false,"unfinished capture"
+gsub %2 ( abc	false,"invalid capture index"
+gsub fn ( abc	false,"unfinished capture"
+gsub tbl ( abc	false,"unfinished capture"
+find ( abc	false,"unfinished capture"
+find 10 ( abc	false,"unfinished capture"
+match ( abc	false,"unfinished capture"
+gmatch ( abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ( 	true,"x",1
+gsub %0 ( 	true,"<>",1
+gsub 1 ( 	true,"x",1
+gsub %1 ( 	false,"unfinished capture"
+gsub %2 ( 	false,"invalid capture index"
+gsub fn ( 	false,"unfinished capture"
+gsub tbl ( 	false,"unfinished capture"
+find ( 	false,"unfinished capture"
+find 10 ( 	false,"unfinished capture"
+match ( 	false,"unfinished capture"
+gmatch ( 	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ( aa	true,"xaxax",3
+gsub %0 ( aa	true,"<>a<>a<>",3
+gsub 1 ( aa	true,"xaa",1
+gsub %1 ( aa	false,"unfinished capture"
+gsub %2 ( aa	false,"invalid capture index"
+gsub fn ( aa	false,"unfinished capture"
+gsub tbl ( aa	false,"unfinished capture"
+find ( aa	false,"unfinished capture"
+find 10 ( aa	false,"unfinished capture"
+match ( aa	false,"unfinished capture"
+gmatch ( aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ( a$a	true,"xax$xax",4
+gsub %0 ( a$a	true,"<>a<>$<>a<>",4
+gsub 1 ( a$a	true,"xa$a",1
+gsub %1 ( a$a	false,"unfinished capture"
+gsub %2 ( a$a	false,"invalid capture index"
+gsub fn ( a$a	false,"unfinished capture"
+gsub tbl ( a$a	false,"unfinished capture"
+find ( a$a	false,"unfinished capture"
+find 10 ( a$a	false,"unfinished capture"
+match ( a$a	false,"unfinished capture"
+gmatch ( a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x a( abc	true,"xbc",1
+gsub %0 a( abc	true,"<a>bc",1
+gsub 1 a( abc	true,"xbc",1
+gsub %1 a( abc	false,"unfinished capture"
+gsub %2 a( abc	false,"invalid capture index"
+gsub fn a( abc	false,"unfinished capture"
+gsub tbl a( abc	false,"unfinished capture"
+find a( abc	false,"unfinished capture"
+find 10 a( abc	true,nil
+match a( abc	false,"unfinished capture"
+gmatch a( abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x a( 	true,"",0
+gsub %0 a( 	true,"",0
+gsub 1 a( 	true,"",0
+gsub %1 a( 	true,"",0
+gsub %2 a( 	true,"",0
+gsub fn a( 	true,"",0
+gsub tbl a( 	true,"",0
+find a( 	true,nil
+find 10 a( 	true,nil
+match a( 	true,nil
+gmatch a( 	true,""
+gsub x a( aa	true,"xx",2
+gsub %0 a( aa	true,"<a><a>",2
+gsub 1 a( aa	true,"xa",1
+gsub %1 a( aa	false,"unfinished capture"
+gsub %2 a( aa	false,"invalid capture index"
+gsub fn a( aa	false,"unfinished capture"
+gsub tbl a( aa	false,"unfinished capture"
+find a( aa	false,"unfinished capture"
+find 10 a( aa	true,nil
+match a( aa	false,"unfinished capture"
+gmatch a( aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x a( a$a	true,"x$x",2
+gsub %0 a( a$a	true,"<a>$<a>",2
+gsub 1 a( a$a	true,"x$a",1
+gsub %1 a( a$a	false,"unfinished capture"
+gsub %2 a( a$a	false,"invalid capture index"
+gsub fn a( a$a	false,"unfinished capture"
+gsub tbl a( a$a	false,"unfinished capture"
+find a( a$a	false,"unfinished capture"
+find 10 a( a$a	true,nil
+match a( a$a	false,"unfinished capture"
+gmatch a( a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (a abc	true,"xbc",1
+gsub %0 (a abc	true,"<a>bc",1
+gsub 1 (a abc	true,"xbc",1
+gsub %1 (a abc	false,"unfinished capture"
+gsub %2 (a abc	false,"invalid capture index"
+gsub fn (a abc	false,"unfinished capture"
+gsub tbl (a abc	false,"unfinished capture"
+find (a abc	false,"unfinished capture"
+find 10 (a abc	true,nil
+match (a abc	false,"unfinished capture"
+gmatch (a abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (a 	true,"",0
+gsub %0 (a 	true,"",0
+gsub 1 (a 	true,"",0
+gsub %1 (a 	true,"",0
+gsub %2 (a 	true,"",0
+gsub fn (a 	true,"",0
+gsub tbl (a 	true,"",0
+find (a 	true,nil
+find 10 (a 	true,nil
+match (a 	true,nil
+gmatch (a 	true,""
+gsub x (a aa	true,"xx",2
+gsub %0 (a aa	true,"<a><a>",2
+gsub 1 (a aa	true,"xa",1
+gsub %1 (a aa	false,"unfinished capture"
+gsub %2 (a aa	false,"invalid capture index"
+gsub fn (a aa	false,"unfinished capture"
+gsub tbl (a aa	false,"unfinished capture"
+find (a aa	false,"unfinished capture"
+find 10 (a aa	true,nil
+match (a aa	false,"unfinished capture"
+gmatch (a aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (a a$a	true,"x$x",2
+gsub %0 (a a$a	true,"<a>$<a>",2
+gsub 1 (a a$a	true,"x$a",1
+gsub %1 (a a$a	false,"unfinished capture"
+gsub %2 (a a$a	false,"invalid capture index"
+gsub fn (a a$a	false,"unfinished capture"
+gsub tbl (a a$a	false,"unfinished capture"
+find (a a$a	false,"unfinished capture"
+find 10 (a a$a	true,nil
+match (a a$a	false,"unfinished capture"
+gmatch (a a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x b( abc	true,"axc",1
+gsub %0 b( abc	true,"a<b>c",1
+gsub 1 b( abc	true,"axc",1
+gsub %1 b( abc	false,"unfinished capture"
+gsub %2 b( abc	false,"invalid capture index"
+gsub fn b( abc	false,"unfinished capture"
+gsub tbl b( abc	false,"unfinished capture"
+find b( abc	false,"unfinished capture"
+find 10 b( abc	true,nil
+match b( abc	false,"unfinished capture"
+gmatch b( abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x b( 	true,"",0
+gsub %0 b( 	true,"",0
+gsub 1 b( 	true,"",0
+gsub %1 b( 	true,"",0
+gsub %2 b( 	true,"",0
+gsub fn b( 	true,"",0
+gsub tbl b( 	true,"",0
+find b( 	true,nil
+find 10 b( 	true,nil
+match b( 	true,nil
+gmatch b( 	true,""
+gsub x b( aa	true,"aa",0
+gsub %0 b( aa	true,"aa",0
+gsub 1 b( aa	true,"aa",0
+gsub %1 b( aa	true,"aa",0
+gsub %2 b( aa	true,"aa",0
+gsub fn b( aa	true,"aa",0
+gsub tbl b( aa	true,"aa",0
+find b( aa	true,nil
+find 10 b( aa	true,nil
+match b( aa	true,nil
+gmatch b( aa	true,""
+gsub x b( a$a	true,"a$a",0
+gsub %0 b( a$a	true,"a$a",0
+gsub 1 b( a$a	true,"a$a",0
+gsub %1 b( a$a	true,"a$a",0
+gsub %2 b( a$a	true,"a$a",0
+gsub fn b( a$a	true,"a$a",0
+gsub tbl b( a$a	true,"a$a",0
+find b( a$a	true,nil
+find 10 b( a$a	true,nil
+match b( a$a	true,nil
+gmatch b( a$a	true,""
+gsub x (() abc	true,"xaxbxcx",4
+gsub %0 (() abc	true,"<>a<>b<>c<>",4
+gsub 1 (() abc	true,"xabc",1
+gsub %1 (() abc	false,"unfinished capture"
+gsub %2 (() abc	true,"1a2b3c4",4
+gsub fn (() abc	false,"unfinished capture"
+gsub tbl (() abc	false,"unfinished capture"
+find (() abc	false,"unfinished capture"
+find 10 (() abc	false,"unfinished capture"
+match (() abc	false,"unfinished capture"
+gmatch (() abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (() 	true,"x",1
+gsub %0 (() 	true,"<>",1
+gsub 1 (() 	true,"x",1
+gsub %1 (() 	false,"unfinished capture"
+gsub %2 (() 	true,"1",1
+gsub fn (() 	false,"unfinished capture"
+gsub tbl (() 	false,"unfinished capture"
+find (() 	false,"unfinished capture"
+find 10 (() 	false,"unfinished capture"
+match (() 	false,"unfinished capture"
+gmatch (() 	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (() aa	true,"xaxax",3
+gsub %0 (() aa	true,"<>a<>a<>",3
+gsub 1 (() aa	true,"xaa",1
+gsub %1 (() aa	false,"unfinished capture"
+gsub %2 (() aa	true,"1a2a3",3
+gsub fn (() aa	false,"unfinished capture"
+gsub tbl (() aa	false,"unfinished capture"
+find (() aa	false,"unfinished capture"
+find 10 (() aa	false,"unfinished capture"
+match (() aa	false,"unfinished capture"
+gmatch (() aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (() a$a	true,"xax$xax",4
+gsub %0 (() a$a	true,"<>a<>$<>a<>",4
+gsub 1 (() a$a	true,"xa$a",1
+gsub %1 (() a$a	false,"unfinished capture"
+gsub %2 (() a$a	true,"1a2$3a4",4
+gsub fn (() a$a	false,"unfinished capture"
+gsub tbl (() a$a	false,"unfinished capture"
+find (() a$a	false,"unfinished capture"
+find 10 (() a$a	false,"unfinished capture"
+match (() a$a	false,"unfinished capture"
+gmatch (() a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ()( abc	true,"xaxbxcx",4
+gsub %0 ()( abc	true,"<>a<>b<>c<>",4
+gsub 1 ()( abc	true,"xabc",1
+gsub %1 ()( abc	true,"1a2b3c4",4
+gsub %2 ()( abc	false,"unfinished capture"
+gsub fn ()( abc	false,"unfinished capture"
+gsub tbl ()( abc	true,"abc",4
+find ()( abc	false,"unfinished capture"
+find 10 ()( abc	false,"unfinished capture"
+match ()( abc	false,"unfinished capture"
+gmatch ()( abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ()( 	true,"x",1
+gsub %0 ()( 	true,"<>",1
+gsub 1 ()( 	true,"x",1
+gsub %1 ()( 	true,"1",1
+gsub %2 ()( 	false,"unfinished capture"
+gsub fn ()( 	false,"unfinished capture"
+gsub tbl ()( 	true,"",1
+find ()( 	false,"unfinished capture"
+find 10 ()( 	false,"unfinished capture"
+match ()( 	false,"unfinished capture"
+gmatch ()( 	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ()( aa	true,"xaxax",3
+gsub %0 ()( aa	true,"<>a<>a<>",3
+gsub 1 ()( aa	true,"xaa",1
+gsub %1 ()( aa	true,"1a2a3",3
+gsub %2 ()( aa	false,"unfinished capture"
+gsub fn ()( aa	false,"unfinished capture"
+gsub tbl ()( aa	true,"aa",3
+find ()( aa	false,"unfinished capture"
+find 10 ()( aa	false,"unfinished capture"
+match ()( aa	false,"unfinished capture"
+gmatch ()( aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ()( a$a	true,"xax$xax",4
+gsub %0 ()( a$a	true,"<>a<>$<>a<>",4
+gsub 1 ()( a$a	true,"xa$a",1
+gsub %1 ()( a$a	true,"1a2$3a4",4
+gsub %2 ()( a$a	false,"unfinished capture"
+gsub fn ()( a$a	false,"unfinished capture"
+gsub tbl ()( a$a	true,"a$a",4
+find ()( a$a	false,"unfinished capture"
+find 10 ()( a$a	false,"unfinished capture"
+match ()( a$a	false,"unfinished capture"
+gmatch ()( a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (( abc	true,"xaxbxcx",4
+gsub %0 (( abc	true,"<>a<>b<>c<>",4
+gsub 1 (( abc	true,"xabc",1
+gsub %1 (( abc	false,"unfinished capture"
+gsub %2 (( abc	false,"unfinished capture"
+gsub fn (( abc	false,"unfinished capture"
+gsub tbl (( abc	false,"unfinished capture"
+find (( abc	false,"unfinished capture"
+find 10 (( abc	false,"unfinished capture"
+match (( abc	false,"unfinished capture"
+gmatch (( abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (( 	true,"x",1
+gsub %0 (( 	true,"<>",1
+gsub 1 (( 	true,"x",1
+gsub %1 (( 	false,"unfinished capture"
+gsub %2 (( 	false,"unfinished capture"
+gsub fn (( 	false,"unfinished capture"
+gsub tbl (( 	false,"unfinished capture"
+find (( 	false,"unfinished capture"
+find 10 (( 	false,"unfinished capture"
+match (( 	false,"unfinished capture"
+gmatch (( 	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (( aa	true,"xaxax",3
+gsub %0 (( aa	true,"<>a<>a<>",3
+gsub 1 (( aa	true,"xaa",1
+gsub %1 (( aa	false,"unfinished capture"
+gsub %2 (( aa	false,"unfinished capture"
+gsub fn (( aa	false,"unfinished capture"
+gsub tbl (( aa	false,"unfinished capture"
+find (( aa	false,"unfinished capture"
+find 10 (( aa	false,"unfinished capture"
+match (( aa	false,"unfinished capture"
+gmatch (( aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (( a$a	true,"xax$xax",4
+gsub %0 (( a$a	true,"<>a<>$<>a<>",4
+gsub 1 (( a$a	true,"xa$a",1
+gsub %1 (( a$a	false,"unfinished capture"
+gsub %2 (( a$a	false,"unfinished capture"
+gsub fn (( a$a	false,"unfinished capture"
+gsub tbl (( a$a	false,"unfinished capture"
+find (( a$a	false,"unfinished capture"
+find 10 (( a$a	false,"unfinished capture"
+match (( a$a	false,"unfinished capture"
+gmatch (( a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ((b) abc	true,"axc",1
+gsub %0 ((b) abc	true,"a<b>c",1
+gsub 1 ((b) abc	true,"axc",1
+gsub %1 ((b) abc	false,"unfinished capture"
+gsub %2 ((b) abc	true,"abc",1
+gsub fn ((b) abc	false,"unfinished capture"
+gsub tbl ((b) abc	false,"unfinished capture"
+find ((b) abc	false,"unfinished capture"
+find 10 ((b) abc	true,nil
+match ((b) abc	false,"unfinished capture"
+gmatch ((b) abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ((b) 	true,"",0
+gsub %0 ((b) 	true,"",0
+gsub 1 ((b) 	true,"",0
+gsub %1 ((b) 	true,"",0
+gsub %2 ((b) 	true,"",0
+gsub fn ((b) 	true,"",0
+gsub tbl ((b) 	true,"",0
+find ((b) 	true,nil
+find 10 ((b) 	true,nil
+match ((b) 	true,nil
+gmatch ((b) 	true,""
+gsub x ((b) aa	true,"aa",0
+gsub %0 ((b) aa	true,"aa",0
+gsub 1 ((b) aa	true,"aa",0
+gsub %1 ((b) aa	true,"aa",0
+gsub %2 ((b) aa	true,"aa",0
+gsub fn ((b) aa	true,"aa",0
+gsub tbl ((b) aa	true,"aa",0
+find ((b) aa	true,nil
+find 10 ((b) aa	true,nil
+match ((b) aa	true,nil
+gmatch ((b) aa	true,""
+gsub x ((b) a$a	true,"a$a",0
+gsub %0 ((b) a$a	true,"a$a",0
+gsub 1 ((b) a$a	true,"a$a",0
+gsub %1 ((b) a$a	true,"a$a",0
+gsub %2 ((b) a$a	true,"a$a",0
+gsub fn ((b) a$a	true,"a$a",0
+gsub tbl ((b) a$a	true,"a$a",0
+find ((b) a$a	true,nil
+find 10 ((b) a$a	true,nil
+match ((b) a$a	true,nil
+gmatch ((b) a$a	true,""
+gsub x (b() abc	true,"axc",1
+gsub %0 (b() abc	true,"a<b>c",1
+gsub 1 (b() abc	true,"axc",1
+gsub %1 (b() abc	false,"unfinished capture"
+gsub %2 (b() abc	true,"a3c",1
+gsub fn (b() abc	false,"unfinished capture"
+gsub tbl (b() abc	false,"unfinished capture"
+find (b() abc	false,"unfinished capture"
+find 10 (b() abc	true,nil
+match (b() abc	false,"unfinished capture"
+gmatch (b() abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (b() 	true,"",0
+gsub %0 (b() 	true,"",0
+gsub 1 (b() 	true,"",0
+gsub %1 (b() 	true,"",0
+gsub %2 (b() 	true,"",0
+gsub fn (b() 	true,"",0
+gsub tbl (b() 	true,"",0
+find (b() 	true,nil
+find 10 (b() 	true,nil
+match (b() 	true,nil
+gmatch (b() 	true,""
+gsub x (b() aa	true,"aa",0
+gsub %0 (b() aa	true,"aa",0
+gsub 1 (b() aa	true,"aa",0
+gsub %1 (b() aa	true,"aa",0
+gsub %2 (b() aa	true,"aa",0
+gsub fn (b() aa	true,"aa",0
+gsub tbl (b() aa	true,"aa",0
+find (b() aa	true,nil
+find 10 (b() aa	true,nil
+match (b() aa	true,nil
+gmatch (b() aa	true,""
+gsub x (b() a$a	true,"a$a",0
+gsub %0 (b() a$a	true,"a$a",0
+gsub 1 (b() a$a	true,"a$a",0
+gsub %1 (b() a$a	true,"a$a",0
+gsub %2 (b() a$a	true,"a$a",0
+gsub fn (b() a$a	true,"a$a",0
+gsub tbl (b() a$a	true,"a$a",0
+find (b() a$a	true,nil
+find 10 (b() a$a	true,nil
+match (b() a$a	true,nil
+gmatch (b() a$a	true,""
+gsub x (.- abc	true,"xaxbxcx",4
+gsub %0 (.- abc	true,"<>a<>b<>c<>",4
+gsub 1 (.- abc	true,"xabc",1
+gsub %1 (.- abc	false,"unfinished capture"
+gsub %2 (.- abc	false,"invalid capture index"
+gsub fn (.- abc	false,"unfinished capture"
+gsub tbl (.- abc	false,"unfinished capture"
+find (.- abc	false,"unfinished capture"
+find 10 (.- abc	false,"unfinished capture"
+match (.- abc	false,"unfinished capture"
+gmatch (.- abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (.- 	true,"x",1
+gsub %0 (.- 	true,"<>",1
+gsub 1 (.- 	true,"x",1
+gsub %1 (.- 	false,"unfinished capture"
+gsub %2 (.- 	false,"invalid capture index"
+gsub fn (.- 	false,"unfinished capture"
+gsub tbl (.- 	false,"unfinished capture"
+find (.- 	false,"unfinished capture"
+find 10 (.- 	false,"unfinished capture"
+match (.- 	false,"unfinished capture"
+gmatch (.- 	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (.- aa	true,"xaxax",3
+gsub %0 (.- aa	true,"<>a<>a<>",3
+gsub 1 (.- aa	true,"xaa",1
+gsub %1 (.- aa	false,"unfinished capture"
+gsub %2 (.- aa	false,"invalid capture index"
+gsub fn (.- aa	false,"unfinished capture"
+gsub tbl (.- aa	false,"unfinished capture"
+find (.- aa	false,"unfinished capture"
+find 10 (.- aa	false,"unfinished capture"
+match (.- aa	false,"unfinished capture"
+gmatch (.- aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (.- a$a	true,"xax$xax",4
+gsub %0 (.- a$a	true,"<>a<>$<>a<>",4
+gsub 1 (.- a$a	true,"xa$a",1
+gsub %1 (.- a$a	false,"unfinished capture"
+gsub %2 (.- a$a	false,"invalid capture index"
+gsub fn (.- a$a	false,"unfinished capture"
+gsub tbl (.- a$a	false,"unfinished capture"
+find (.- a$a	false,"unfinished capture"
+find 10 (.- a$a	false,"unfinished capture"
+match (.- a$a	false,"unfinished capture"
+gmatch (.- a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (x* abc	true,"xaxbxcx",4
+gsub %0 (x* abc	true,"<>a<>b<>c<>",4
+gsub 1 (x* abc	true,"xabc",1
+gsub %1 (x* abc	false,"unfinished capture"
+gsub %2 (x* abc	false,"invalid capture index"
+gsub fn (x* abc	false,"unfinished capture"
+gsub tbl (x* abc	false,"unfinished capture"
+find (x* abc	false,"unfinished capture"
+find 10 (x* abc	false,"unfinished capture"
+match (x* abc	false,"unfinished capture"
+gmatch (x* abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (x* 	true,"x",1
+gsub %0 (x* 	true,"<>",1
+gsub 1 (x* 	true,"x",1
+gsub %1 (x* 	false,"unfinished capture"
+gsub %2 (x* 	false,"invalid capture index"
+gsub fn (x* 	false,"unfinished capture"
+gsub tbl (x* 	false,"unfinished capture"
+find (x* 	false,"unfinished capture"
+find 10 (x* 	false,"unfinished capture"
+match (x* 	false,"unfinished capture"
+gmatch (x* 	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (x* aa	true,"xaxax",3
+gsub %0 (x* aa	true,"<>a<>a<>",3
+gsub 1 (x* aa	true,"xaa",1
+gsub %1 (x* aa	false,"unfinished capture"
+gsub %2 (x* aa	false,"invalid capture index"
+gsub fn (x* aa	false,"unfinished capture"
+gsub tbl (x* aa	false,"unfinished capture"
+find (x* aa	false,"unfinished capture"
+find 10 (x* aa	false,"unfinished capture"
+match (x* aa	false,"unfinished capture"
+gmatch (x* aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (x* a$a	true,"xax$xax",4
+gsub %0 (x* a$a	true,"<>a<>$<>a<>",4
+gsub 1 (x* a$a	true,"xa$a",1
+gsub %1 (x* a$a	false,"unfinished capture"
+gsub %2 (x* a$a	false,"invalid capture index"
+gsub fn (x* a$a	false,"unfinished capture"
+gsub tbl (x* a$a	false,"unfinished capture"
+find (x* a$a	false,"unfinished capture"
+find 10 (x* a$a	false,"unfinished capture"
+match (x* a$a	false,"unfinished capture"
+gmatch (x* a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x b(.* abc	true,"ax",1
+gsub %0 b(.* abc	true,"a<bc>",1
+gsub 1 b(.* abc	true,"ax",1
+gsub %1 b(.* abc	false,"unfinished capture"
+gsub %2 b(.* abc	false,"invalid capture index"
+gsub fn b(.* abc	false,"unfinished capture"
+gsub tbl b(.* abc	false,"unfinished capture"
+find b(.* abc	false,"unfinished capture"
+find 10 b(.* abc	true,nil
+match b(.* abc	false,"unfinished capture"
+gmatch b(.* abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x b(.* 	true,"",0
+gsub %0 b(.* 	true,"",0
+gsub 1 b(.* 	true,"",0
+gsub %1 b(.* 	true,"",0
+gsub %2 b(.* 	true,"",0
+gsub fn b(.* 	true,"",0
+gsub tbl b(.* 	true,"",0
+find b(.* 	true,nil
+find 10 b(.* 	true,nil
+match b(.* 	true,nil
+gmatch b(.* 	true,""
+gsub x b(.* aa	true,"aa",0
+gsub %0 b(.* aa	true,"aa",0
+gsub 1 b(.* aa	true,"aa",0
+gsub %1 b(.* aa	true,"aa",0
+gsub %2 b(.* aa	true,"aa",0
+gsub fn b(.* aa	true,"aa",0
+gsub tbl b(.* aa	true,"aa",0
+find b(.* aa	true,nil
+find 10 b(.* aa	true,nil
+match b(.* aa	true,nil
+gmatch b(.* aa	true,""
+gsub x b(.* a$a	true,"a$a",0
+gsub %0 b(.* a$a	true,"a$a",0
+gsub 1 b(.* a$a	true,"a$a",0
+gsub %1 b(.* a$a	true,"a$a",0
+gsub %2 b(.* a$a	true,"a$a",0
+gsub fn b(.* a$a	true,"a$a",0
+gsub tbl b(.* a$a	true,"a$a",0
+find b(.* a$a	true,nil
+find 10 b(.* a$a	true,nil
+match b(.* a$a	true,nil
+gmatch b(.* a$a	true,""
+gsub x ^( abc	true,"xabc",1
+gsub %0 ^( abc	true,"<>abc",1
+gsub 1 ^( abc	true,"xabc",1
+gsub %1 ^( abc	false,"unfinished capture"
+gsub %2 ^( abc	false,"invalid capture index"
+gsub fn ^( abc	false,"unfinished capture"
+gsub tbl ^( abc	false,"unfinished capture"
+find ^( abc	false,"unfinished capture"
+find 10 ^( abc	false,"unfinished capture"
+match ^( abc	false,"unfinished capture"
+gmatch ^( abc	true,""
+gsub x ^( 	true,"x",1
+gsub %0 ^( 	true,"<>",1
+gsub 1 ^( 	true,"x",1
+gsub %1 ^( 	false,"unfinished capture"
+gsub %2 ^( 	false,"invalid capture index"
+gsub fn ^( 	false,"unfinished capture"
+gsub tbl ^( 	false,"unfinished capture"
+find ^( 	false,"unfinished capture"
+find 10 ^( 	false,"unfinished capture"
+match ^( 	false,"unfinished capture"
+gmatch ^( 	true,""
+gsub x ^( aa	true,"xaa",1
+gsub %0 ^( aa	true,"<>aa",1
+gsub 1 ^( aa	true,"xaa",1
+gsub %1 ^( aa	false,"unfinished capture"
+gsub %2 ^( aa	false,"invalid capture index"
+gsub fn ^( aa	false,"unfinished capture"
+gsub tbl ^( aa	false,"unfinished capture"
+find ^( aa	false,"unfinished capture"
+find 10 ^( aa	false,"unfinished capture"
+match ^( aa	false,"unfinished capture"
+gmatch ^( aa	true,""
+gsub x ^( a$a	true,"xa$a",1
+gsub %0 ^( a$a	true,"<>a$a",1
+gsub 1 ^( a$a	true,"xa$a",1
+gsub %1 ^( a$a	false,"unfinished capture"
+gsub %2 ^( a$a	false,"invalid capture index"
+gsub fn ^( a$a	false,"unfinished capture"
+gsub tbl ^( a$a	false,"unfinished capture"
+find ^( a$a	false,"unfinished capture"
+find 10 ^( a$a	false,"unfinished capture"
+match ^( a$a	false,"unfinished capture"
+gmatch ^( a$a	true,""
+gsub x %f[a]( abc	true,"xabc",1
+gsub %0 %f[a]( abc	true,"<>abc",1
+gsub 1 %f[a]( abc	true,"xabc",1
+gsub %1 %f[a]( abc	false,"unfinished capture"
+gsub %2 %f[a]( abc	false,"invalid capture index"
+gsub fn %f[a]( abc	false,"unfinished capture"
+gsub tbl %f[a]( abc	false,"unfinished capture"
+find %f[a]( abc	false,"unfinished capture"
+find 10 %f[a]( abc	true,nil
+match %f[a]( abc	false,"unfinished capture"
+gmatch %f[a]( abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x %f[a]( 	true,"",0
+gsub %0 %f[a]( 	true,"",0
+gsub 1 %f[a]( 	true,"",0
+gsub %1 %f[a]( 	true,"",0
+gsub %2 %f[a]( 	true,"",0
+gsub fn %f[a]( 	true,"",0
+gsub tbl %f[a]( 	true,"",0
+find %f[a]( 	true,nil
+find 10 %f[a]( 	true,nil
+match %f[a]( 	true,nil
+gmatch %f[a]( 	true,""
+gsub x %f[a]( aa	true,"xaa",1
+gsub %0 %f[a]( aa	true,"<>aa",1
+gsub 1 %f[a]( aa	true,"xaa",1
+gsub %1 %f[a]( aa	false,"unfinished capture"
+gsub %2 %f[a]( aa	false,"invalid capture index"
+gsub fn %f[a]( aa	false,"unfinished capture"
+gsub tbl %f[a]( aa	false,"unfinished capture"
+find %f[a]( aa	false,"unfinished capture"
+find 10 %f[a]( aa	true,nil
+match %f[a]( aa	false,"unfinished capture"
+gmatch %f[a]( aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x %f[a]( a$a	true,"xa$xa",2
+gsub %0 %f[a]( a$a	true,"<>a$<>a",2
+gsub 1 %f[a]( a$a	true,"xa$a",1
+gsub %1 %f[a]( a$a	false,"unfinished capture"
+gsub %2 %f[a]( a$a	false,"invalid capture index"
+gsub fn %f[a]( a$a	false,"unfinished capture"
+gsub tbl %f[a]( a$a	false,"unfinished capture"
+find %f[a]( a$a	false,"unfinished capture"
+find 10 %f[a]( a$a	true,nil
+match %f[a]( a$a	false,"unfinished capture"
+gmatch %f[a]( a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (a$ abc	true,"abc",0
+gsub %0 (a$ abc	true,"abc",0
+gsub 1 (a$ abc	true,"abc",0
+gsub %1 (a$ abc	true,"abc",0
+gsub %2 (a$ abc	true,"abc",0
+gsub fn (a$ abc	true,"abc",0
+gsub tbl (a$ abc	true,"abc",0
+find (a$ abc	true,nil
+find 10 (a$ abc	true,nil
+match (a$ abc	true,nil
+gmatch (a$ abc	true,""
+gsub x (a$ 	true,"",0
+gsub %0 (a$ 	true,"",0
+gsub 1 (a$ 	true,"",0
+gsub %1 (a$ 	true,"",0
+gsub %2 (a$ 	true,"",0
+gsub fn (a$ 	true,"",0
+gsub tbl (a$ 	true,"",0
+find (a$ 	true,nil
+find 10 (a$ 	true,nil
+match (a$ 	true,nil
+gmatch (a$ 	true,""
+gsub x (a$ aa	true,"ax",1
+gsub %0 (a$ aa	true,"a<a>",1
+gsub 1 (a$ aa	true,"ax",1
+gsub %1 (a$ aa	false,"unfinished capture"
+gsub %2 (a$ aa	false,"invalid capture index"
+gsub fn (a$ aa	false,"unfinished capture"
+gsub tbl (a$ aa	false,"unfinished capture"
+find (a$ aa	false,"unfinished capture"
+find 10 (a$ aa	true,nil
+match (a$ aa	false,"unfinished capture"
+gmatch (a$ aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (a$ a$a	true,"a$x",1
+gsub %0 (a$ a$a	true,"a$<a>",1
+gsub 1 (a$ a$a	true,"a$x",1
+gsub %1 (a$ a$a	false,"unfinished capture"
+gsub %2 (a$ a$a	false,"invalid capture index"
+gsub fn (a$ a$a	false,"unfinished capture"
+gsub tbl (a$ a$a	false,"unfinished capture"
+find (a$ a$a	false,"unfinished capture"
+find 10 (a$ a$a	true,nil
+match (a$ a$a	false,"unfinished capture"
+gmatch (a$ a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x a($ abc	true,"abc",0
+gsub %0 a($ abc	true,"abc",0
+gsub 1 a($ abc	true,"abc",0
+gsub %1 a($ abc	true,"abc",0
+gsub %2 a($ abc	true,"abc",0
+gsub fn a($ abc	true,"abc",0
+gsub tbl a($ abc	true,"abc",0
+find a($ abc	true,nil
+find 10 a($ abc	true,nil
+match a($ abc	true,nil
+gmatch a($ abc	true,""
+gsub x a($ 	true,"",0
+gsub %0 a($ 	true,"",0
+gsub 1 a($ 	true,"",0
+gsub %1 a($ 	true,"",0
+gsub %2 a($ 	true,"",0
+gsub fn a($ 	true,"",0
+gsub tbl a($ 	true,"",0
+find a($ 	true,nil
+find 10 a($ 	true,nil
+match a($ 	true,nil
+gmatch a($ 	true,""
+gsub x a($ aa	true,"ax",1
+gsub %0 a($ aa	true,"a<a>",1
+gsub 1 a($ aa	true,"ax",1
+gsub %1 a($ aa	false,"unfinished capture"
+gsub %2 a($ aa	false,"invalid capture index"
+gsub fn a($ aa	false,"unfinished capture"
+gsub tbl a($ aa	false,"unfinished capture"
+find a($ aa	false,"unfinished capture"
+find 10 a($ aa	true,nil
+match a($ aa	false,"unfinished capture"
+gmatch a($ aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x a($ a$a	true,"a$x",1
+gsub %0 a($ a$a	true,"a$<a>",1
+gsub 1 a($ a$a	true,"a$x",1
+gsub %1 a($ a$a	false,"unfinished capture"
+gsub %2 a($ a$a	false,"invalid capture index"
+gsub fn a($ a$a	false,"unfinished capture"
+gsub tbl a($ a$a	false,"unfinished capture"
+find a($ a$a	false,"unfinished capture"
+find 10 a($ a$a	true,nil
+match a($ a$a	false,"unfinished capture"
+gmatch a($ a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ($ abc	true,"abcx",1
+gsub %0 ($ abc	true,"abc<>",1
+gsub 1 ($ abc	true,"abcx",1
+gsub %1 ($ abc	false,"unfinished capture"
+gsub %2 ($ abc	false,"invalid capture index"
+gsub fn ($ abc	false,"unfinished capture"
+gsub tbl ($ abc	false,"unfinished capture"
+find ($ abc	false,"unfinished capture"
+find 10 ($ abc	false,"unfinished capture"
+match ($ abc	false,"unfinished capture"
+gmatch ($ abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ($ 	true,"x",1
+gsub %0 ($ 	true,"<>",1
+gsub 1 ($ 	true,"x",1
+gsub %1 ($ 	false,"unfinished capture"
+gsub %2 ($ 	false,"invalid capture index"
+gsub fn ($ 	false,"unfinished capture"
+gsub tbl ($ 	false,"unfinished capture"
+find ($ 	false,"unfinished capture"
+find 10 ($ 	false,"unfinished capture"
+match ($ 	false,"unfinished capture"
+gmatch ($ 	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ($ aa	true,"aax",1
+gsub %0 ($ aa	true,"aa<>",1
+gsub 1 ($ aa	true,"aax",1
+gsub %1 ($ aa	false,"unfinished capture"
+gsub %2 ($ aa	false,"invalid capture index"
+gsub fn ($ aa	false,"unfinished capture"
+gsub tbl ($ aa	false,"unfinished capture"
+find ($ aa	false,"unfinished capture"
+find 10 ($ aa	false,"unfinished capture"
+match ($ aa	false,"unfinished capture"
+gmatch ($ aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ($ a$a	true,"a$ax",1
+gsub %0 ($ a$a	true,"a$a<>",1
+gsub 1 ($ a$a	true,"a$ax",1
+gsub %1 ($ a$a	false,"unfinished capture"
+gsub %2 ($ a$a	false,"invalid capture index"
+gsub fn ($ a$a	false,"unfinished capture"
+gsub tbl ($ a$a	false,"unfinished capture"
+find ($ a$a	false,"unfinished capture"
+find 10 ($ a$a	false,"unfinished capture"
+match ($ a$a	false,"unfinished capture"
+gmatch ($ a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (%a+$ abc	true,"x",1
+gsub %0 (%a+$ abc	true,"<abc>",1
+gsub 1 (%a+$ abc	true,"x",1
+gsub %1 (%a+$ abc	false,"unfinished capture"
+gsub %2 (%a+$ abc	false,"invalid capture index"
+gsub fn (%a+$ abc	false,"unfinished capture"
+gsub tbl (%a+$ abc	false,"unfinished capture"
+find (%a+$ abc	false,"unfinished capture"
+find 10 (%a+$ abc	true,nil
+match (%a+$ abc	false,"unfinished capture"
+gmatch (%a+$ abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (%a+$ 	true,"",0
+gsub %0 (%a+$ 	true,"",0
+gsub 1 (%a+$ 	true,"",0
+gsub %1 (%a+$ 	true,"",0
+gsub %2 (%a+$ 	true,"",0
+gsub fn (%a+$ 	true,"",0
+gsub tbl (%a+$ 	true,"",0
+find (%a+$ 	true,nil
+find 10 (%a+$ 	true,nil
+match (%a+$ 	true,nil
+gmatch (%a+$ 	true,""
+gsub x (%a+$ aa	true,"x",1
+gsub %0 (%a+$ aa	true,"<aa>",1
+gsub 1 (%a+$ aa	true,"x",1
+gsub %1 (%a+$ aa	false,"unfinished capture"
+gsub %2 (%a+$ aa	false,"invalid capture index"
+gsub fn (%a+$ aa	false,"unfinished capture"
+gsub tbl (%a+$ aa	false,"unfinished capture"
+find (%a+$ aa	false,"unfinished capture"
+find 10 (%a+$ aa	true,nil
+match (%a+$ aa	false,"unfinished capture"
+gmatch (%a+$ aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (%a+$ a$a	true,"a$x",1
+gsub %0 (%a+$ a$a	true,"a$<a>",1
+gsub 1 (%a+$ a$a	true,"a$x",1
+gsub %1 (%a+$ a$a	false,"unfinished capture"
+gsub %2 (%a+$ a$a	false,"invalid capture index"
+gsub fn (%a+$ a$a	false,"unfinished capture"
+gsub tbl (%a+$ a$a	false,"unfinished capture"
+find (%a+$ a$a	false,"unfinished capture"
+find 10 (%a+$ a$a	true,nil
+match (%a+$ a$a	false,"unfinished capture"
+gmatch (%a+$ a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ((a)$ abc	true,"abc",0
+gsub %0 ((a)$ abc	true,"abc",0
+gsub 1 ((a)$ abc	true,"abc",0
+gsub %1 ((a)$ abc	true,"abc",0
+gsub %2 ((a)$ abc	true,"abc",0
+gsub fn ((a)$ abc	true,"abc",0
+gsub tbl ((a)$ abc	true,"abc",0
+find ((a)$ abc	true,nil
+find 10 ((a)$ abc	true,nil
+match ((a)$ abc	true,nil
+gmatch ((a)$ abc	true,""
+gsub x ((a)$ 	true,"",0
+gsub %0 ((a)$ 	true,"",0
+gsub 1 ((a)$ 	true,"",0
+gsub %1 ((a)$ 	true,"",0
+gsub %2 ((a)$ 	true,"",0
+gsub fn ((a)$ 	true,"",0
+gsub tbl ((a)$ 	true,"",0
+find ((a)$ 	true,nil
+find 10 ((a)$ 	true,nil
+match ((a)$ 	true,nil
+gmatch ((a)$ 	true,""
+gsub x ((a)$ aa	true,"ax",1
+gsub %0 ((a)$ aa	true,"a<a>",1
+gsub 1 ((a)$ aa	true,"ax",1
+gsub %1 ((a)$ aa	false,"unfinished capture"
+gsub %2 ((a)$ aa	true,"aa",1
+gsub fn ((a)$ aa	false,"unfinished capture"
+gsub tbl ((a)$ aa	false,"unfinished capture"
+find ((a)$ aa	false,"unfinished capture"
+find 10 ((a)$ aa	true,nil
+match ((a)$ aa	false,"unfinished capture"
+gmatch ((a)$ aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x ((a)$ a$a	true,"a$x",1
+gsub %0 ((a)$ a$a	true,"a$<a>",1
+gsub 1 ((a)$ a$a	true,"a$x",1
+gsub %1 ((a)$ a$a	false,"unfinished capture"
+gsub %2 ((a)$ a$a	true,"a$a",1
+gsub fn ((a)$ a$a	false,"unfinished capture"
+gsub tbl ((a)$ a$a	false,"unfinished capture"
+find ((a)$ a$a	false,"unfinished capture"
+find 10 ((a)$ a$a	true,nil
+match ((a)$ a$a	false,"unfinished capture"
+gmatch ((a)$ a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (()$ abc	true,"abcx",1
+gsub %0 (()$ abc	true,"abc<>",1
+gsub 1 (()$ abc	true,"abcx",1
+gsub %1 (()$ abc	false,"unfinished capture"
+gsub %2 (()$ abc	true,"abc4",1
+gsub fn (()$ abc	false,"unfinished capture"
+gsub tbl (()$ abc	false,"unfinished capture"
+find (()$ abc	false,"unfinished capture"
+find 10 (()$ abc	false,"unfinished capture"
+match (()$ abc	false,"unfinished capture"
+gmatch (()$ abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (()$ 	true,"x",1
+gsub %0 (()$ 	true,"<>",1
+gsub 1 (()$ 	true,"x",1
+gsub %1 (()$ 	false,"unfinished capture"
+gsub %2 (()$ 	true,"1",1
+gsub fn (()$ 	false,"unfinished capture"
+gsub tbl (()$ 	false,"unfinished capture"
+find (()$ 	false,"unfinished capture"
+find 10 (()$ 	false,"unfinished capture"
+match (()$ 	false,"unfinished capture"
+gmatch (()$ 	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (()$ aa	true,"aax",1
+gsub %0 (()$ aa	true,"aa<>",1
+gsub 1 (()$ aa	true,"aax",1
+gsub %1 (()$ aa	false,"unfinished capture"
+gsub %2 (()$ aa	true,"aa3",1
+gsub fn (()$ aa	false,"unfinished capture"
+gsub tbl (()$ aa	false,"unfinished capture"
+find (()$ aa	false,"unfinished capture"
+find 10 (()$ aa	false,"unfinished capture"
+match (()$ aa	false,"unfinished capture"
+gmatch (()$ aa	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (()$ a$a	true,"a$ax",1
+gsub %0 (()$ a$a	true,"a$a<>",1
+gsub 1 (()$ a$a	true,"a$ax",1
+gsub %1 (()$ a$a	false,"unfinished capture"
+gsub %2 (()$ a$a	true,"a$a4",1
+gsub fn (()$ a$a	false,"unfinished capture"
+gsub tbl (()$ a$a	false,"unfinished capture"
+find (()$ a$a	false,"unfinished capture"
+find 10 (()$ a$a	false,"unfinished capture"
+match (()$ a$a	false,"unfinished capture"
+gmatch (()$ a$a	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (b)( abc	true,"axc",1
+gsub %0 (b)( abc	true,"a<b>c",1
+gsub 1 (b)( abc	true,"axc",1
+gsub %1 (b)( abc	true,"abc",1
+gsub %2 (b)( abc	false,"unfinished capture"
+gsub fn (b)( abc	false,"unfinished capture"
+gsub tbl (b)( abc	true,"abc",1
+find (b)( abc	false,"unfinished capture"
+find 10 (b)( abc	true,nil
+match (b)( abc	false,"unfinished capture"
+gmatch (b)( abc	false,"lib_pattern_unfinished.lua:21: unfinished capture"
+gsub x (b)( 	true,"",0
+gsub %0 (b)( 	true,"",0
+gsub 1 (b)( 	true,"",0
+gsub %1 (b)( 	true,"",0
+gsub %2 (b)( 	true,"",0
+gsub fn (b)( 	true,"",0
+gsub tbl (b)( 	true,"",0
+find (b)( 	true,nil
+find 10 (b)( 	true,nil
+match (b)( 	true,nil
+gmatch (b)( 	true,""
+gsub x (b)( aa	true,"aa",0
+gsub %0 (b)( aa	true,"aa",0
+gsub 1 (b)( aa	true,"aa",0
+gsub %1 (b)( aa	true,"aa",0
+gsub %2 (b)( aa	true,"aa",0
+gsub fn (b)( aa	true,"aa",0
+gsub tbl (b)( aa	true,"aa",0
+find (b)( aa	true,nil
+find 10 (b)( aa	true,nil
+match (b)( aa	true,nil
+gmatch (b)( aa	true,""
+gsub x (b)( a$a	true,"a$a",0
+gsub %0 (b)( a$a	true,"a$a",0
+gsub 1 (b)( a$a	true,"a$a",0
+gsub %1 (b)( a$a	true,"a$a",0
+gsub %2 (b)( a$a	true,"a$a",0
+gsub fn (b)( a$a	true,"a$a",0
+gsub tbl (b)( a$a	true,"a$a",0
+find (b)( a$a	true,nil
+find 10 (b)( a$a	true,nil
+match (b)( a$a	true,nil
+gmatch (b)( a$a	true,""
+backref	false,"invalid capture index"
+backref2	false,"unfinished capture"
+backref3	true,"xb",1
+backref4	false,"invalid capture index"
+plain find	true,2,2
+false	lib_pattern_unfinished.lua:51: unfinished capture
+false	lib_pattern_unfinished.lua:52: unfinished capture
+false	lib_pattern_unfinished.lua:53: unfinished capture

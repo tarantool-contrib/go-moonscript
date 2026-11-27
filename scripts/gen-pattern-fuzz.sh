@@ -7,7 +7,8 @@
 #   third_party/gopher-lua/testdata/compat/ref/lib_pattern_fuzz.out
 #       its output on lua5.1, which TestCompat compares gopher-lua's with
 #
-# usage: gen-pattern-fuzz.sh [ncases]   (default 3000; half literal patterns)
+# usage: gen-pattern-fuzz.sh [ncases]   (default 3000; half literal patterns;
+#        then ncases/10 cases ending inside an unclosed capture)
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)

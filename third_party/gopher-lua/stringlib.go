@@ -142,14 +142,7 @@ func strFind(L *LState) int {
 	md := mds[0]
 	L.Push(LNumber(md.Capture(0) + 1))
 	L.Push(LNumber(md.Capture(1)))
-	for i := 2; i < md.CaptureLength(); i += 2 {
-		if md.IsPosCapture(i) {
-			L.Push(LNumber(md.Capture(i)))
-		} else {
-			L.Push(LString(str[md.Capture(i):md.Capture(i+1)]))
-		}
-	}
-	return md.CaptureLength()/2 + 1
+	return pushCaptures(L, md, str) + 2
 }
 
 func strGsub(L *LState) int {
@@ -200,6 +193,28 @@ type replaceInfo struct {
 	String   string
 }
 
+// captureValue is lstrlib's push_onecapture for the capture at slot idx of
+// m (2, 4, ...): its position, or its text; an unfinished capture (a '('
+// the pattern ends in) raises "unfinished capture". go-moonscript patch.
+func captureValue(L *LState, m *pm.MatchData, str string, idx int) LValue {
+	if m.IsPosCapture(idx) {
+		return LNumber(m.Capture(idx))
+	}
+	if m.IsUnfinished(idx) {
+		L.RaiseError("unfinished capture")
+	}
+	return LString(str[m.Capture(idx):m.Capture(idx+1)])
+}
+
+// pushCaptures is lstrlib's push_captures without the whole match: it
+// pushes every capture of m and returns how many. go-moonscript patch.
+func pushCaptures(L *LState, m *pm.MatchData, str string) int {
+	for i := 2; i < m.CaptureLength(); i += 2 {
+		L.Push(captureValue(L, m, str, i))
+	}
+	return m.CaptureLength()/2 - 1
+}
+
 func checkCaptureIndex(L *LState, m *pm.MatchData, idx int) {
 	if idx <= 2 {
 		return
@@ -216,10 +231,8 @@ func capturedString(L *LState, m *pm.MatchData, str string, idx int) string {
 	}
 	if m.IsPosCapture(idx) {
 		return fmt.Sprint(m.Capture(idx))
-	} else {
-		return str[m.Capture(idx):m.Capture(idx+1)]
 	}
-
+	return string(captureValue(L, m, str, idx).(LString)) // go-moonscript patch: unfinished
 }
 
 // strGsubDoReplace replaces the matched ranges in info, which are in order
@@ -285,12 +298,7 @@ func strGsubTable(L *LState, str string, repl *LTable, matches []*pm.MatchData) 
 		if match.CaptureLength() > 2 { // has captures
 			idx = 2
 		}
-		var value LValue
-		if match.IsPosCapture(idx) {
-			value = L.GetTable(repl, LNumber(match.Capture(idx)))
-		} else {
-			value = L.GetField(repl, str[match.Capture(idx):match.Capture(idx+1)])
-		}
+		value := L.GetTable(repl, captureValue(L, match, str, idx)) // go-moonscript patch: unfinished
 		if !LVIsFalse(value) {
 			infoList = append(infoList, replaceInfo{[]int{match.Capture(0), match.Capture(1)}, strGsubValue(L, value)})
 		}
@@ -305,14 +313,7 @@ func strGsubFunc(L *LState, str string, repl *LFunction, matches []*pm.MatchData
 		L.Push(repl)
 		nargs := 0
 		if match.CaptureLength() > 2 { // has captures
-			for i := 2; i < match.CaptureLength(); i += 2 {
-				if match.IsPosCapture(i) {
-					L.Push(LNumber(match.Capture(i)))
-				} else {
-					L.Push(LString(capturedString(L, match, str, i)))
-				}
-				nargs++
-			}
+			nargs = pushCaptures(L, match, str)
 		} else {
 			L.Push(LString(capturedString(L, match, str, 0)))
 			nargs++
@@ -371,15 +372,7 @@ func strGmatchIter(L *LState) int {
 		L.Push(LString(str[match.Capture(0):match.Capture(1)]))
 		return 1
 	}
-
-	for i := 2; i < match.CaptureLength(); i += 2 {
-		if match.IsPosCapture(i) {
-			L.Push(LNumber(match.Capture(i)))
-		} else {
-			L.Push(LString(str[match.Capture(i):match.Capture(i+1)]))
-		}
-	}
-	return match.CaptureLength()/2 - 1
+	return pushCaptures(L, match, str)
 }
 
 // strFindInit is the byte offset where string.find and string.match start,
@@ -446,14 +439,7 @@ func strMatch(L *LState) int {
 		L.Push(LString(str[md.Capture(0):md.Capture(1)]))
 		return 1
 	default:
-		for i := 2; i < md.CaptureLength(); i += 2 {
-			if md.IsPosCapture(i) {
-				L.Push(LNumber(md.Capture(i)))
-			} else {
-				L.Push(LString(str[md.Capture(i):md.Capture(i+1)]))
-			}
-		}
-		return nsubs - 1
+		return pushCaptures(L, md, str)
 	}
 }
 
