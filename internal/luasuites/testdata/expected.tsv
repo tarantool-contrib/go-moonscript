@@ -29,7 +29,6 @@ lua5.1-tests	verybig.lua	-	pass
 harness	241-standalone.t	-	skip: tests lua.c, the standalone interpreter (options, LUA_INIT, messages), which our VM does not have
 harness	242-luac.t	-	skip: tests luac, the bytecode compiler, which our VM does not have
 harness	301-basic.t	#58	todo ok [lua5.1: todo not ok] (TODO # not with 5.1)
-harness	303-package.t	#11	not ok [lua5.1: ok] 
 harness	307-math.t	#33	not ok [lua5.1: ok] function max 0 | 307-math.t:178: wrong number of arguments | doesn't match '^[^:]+:%d+: bad argument #1 to 'max' %(.- expected'
 harness	307-math.t	#38	not ok [lua5.1: ok] function min 0 | 307-math.t:198: wrong number of arguments | doesn't match '^[^:]+:%d+: bad argument #1 to 'min' %(.- expected'
 harness	308-io.t	#81	not ok [lua5.1: ok] method seek (invalid) | 308-io.t:347: bad argument #1 to 'seek' (invalid option: bad (must be one of set,cur,end)) | doesn't match '^[^:]+:%d+: bad argument #1 to 'seek' %(invalid option 'bad'%)'

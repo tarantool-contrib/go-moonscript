@@ -1,0 +1,51 @@
+missing	false	module 'nosuchmod' not found:
+	no field package.preload['nosuchmod']
+	no file 'files/nosuchmod.lua'
+	no file 'files/nosuchmod/init.lua'
+	no file 'files/nosuchmod.so'
+	no file 'files/libnosuchmod.so'
+missing dotted	false	module 'a.b' not found:
+	no field package.preload['a.b']
+	no file 'files/a/b.lua'
+	no file 'files/a/b/init.lua'
+	no file 'files/a/b.so'
+	no file 'files/liba/b.so'
+	no file 'files/a.so'
+	no file 'files/liba.so'
+syntax error	false	error loading module 'req_syn' from file 'files/req_syn.lua':
+	files/req_syn.lua:1: unexpected symbol near '='
+runtime error	false	files/req_rt.lua:1: rt in mod
+runtime error again	false	loop or previous error loading module 'req_rt'
+loop	false	files/req_loop.lua:1: loop or previous error loading module 'req_loop'
+found	true	req_ok	@files/req_ok.lua	true
+found again	true
+init	true	init of pkg
+shebang	true	sheb
+no value	true	true	true	1
+preload	true	preloaded 1 pre
+loaded	true	set
+false	lib_require.lua:30: module 'nosuchmod2' not found:
+	no field package.preload['nosuchmod2']
+	no file 'files/nosuchmod2.lua'
+	no file 'files/nosuchmod2/init.lua'
+	no file 'files/nosuchmod2.so'
+	no file 'files/libnosuchmod2.so'
+cpath number	false	module 'nosuchmod3' not found:
+	no field package.preload['nosuchmod3']
+	no file 'files/nosuchmod3.lua'
+	no file '5'
+directory	false	error loading module 'files' from file 'files':
+	cannot read files: Is a directory
+path nil	false	'package.path' must be a string
+preload not a table	false	'package.preload' must be a table
+no loaders	false	module 'nosuchmod6' not found:
+loader messages	false	module 'nosuchmod7' not found:
+	mine nosuchmod77
+loaders nil	false	'package.loaders' must be a table
+package replaced	false	module 'nosuchmod9' not found:
+	no field package.preload['nosuchmod9']
+	no file 'files/nosuchmod9.lua'
+require of 1	false	module '1' not found:
+	no field package.preload['1']
+	no file 'files/1.lua'
+require of nil	false	bad argument #1 to '?' (string expected, got no value)

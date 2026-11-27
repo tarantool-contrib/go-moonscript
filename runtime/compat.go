@@ -5,17 +5,15 @@ package runtime
 // libraries that MoonScript tooling depends on behave like the reference
 // interpreter:
 //
-//   - chunk names, syntax errors, loadfile and dofile are gopher-lua's own
-//     (third_party/gopher-lua/chunkname.go): Lua chunk names ("@foo.moon",
-//     "=(command line)", source strings) are shown as luaO_chunkid does
-//     ("foo.moon:3:", "(command line)", [string "..."]) and debug.getinfo
-//     reports them as source (short_src is the shown name), which
-//     moonscript.errors relies on: it looks the file name from an error
-//     position up as line_tables["@" .. name]. LoadLua is loadstring's
-//     loading.
-//   - require follows ll_require: package.loaders is read from the package
-//     table on every call (so moonscript.insert_loader works), and the
-//     "module 'x' not found:" message lists each loader's reason.
+//   - chunk names, syntax errors, loadfile/dofile and require are
+//     gopher-lua's own (third_party/gopher-lua/chunkname.go and loadlib.go):
+//     Lua chunk names ("@foo.moon", "=(command line)", source strings) are
+//     shown as luaO_chunkid does ("foo.moon:3:", "(command line)", [string
+//     "..."]) and debug.getinfo reports them as source (short_src is the
+//     shown name), which moonscript.errors relies on: it looks the file name
+//     from an error position up as line_tables["@" .. name]; require reads
+//     package.loaders from the package table on every call (so
+//     moonscript.insert_loader works). LoadLua is loadstring's loading.
 //   - debug.traceback labels frames like PUC Lua: native (Go) functions
 //     "[C]" instead of "[G]", "(tail call)" instead of "(tailcall)", chunk
 //     functions "main chunk" instead of "function <file:0>".
@@ -32,7 +30,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"os"
 	"strconv"
 	"strings"
 
@@ -96,8 +93,6 @@ func OpenCompat(L *lua.LState) {
 		return 0
 	}))
 
-	openPackageCompat(L)
-
 	if strlib, ok := g.RawGetString("string").(*lua.LTable); ok {
 		if format, ok := strlib.RawGetString("format").(*lua.LFunction); ok {
 			strlib.RawSetString("format", L.NewFunction(func(L *lua.LState) int {
@@ -155,136 +150,6 @@ func where(L *lua.LState, level int) string {
 // raise is luaL_error: the message prefixed with where(L, 1).
 func raise(L *lua.LState, format string, args ...any) {
 	L.Error(lua.LString(where(L, 1)+fmt.Sprintf(format, args...)), 0)
-}
-
-// sentinel marks a module being loaded (ll_require's sentinel).
-var sentinel = &lua.LUserData{}
-
-func openPackageCompat(L *lua.LState) {
-	pkg, ok := L.G.Global.RawGetString("package").(*lua.LTable)
-	if !ok {
-		return
-	}
-
-	loaders := L.NewTable()
-	loaders.Append(L.NewFunction(loaderPreload))
-	loaders.Append(L.NewFunction(loaderLua))
-	pkg.RawSetString("loaders", loaders)
-
-	require := L.NewFunction(func(L *lua.LState) int {
-		name := L.CheckString(1)
-		L.SetTop(1)
-		loaded, ok := L.GetField(L.Get(lua.RegistryIndex), "_LOADED").(*lua.LTable)
-		if !ok {
-			raise(L, "'package.loaded' must be a table")
-		}
-		if v := loaded.RawGetString(name); lua.LVAsBool(v) {
-			if v == sentinel {
-				raise(L, "loop or previous error loading module '%s'", name)
-			}
-			L.Push(v)
-			return 1
-		}
-		ls, ok := pkg.RawGetString("loaders").(*lua.LTable)
-		if !ok {
-			raise(L, "'package.loaders' must be a table")
-		}
-		var msg strings.Builder
-		var fn lua.LValue
-		for i := 1; ; i++ {
-			loader := ls.RawGetInt(i)
-			if loader == lua.LNil {
-				raise(L, "module '%s' not found:%s", name, msg.String())
-			}
-			L.Push(loader)
-			L.Push(lua.LString(name))
-			L.Call(1, 1)
-			res := L.Get(-1)
-			L.Pop(1)
-			if _, isFn := res.(*lua.LFunction); isFn {
-				fn = res
-				break
-			}
-			if s, isStr := res.(lua.LString); isStr {
-				msg.WriteString(string(s))
-			}
-		}
-		loaded.RawSetString(name, sentinel)
-		L.Push(fn)
-		L.Push(lua.LString(name))
-		L.Call(1, 1)
-		if res := L.Get(-1); res != lua.LNil {
-			loaded.RawSetString(name, res)
-		}
-		L.Pop(1)
-		if loaded.RawGetString(name) == sentinel {
-			loaded.RawSetString(name, lua.LTrue)
-		}
-		L.Push(loaded.RawGetString(name))
-		return 1
-	})
-	L.G.Global.RawSetString("require", require)
-}
-
-func loaderPreload(L *lua.LState) int {
-	name := L.CheckString(1)
-	pkg, _ := L.G.Global.RawGetString("package").(*lua.LTable)
-	var preload *lua.LTable
-	if pkg != nil {
-		preload, _ = pkg.RawGetString("preload").(*lua.LTable)
-	}
-	if preload == nil {
-		raise(L, "'package.preload' must be a table")
-	}
-	if v := preload.RawGetString(name); v != lua.LNil {
-		L.Push(v)
-		return 1
-	}
-	L.Push(lua.LString(fmt.Sprintf("\n\tno field package.preload['%s']", name)))
-	return 1
-}
-
-// findFile is findfile: the first readable expansion of package[pname] for
-// name, or "" and the "no file" list.
-func findFile(L *lua.LState, name, pname string) (string, string) {
-	pkg, _ := L.G.Global.RawGetString("package").(*lua.LTable)
-	path := lua.LNil
-	if pkg != nil {
-		path = pkg.RawGetString(pname)
-	}
-	ps, ok := path.(lua.LString)
-	if !ok {
-		raise(L, "'package.%s' must be a string", pname)
-	}
-	name = strings.ReplaceAll(name, ".", "/")
-	var msg strings.Builder
-	for _, tmpl := range strings.Split(string(ps), ";") {
-		if tmpl == "" {
-			continue
-		}
-		fname := strings.ReplaceAll(tmpl, "?", name)
-		if f, err := os.Open(fname); err == nil {
-			_ = f.Close() // only opened to probe readability, like readable()
-			return fname, ""
-		}
-		fmt.Fprintf(&msg, "\n\tno file '%s'", fname)
-	}
-	return "", msg.String()
-}
-
-func loaderLua(L *lua.LState) int {
-	name := L.CheckString(1)
-	fname, msg := findFile(L, name, "path")
-	if fname == "" {
-		L.Push(lua.LString(msg))
-		return 1
-	}
-	fn, err := L.LoadFile(fname)
-	if err != nil {
-		raise(L, "error loading module '%s' from file '%s':\n\t%s", name, fname, err.Error())
-	}
-	L.Push(fn)
-	return 1
 }
 
 // LoadLua compiles Lua code like loadstring(code, chunkname) after
