@@ -982,6 +982,7 @@ func compileStmt(context *funcContext, stmt ast.Stmt, isLastStmt bool) { // {{{
 func compileAssignStmtLeft(context *funcContext, stmt *ast.AssignStmt) (int, []*assigncontext) { // {{{
 	reg := context.RegTop()
 	acs := make([]*assigncontext, 0, len(stmt.Lhs))
+	var copies map[string]int // the registers of the locals copied, by name
 	for i, lhs := range stmt.Lhs {
 		switch st := lhs.(type) {
 		case *ast.IdentExpr:
@@ -1005,14 +1006,26 @@ func compileAssignStmtLeft(context *funcContext, stmt *ast.AssignStmt) (int, []*
 			// lua#560: t, t.x = u, 1): it is assigned first. The table is
 			// operand A, a register: a constant object, as in ("s").k = v,
 			// stays loaded (yuin/gopher-lua#538, #310).
+			// One copy of a local serves all the targets, as luac's does
+			// (go-moonscript patch).
 			if assignConflict(context, stmt.Lhs[i+1:], st.Object) {
-				compileExprWithPropagation(context, st.Object, &reg, &ac.ec.reg, keepInRegister)
+				if r, ok := copies[st.Object.(*ast.IdentExpr).Value]; ok {
+					ac.ec.reg = r
+				} else {
+					compileExprWithPropagation(context, st.Object, &reg, &ac.ec.reg, keepInRegister)
+					copies = addCopy(copies, st.Object, ac.ec.reg)
+				}
 			} else {
 				compileExprWithMVPropagation(context, st.Object, &reg, &ac.ec.reg)
 			}
 			pc := context.Code.LastPC()
 			if assignConflict(context, stmt.Lhs[i+1:], st.Key) {
-				compileExprWithPropagation(context, st.Key, &reg, &ac.keyrk, keepInRegister)
+				if r, ok := copies[st.Key.(*ast.IdentExpr).Value]; ok {
+					ac.keyrk = r
+				} else {
+					compileExprWithPropagation(context, st.Key, &reg, &ac.keyrk, keepInRegister)
+					copies = addCopy(copies, st.Key, ac.keyrk)
+				}
 			} else {
 				compileExprWithKMVPropagation(context, st.Key, &reg, &ac.keyrk)
 			}
@@ -1035,6 +1048,16 @@ func compileAssignStmtLeft(context *funcContext, stmt *ast.AssignStmt) (int, []*
 	}
 	return reg, acs
 } // }}}
+
+// addCopy records the register a local is copied to for the targets of a
+// multiple assignment. go-moonscript patch.
+func addCopy(copies map[string]int, local ast.Expr, reg int) map[string]int {
+	if copies == nil {
+		copies = map[string]int{}
+	}
+	copies[local.(*ast.IdentExpr).Value] = reg
+	return copies
+}
 
 // assignConflict reports whether expr is a local that one of the targets
 // assigns. go-moonscript patch.
@@ -2361,6 +2384,14 @@ func patchCode(context *funcContext) { // {{{
 		curop := opGetOpCode(inst)
 		switch curop {
 		case OP_CLOSURE:
+			// go-moonscript patch: the closure's register counts (f(function()
+			// end, ...) passes closures in registers no other instruction sets)
+			if reg := opGetArgA(inst); reg > maxreg {
+				maxreg = reg
+			}
+			if previousMax < maxRegisters-1 && maxreg >= maxRegisters-1 {
+				overflowLine = lines[pc]
+			}
 			pc += int(context.Proto.FunctionPrototypes[opGetArgBx(inst)].NumUpvalues)
 			moven = 0
 			continue
