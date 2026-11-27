@@ -70,6 +70,15 @@ dialect, is adapted from go-luascope's parser/number.go, a port of LuaJIT's
 lj_strscan.c (LuaJIT, Copyright (C) 2005-2017 Mike Pall, MIT License; the
 MIT License text is the one above, with that copyright line).
 
+third_party/gopher-lua/parse/jitcode.go, the model of LuaJIT's code
+generator the parser runs in the LuaJIT dialect, and its calls in
+third_party/gopher-lua/parse/parser.go are adapted from go-luascope's
+parser/codegen.go, parser/bytecode.go, parser/scope.go and
+parser/parser_stmt.go, ports of LuaJIT's lj_parse.c and lj_bc.h (same
+copyright and license as lj_strscan.c above);
+third_party/gopher-lua/parse/jitcode_test.go has go-luascope's limit and
+code generator snippets (parser/snippets_test.go) and their results.
+
 BSD 2-Clause License
 
 Copyright (c) 2026, Eugene Blikh

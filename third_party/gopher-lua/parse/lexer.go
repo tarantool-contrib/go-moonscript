@@ -119,7 +119,8 @@ type token struct {
 	typ   int
 	sem   string
 	line  int
-	cdata bool // a LuaJIT FFI numeral (1LL, 1ULL, 1i), sem its text
+	cdata bool    // a LuaJIT FFI numeral (1LL, 1ULL, 1i), sem its text
+	num   float64 // a LuaJIT numeral's value
 }
 
 type lexer struct {
@@ -333,8 +334,8 @@ func isNumeral(s string) bool {
 // lexNumber is LuaJIT's lex_number: the numeral, as lj_strscan reads it with
 // the FFI (scanNumeral). It returns the token's value, the number formatted
 // to convert back exactly (by parseNumber) or the numeral of a cdata one
-// (1LL, 1ULL, 1i), and whether the numeral is cdata.
-func (ls *lexer) lexNumber() (string, bool) {
+// (1LL, 1ULL, 1i), its value, and whether the numeral is cdata.
+func (ls *lexer) lexNumber() (string, float64, bool) {
 	xp := 'e'
 	c := ls.current
 	if c == '0' {
@@ -354,9 +355,9 @@ func (ls *lexer) lexNumber() (string, bool) {
 		ls.lexError("malformed number", tkNumber)
 	}
 	if cdata {
-		return s, true
+		return s, 0, true
 	}
-	return strconv.FormatFloat(v, 'g', -1, 64), false
+	return strconv.FormatFloat(v, 'g', -1, 64), v, false
 }
 
 func (ls *lexer) skipSep() int {
@@ -712,7 +713,7 @@ func (ls *lexer) llex(tok *token) int {
 				return '.'
 			}
 			if jit {
-				tok.sem, tok.cdata = ls.lexNumber()
+				tok.sem, tok.num, tok.cdata = ls.lexNumber()
 			} else {
 				tok.sem = ls.readNumeral()
 			}
@@ -727,7 +728,7 @@ func (ls *lexer) llex(tok *token) int {
 			continue
 		case isDigit(c):
 			if jit {
-				tok.sem, tok.cdata = ls.lexNumber()
+				tok.sem, tok.num, tok.cdata = ls.lexNumber()
 			} else {
 				tok.sem = ls.readNumeral()
 			}
