@@ -199,8 +199,13 @@ func (ls *lexer) inclinenumber() {
 	ls.linenumber++
 }
 
+// checkNext is check_next: Lua 5.1's looks the character up with strchr,
+// which finds a NUL byte too (the set's terminator), so a NUL is taken
+// for any character of the set: "1\0x" is the numeral 1 (the conversion
+// stops at the NUL) and "a.\0b" is a .. b. LuaJIT compares characters.
 func (ls *lexer) checkNext(set string) bool {
-	if ls.current < 0 || !strings.ContainsRune(set, rune(ls.current)) {
+	nul := ls.current == 0 && ls.dialect == Lua51
+	if !nul && (ls.current < 0 || !strings.ContainsRune(set, rune(ls.current))) {
 		return false
 	}
 	ls.saveNext()
@@ -273,6 +278,9 @@ func (ls *lexer) readNumeral() string {
 		ls.saveNext()
 	}
 	s := string(ls.buff)
+	if i := strings.IndexByte(s, 0); i >= 0 {
+		s = s[:i] // luaO_str2d converts a C string
+	}
 	if !isNumeral(s) {
 		ls.lexError("malformed number", tkNumber)
 	}

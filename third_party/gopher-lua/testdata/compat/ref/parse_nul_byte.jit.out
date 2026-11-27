@@ -1,0 +1,20 @@
+number	1: '<eof>' expected
+number sign	1: '<eof>' expected
+number two nul	1: '<eof>' expected
+number then x	1: '<eof>' expected
+number then e	1: '<eof>' expected
+number dot	1: '<eof>' expected
+number at end	1: '<eof>' expected
+exponent nul	1: malformed number near '1e'
+exponent nul digits	1: malformed number near '1e'
+exponent sign nul	1: malformed number near '1e+'
+hex nul	1: malformed number near '0x'
+hex digits nul	1: '<eof>' expected
+dot	1: '<name>' expected
+dot at end	1: '<name>' expected
+dots	1: unexpected symbol
+dot dot nul	1: '<name>' expected
+field	1: '<name>' expected
+name	1: '<eof>' expected
+string	true	true
+comment	true	1
