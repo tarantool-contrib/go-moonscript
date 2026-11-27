@@ -695,6 +695,7 @@ func (p *parser) body(needself bool, line int) *ast.FunctionExpr {
 					p.newLocalVar("arg", len(parlist.Names))
 				}
 				parlist.HasVargs = true
+				parlist.NoArg = p.jit
 				p.fs.vararg = true
 			default:
 				ls.syntaxError("<name> or '...' expected")

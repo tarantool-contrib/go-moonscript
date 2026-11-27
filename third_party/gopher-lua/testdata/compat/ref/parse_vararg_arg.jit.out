@@ -1,0 +1,10 @@
+no ...	string
+extra	2	string	false
+table	string	false	false
+with ...	string
+assign	5	5
+locals	n,i
+upvalue	string
+method	string	2
+main chunk	string
+loaded chunk	string	2

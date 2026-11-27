@@ -1826,7 +1826,8 @@ func compileFunctionExpr(context *funcContext, funcexpr *ast.FunctionExpr, ec *e
 		context.RegisterLocalVar(name)
 	}
 	if funcexpr.ParList.HasVargs {
-		if CompatVarArg {
+		// go-moonscript patch: LuaJIT has no implicit arg (ParList.NoArg)
+		if CompatVarArg && !funcexpr.ParList.NoArg {
 			context.Proto.IsVarArg = VarArgHasArg | VarArgNeedsArg
 			if context.Parent != nil {
 				context.RegisterLocalVar("arg")

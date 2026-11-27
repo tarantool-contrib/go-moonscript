@@ -7,7 +7,10 @@ type Field struct {
 
 type ParList struct {
 	HasVargs bool
-	Names    []string
+	// NoArg: a vararg function without Lua 5.1's implicit local "arg"
+	// (LUA_COMPAT_VARARG), as in LuaJIT (go-moonscript patch)
+	NoArg bool
+	Names []string
 }
 
 type FuncName struct {

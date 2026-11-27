@@ -1,0 +1,10 @@
+no ...	table
+extra	2	nil	false
+table	table	2	3
+with ...	nil
+assign	5	global
+locals	arg,n,i
+upvalue	table
+method	nil	2
+main chunk	string
+loaded chunk	string	2
