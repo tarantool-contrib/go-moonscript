@@ -35,14 +35,51 @@ func newLTable(acap int, hcap int) *LTable {
 	if acap+hcap >= tableBigSlots {
 		tableReserve(acap, hcap) // go-moonscript patch
 	}
-	tb := &LTable{}
-	tb.Metatable = LNil
-	if acap > 0 {
-		tb.array = make([]LValue, acap)
-		for i := range tb.array {
-			tb.array[i] = LNil
+	// go-moonscript patch: a small array part is allocated together with
+	// the table (the table first, so that a weak reference to it is to the
+	// start of the object)
+	var tb *LTable
+	switch acap {
+	case 0:
+		tb = &LTable{}
+	case 1:
+		c := &struct {
+			tb  LTable
+			arr [1]LValue
+		}{arr: [1]LValue{LNil}}
+		tb = &c.tb
+		tb.array = c.arr[:]
+	case 2:
+		c := &struct {
+			tb  LTable
+			arr [2]LValue
+		}{arr: [2]LValue{LNil, LNil}}
+		tb = &c.tb
+		tb.array = c.arr[:]
+	case 3:
+		c := &struct {
+			tb  LTable
+			arr [3]LValue
+		}{arr: [3]LValue{LNil, LNil, LNil}}
+		tb = &c.tb
+		tb.array = c.arr[:]
+	case 4:
+		c := &struct {
+			tb  LTable
+			arr [4]LValue
+		}{arr: [4]LValue{LNil, LNil, LNil, LNil}}
+		tb = &c.tb
+		tb.array = c.arr[:]
+	default:
+		tb = &LTable{}
+		if acap > 0 {
+			tb.array = make([]LValue, acap)
+			for i := range tb.array {
+				tb.array[i] = LNil
+			}
 		}
 	}
+	tb.Metatable = LNil
 	if hcap > 0 {
 		tb.hash.init(hcap)
 	}
