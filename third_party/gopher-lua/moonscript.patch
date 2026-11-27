@@ -20202,13 +20202,12 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/table.go
 +++ b/table.go
-@@ -1,387 +1,509 @@
+@@ -1,387 +1,585 @@
  package lua
  
 -const defaultArrayCap = 32
 -const defaultHashCap = 32
-+import "math/bits"
- 
+-
 -type lValueArraySorter struct {
 -	L      *LState
 -	Fn     *LFunction
@@ -20233,6 +20232,11 @@ regenerates the diff below; this header is edited by hand.
 -	}
 -	return lessThan(lv.L, lv.Values[i], lv.Values[j])
 -}
++import (
++	"math/bits"
++	"unsafe"
++)
++
 +// go-moonscript patch: a table has the shape of a Lua 5.1 table (ltable.c):
 +// an array part for the keys 1..len(array), which may hold nils, and a hash
 +// part (table_hash.go) for the other keys, whose size is 0 or a power of 2.
@@ -20265,22 +20269,58 @@ regenerates the diff below; this header is edited by hand.
  func newLTable(acap int, hcap int) *LTable {
 -	if acap < 0 {
 -		acap = 0
--	}
--	if hcap < 0 {
--		hcap = 0
 +	if acap+hcap >= tableBigSlots {
 +		tableReserve(acap, hcap) // go-moonscript patch
  	}
- 	tb := &LTable{}
+-	if hcap < 0 {
+-		hcap = 0
++	// go-moonscript patch: a small array part is allocated together with
++	// the table (the table first, so that a weak reference to it is to the
++	// start of the object)
++	var tb *LTable
++	switch acap {
++	case 0:
++		tb = &LTable{}
++	case 1:
++		c := &struct {
++			tb  LTable
++			arr [1]LValue
++		}{arr: [1]LValue{LNil}}
++		tb = &c.tb
++		tb.array = c.arr[:]
++	case 2:
++		c := &struct {
++			tb  LTable
++			arr [2]LValue
++		}{arr: [2]LValue{LNil, LNil}}
++		tb = &c.tb
++		tb.array = c.arr[:]
++	case 3:
++		c := &struct {
++			tb  LTable
++			arr [3]LValue
++		}{arr: [3]LValue{LNil, LNil, LNil}}
++		tb = &c.tb
++		tb.array = c.arr[:]
++	case 4:
++		c := &struct {
++			tb  LTable
++			arr [4]LValue
++		}{arr: [4]LValue{LNil, LNil, LNil, LNil}}
++		tb = &c.tb
++		tb.array = c.arr[:]
++	default:
++		tb = &LTable{}
++		if acap > 0 {
++			tb.array = make([]LValue, acap)
++			fillNil(tb.array)
++		}
+ 	}
+-	tb := &LTable{}
  	tb.Metatable = LNil
 -	if acap != 0 {
 -		tb.array = make([]LValue, 0, acap)
-+	if acap > 0 {
-+		tb.array = make([]LValue, acap)
-+		for i := range tb.array {
-+			tb.array[i] = LNil
-+		}
- 	}
+-	}
 -	if hcap != 0 {
 -		tb.strdict = make(map[string]LValue, hcap)
 +	if hcap > 0 {
@@ -20622,6 +20662,10 @@ regenerates the diff below; this header is edited by hand.
  	}
 -	if tb.dict == nil {
 -		tb.dict = make(map[LValue]LValue, len(tb.strdict))
+-	}
+-	if tb.keys == nil {
+-		tb.keys = []LValue{}
+-		tb.k2i = map[LValue]int{}
 +	tb.rehash(key)
 +	if n, ok := key.(LNumber); ok {
 +		if i := tb.arrayIndex(n); i >= 0 {
@@ -20629,22 +20673,7 @@ regenerates the diff below; this header is edited by hand.
 +			return
 +		}
  	}
--	if tb.keys == nil {
--		tb.keys = []LValue{}
--		tb.k2i = map[LValue]int{}
 +	tb.hash.mustAdd(key, value, h, isptr)
-+}
-+
-+// countInt counts key in nums if it may go in the array part (Lua's
-+// countint).
-+func countInt(key LValue, nums *[maxArrayBits + 1]int) int {
-+	if n, ok := key.(LNumber); ok {
-+		if k := int(n); LNumber(k) == n && k >= 1 && k <= 1<<maxArrayBits && k <= MaxArrayIndex {
-+			nums[bits.Len(uint(k-1))]++
-+			return 1
-+		}
- 	}
-+	return 0
 +}
  
 -	if value == LNil {
@@ -20655,6 +20684,25 @@ regenerates the diff below; this header is edited by hand.
 -		if _, ok := tb.k2i[key]; !ok {
 -			tb.k2i[key] = len(tb.keys)
 -			tb.keys = append(tb.keys, key)
++// countInt counts key in nums if it may go in the array part (Lua's
++// countint).
++func countInt(key LValue, nums *[maxArrayBits + 1]int) int {
++	if n, ok := key.(LNumber); ok {
++		if k := int(n); LNumber(k) == n && k >= 1 && k <= 1<<maxArrayBits && k <= MaxArrayIndex {
++			nums[bits.Len(uint(k-1))]++
++			return 1
+ 		}
+ 	}
++	return 0
+ }
+ 
+-// RawGet returns an LValue associated with a given key without __index metamethod.
+-func (tb *LTable) RawGet(key LValue) LValue {
+-	switch v := key.(type) {
+-	case LNumber:
+-		if isArrayKey(v) {
+-			if tb.array == nil {
+-				return LNil
 +// rehash resizes the table for the new key ek as Lua 5.1's rehash does.
 +func (tb *LTable) rehash(ek LValue) {
 +	var nums [maxArrayBits + 1]int // nums[i]: the keys in (2^(i-1), 2^i]
@@ -20681,22 +20729,18 @@ regenerates the diff below; this header is edited by hand.
 +			if a > twotoi/2 {
 +				n = twotoi
 +				na = a
-+			}
+ 			}
+-			index := int(v) - 1
+-			if index >= len(tb.array) {
+-				return LNil
 +		}
 +		if a == nasize {
 +			break
- 		}
- 	}
++		}
++	}
 +	tb.resize(n, totaluse-na)
- }
- 
--// RawGet returns an LValue associated with a given key without __index metamethod.
--func (tb *LTable) RawGet(key LValue) LValue {
--	switch v := key.(type) {
--	case LNumber:
--		if isArrayKey(v) {
--			if tb.array == nil {
--				return LNil
++}
++
 +// resize gives the table an array part of nasize elements and a hash part
 +// for nhsize keys, as Lua 5.1's resize does (in the same order, so that the
 +// keys get the same nodes). The dead keys go.
@@ -20707,11 +20751,8 @@ regenerates the diff below; this header is edited by hand.
 +	oldarray := tb.array
 +	oldhash := tb.hash
 +	if nasize != len(oldarray) {
-+		tb.array = make([]LValue, nasize)
-+		n := copy(tb.array, oldarray)
-+		for i := n; i < nasize; i++ {
-+			tb.array[i] = LNil
-+		}
++		tb.array = resizedArray(oldarray, nasize)
++		defer releaseArray(oldarray) // when resize no longer reads it
 +	}
 +	tb.hash.init(nhsize)
 +	for i := nasize; i < len(oldarray); i++ {
@@ -20730,10 +20771,11 @@ regenerates the diff below; this header is edited by hand.
 +				tb.array[j] = node.val
 +				continue
  			}
--			index := int(v) - 1
--			if index >= len(tb.array) {
--				return LNil
-+		}
+-			return tb.array[index]
+ 		}
+-	case LString:
+-		if tb.strdict == nil {
+-			return LNil
 +		tb.hash.mustAdd(node.key, node.val, node.hash, isPtrKey(node.key))
 +	}
 +	if tb.hash.ptrkeys > 0 {
@@ -20744,12 +20786,10 @@ regenerates the diff below; this header is edited by hand.
 +		for i := nasize; i < len(oldarray); i++ {
 +			if oldarray[i] != LNil {
 +				h.link(h.findKey(LNumber(i + 1)))
- 			}
--			return tb.array[index]
++			}
  		}
--	case LString:
--		if tb.strdict == nil {
--			return LNil
+-		if ret, ok := tb.strdict[string(v)]; ok {
+-			return ret
 +		for i := oldhash.first; i > 0; {
 +			node := &oldhash.nodes[i-1]
 +			i = node.ins
@@ -20760,32 +20800,82 @@ regenerates the diff below; this header is edited by hand.
 +				h.link(j)
 +			}
  		}
--		if ret, ok := tb.strdict[string(v)]; ok {
--			return ret
+-		return LNil
+ 	}
+-	if tb.dict == nil {
+-		return LNil
++}
++
++// resizedArray returns a new array part of n elements with the elements
++// of a, LNil past them. (go-moonscript patch: a make followed by a copy
++// from local to local is one makeslicecopy, whose write barrier shades
++// only the source; copy into the result of make shades the destination
++// too. The new elements are set with fillNil.)
++func resizedArray(a []LValue, n int) []LValue {
++	array := make([]LValue, n)
++	copy(array, a)
++	if len(a) < n {
++		fillNil(array[len(a):])
++	}
++	return array
++}
++
++// releaseArray clears an array part the table no longer uses if it may be
++// the one allocated with the table (newLTable): that one lives as long as
++// the table, and the values left in it would keep the objects they refer
++// to from Go's collector (a weak table's entry would not be cleared).
++// (go-moonscript patch)
++func releaseArray(old []LValue) {
++	if cap(old) <= 4 {
++		clear(old)
 +	}
 +}
 +
++// fillNil sets the elements of s, which are nil (zeroed memory), to LNil.
++// The two words of LNil are pointers out of the Go heap (an itab and
++// runtime.zerobase), and so are those of nil: the collector has nothing
++// to shade, and they are copied as plain words, without a write barrier.
++func fillNil(s []LValue) {
++	if len(s) < 8 {
++		for i := range s {
++			s[i] = LNil
++		}
++		return
+ 	}
+-	if v, ok := tb.dict[key]; ok {
+-		return v
++	w := unsafe.Slice((*uintptr)(unsafe.Pointer(&s[0])), 2*len(s))
++	nw := (*[2]uintptr)(unsafe.Pointer(&LNil))
++	w[0], w[1] = nw[0], nw[1]
++	for i := 2; i < len(w); i *= 2 {
++		copy(w[i:], w[:i])
+ 	}
+-	return LNil
+ }
+ 
+-// RawGetInt returns an LValue at position `key` without __index metamethod.
+-func (tb *LTable) RawGetInt(key int) LValue {
+-	if tb.array == nil {
+-		return LNil
 +// resizeArray makes the array part n elements long if it is shorter
 +// (OP_SETLIST, luaH_resizearray).
 +func (tb *LTable) resizeArray(n int) {
 +	if n <= len(tb.array) {
 +		return
-+	}
+ 	}
+-	index := int(key) - 1
+-	if index >= len(tb.array) || index < 0 {
+-		return LNil
 +	if len(tb.hash.nodes) == 0 {
 +		if n >= tableBigSlots {
 +			tableReserve(n, 0) // go-moonscript patch
 +		}
-+		array := make([]LValue, n)
-+		copy(array, tb.array)
-+		for i := len(tb.array); i < n; i++ {
-+			array[i] = LNil
- 		}
--		return LNil
-+		tb.array = array
++		old := tb.array
++		tb.array = resizedArray(old, n)
++		releaseArray(old)
 +		return
  	}
--	if tb.dict == nil {
--		return LNil
+-	return tb.array[index]
 +	tb.resize(n, len(tb.hash.nodes))
 +}
 +
@@ -20794,9 +20884,7 @@ regenerates the diff below; this header is edited by hand.
 +	if uint(key-1) < uint(len(tb.array)) {
 +		tb.array[key-1] = value
 +		return
- 	}
--	if v, ok := tb.dict[key]; ok {
--		return v
++	}
 +	tb.setNumber(LNumber(key), value)
 +}
 +
@@ -20809,62 +20897,52 @@ regenerates the diff below; this header is edited by hand.
 +// go-moonscript patch: it is RawSet (a number key may be in the array part).
 +func (tb *LTable) RawSetH(key LValue, value LValue) {
 +	tb.RawSet(key, value)
-+}
-+
-+// RawGet returns an LValue associated with a given key without __index metamethod.
-+func (tb *LTable) RawGet(key LValue) LValue {
-+	switch k := key.(type) {
-+	case LNumber:
-+		if i := tb.arrayIndex(k); i >= 0 {
-+			return tb.array[i]
-+		}
-+		return tb.hash.getNumber(k)
-+	case LString:
-+		return tb.hash.getString(string(k))
- 	}
--	return LNil
-+	return tb.hash.get(key)
  }
  
- // RawGetInt returns an LValue at position `key` without __index metamethod.
-+// go-moonscript patch: the keys out of the array part are in the hash part
-+// (RawGetInt(0) did not find t[0]; fixed in the kiven-li/golua and
-+// dong-yue/gopher-lua forks too).
- func (tb *LTable) RawGetInt(key int) LValue {
--	if tb.array == nil {
--		return LNil
-+	if uint(key-1) < uint(len(tb.array)) {
-+		return tb.array[key-1]
- 	}
--	index := int(key) - 1
--	if index >= len(tb.array) || index < 0 {
-+	if len(tb.hash.nodes) == 0 {
- 		return LNil
- 	}
--	return tb.array[index]
-+	return tb.hash.getNumber(LNumber(key))
- }
- 
--// RawGet returns an LValue associated with a given key without __index metamethod.
-+// RawGetH returns an LValue associated with a given key without __index metamethod.
-+// go-moonscript patch: it is RawGet (a number key may be in the array part).
- func (tb *LTable) RawGetH(key LValue) LValue {
+ // RawGet returns an LValue associated with a given key without __index metamethod.
+-func (tb *LTable) RawGetH(key LValue) LValue {
 -	if s, sok := key.(LString); sok {
 -		if tb.strdict == nil {
 -			return LNil
 -		}
 -		if v, vok := tb.strdict[string(s)]; vok {
 -			return v
--		}
++func (tb *LTable) RawGet(key LValue) LValue {
++	switch k := key.(type) {
++	case LNumber:
++		if i := tb.arrayIndex(k); i >= 0 {
++			return tb.array[i]
+ 		}
 -		return LNil
--	}
++		return tb.hash.getNumber(k)
++	case LString:
++		return tb.hash.getString(string(k))
+ 	}
 -	if tb.dict == nil {
 -		return LNil
--	}
++	return tb.hash.get(key)
++}
++
++// RawGetInt returns an LValue at position `key` without __index metamethod.
++// go-moonscript patch: the keys out of the array part are in the hash part
++// (RawGetInt(0) did not find t[0]; fixed in the kiven-li/golua and
++// dong-yue/gopher-lua forks too).
++func (tb *LTable) RawGetInt(key int) LValue {
++	if uint(key-1) < uint(len(tb.array)) {
++		return tb.array[key-1]
+ 	}
 -	if v, ok := tb.dict[key]; ok {
 -		return v
--	}
++	if len(tb.hash.nodes) == 0 {
++		return LNil
+ 	}
 -	return LNil
++	return tb.hash.getNumber(LNumber(key))
++}
++
++// RawGetH returns an LValue associated with a given key without __index metamethod.
++// go-moonscript patch: it is RawGet (a number key may be in the array part).
++func (tb *LTable) RawGetH(key LValue) LValue {
 +	return tb.RawGet(key)
  }
  
@@ -22887,6 +22965,26 @@ regenerates the diff below; this header is edited by hand.
 +local obj = setmetatable({}, proto)
 +collectgarbage()
 +print("weak mt", proto.__index, obj.foo)
+--- a/testdata/compat/gc_weak_array_growth.lua
++++ b/testdata/compat/gc_weak_array_growth.lua
+@@ -0,0 +1,17 @@
++-- A value moved out of a table's array part when it grows, then removed,
++-- is collected: tables with a small array part get it in the same
++-- allocation (go-moonscript), which must not keep the old values alive.
++for size = 1, 5 do
++  local w = setmetatable({}, {__mode = "v"})
++  local t = {}
++  for i = 1, size do t[i] = {} end
++  local ctor = ({{}, {{}, {}}, {{}, {}, {}}, {{}, {}, {}, {}}, {{}, {}, {}, {}, {}}})[size]
++  for i = 1, size do w[i] = t[i]; w[size + i] = ctor[i] end
++  for i = size + 1, 4 * size + 8 do t[i] = i; ctor[i] = i end -- grow
++  for i = 1, size do t[i] = nil; ctor[i] = nil end
++  collectgarbage(); collectgarbage()
++  local left = 0
++  for _ in pairs(w) do left = left + 1 end
++  print(size, "weak values left", left)
++  keep = {t, ctor}
++end
 --- a/testdata/compat/lib_arg_coercion.lua
 +++ b/testdata/compat/lib_arg_coercion.lua
 @@ -0,0 +1,18 @@
@@ -28421,6 +28519,14 @@ regenerates the diff below; this header is edited by hand.
 +#	4	true	nil
 +reuse	101	50	t
 +weak mt	nil	nil
+--- a/testdata/compat/ref/gc_weak_array_growth.out
++++ b/testdata/compat/ref/gc_weak_array_growth.out
+@@ -0,0 +1,5 @@
++1	weak values left	0
++2	weak values left	0
++3	weak values left	0
++4	weak values left	0
++5	weak values left	0
 --- a/testdata/compat/ref/lib_arg_coercion.out
 +++ b/testdata/compat/ref/lib_arg_coercion.out
 @@ -0,0 +1,13 @@
