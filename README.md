@@ -294,8 +294,8 @@ change, with its source, is in
 [`moonscript.patch`](third_party/gopher-lua/moonscript.patch); the official
 Lua 5.1 and LuaJIT test suites run against it in
 [`internal/luasuites`](internal/luasuites). On LuaJIT's benchmark suite it
-is about 3.3 times slower than PUC Lua 5.1 (geometric mean; MoonScript
-workloads about 2.6 times).
+is about 2.6 times slower than PUC Lua 5.1 (geometric mean; MoonScript
+workloads about 2.2 times).
 
 ## Development
 
