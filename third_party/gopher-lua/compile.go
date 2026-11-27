@@ -1092,9 +1092,11 @@ func compileAssignStmtRight(context *funcContext, stmt *ast.AssignStmt, reg int,
 		// as many values as targets is stored first, before anything else
 		// is (and after the other values are evaluated), as in luac
 		last := namesassigned == lennames-1 && lenexprs == lennames
-		if lennames > 1 && ec.ctype == ecLocal && !last {
+		if (lennames > 1 || lenexprs > lennames) && ec.ctype == ecLocal && !last {
 			// go-moonscript patch (yuin/gopher-lua#560): a, b = b, a needs the
-			// value in a temporary, as later expressions may read the local
+			// value in a temporary, as later expressions may read the local;
+			// so does i = 5, f(i), whose extra values are evaluated before i
+			// is assigned
 			ec = ecnone(0)
 		}
 		var expr ast.Expr = nil
@@ -1541,6 +1543,11 @@ func compileNumberForStmt(context *funcContext, stmt *ast.NumberForStmt) { // {{
 	context.LeaveBlock()
 
 	flpc := code.LastPC()
+	if flpc-bodypc > opMaxArgSbx {
+		// go-moonscript patch: FORPREP and FORLOOP jump over the body (a
+		// longer one was a jump out of the code, a Go panic)
+		raiseCompileError(context, eline(stmt), "control structure too long")
+	}
 	code.AddASbx(OP_FORLOOP, rindex, bodypc-(flpc+1), sline(stmt))
 	context.endLoopScope(firstdbg, 3) // go-moonscript patch
 
@@ -1670,6 +1677,16 @@ func compileExpr(context *funcContext, reg int, expr ast.Expr, ec *expcontext) i
 			raiseCompileError(context, sline(ex), "cannot use '...' outside a vararg function")
 		}
 		context.Proto.IsVarArg &= ^VarArgNeedsArg
+		if sreg < reg {
+			// go-moonscript patch: a value for a local's register, as in
+			// x = (...), is loaded into a free one and moved: the VM's
+			// VARARG sets the top of the stack after the values it loads,
+			// which cleared the registers above the local (a crash when
+			// they were read)
+			code.AddABC(OP_VARARG, reg, 2+ec.varargopt, 0, sline(ex))
+			code.AddABC(OP_MOVE, sreg, reg, 0, sline(ex))
+			return 0
+		}
 		code.AddABC(OP_VARARG, sreg, 2+ec.varargopt, 0, sline(ex))
 		if context.RegTop() > (sreg+2+ec.varargopt) || ec.varargopt < -1 {
 			return 0
@@ -1711,6 +1728,11 @@ func compileExpr(context *funcContext, reg int, expr ast.Expr, ec *expcontext) i
 		childcontext := newFuncContext(context.Proto.SourceName, context)
 		compileFunctionExpr(childcontext, ex, ec)
 		protono := len(context.Proto.FunctionPrototypes)
+		if protono > opMaxArgBx {
+			// go-moonscript patch: CLOSURE addresses this many prototypes
+			// (Lua 5.1's pushclosure limit and message)
+			raiseCompileError(context, sline(ex), "constant table overflow")
+		}
 		context.Proto.FunctionPrototypes = append(context.Proto.FunctionPrototypes, childcontext.Proto)
 		// go-moonscript patch: luac creates the closure after the body, on
 		// the line of its "end"
@@ -2460,9 +2482,13 @@ func patchCode(context *funcContext) { // {{{
 			count := 0 // avoiding infinite loops
 			for jmp := inst; opGetOpCode(jmp) == OP_JMP && count < 5; jmp = context.Code.At(pc + distance + 1) {
 				d := context.GetLabelPc(opGetArgSbx(jmp)) - pc
-				if d > opMaxArgSbx {
+				// go-moonscript patch: backward jumps too (a long repeat body
+				// was a jump out of the code, a Go panic), Lua 5.1's message
+				// at the jump's line (it was "too long to jump." at the
+				// function's first line)
+				if d > opMaxArgSbx || d < -opMaxArgSbx {
 					if distance == 0 {
-						raiseCompileError(context, context.Proto.LineDefined, "too long to jump.")
+						raiseCompileError(context, lines[pc], "control structure too long")
 					}
 					break
 				}

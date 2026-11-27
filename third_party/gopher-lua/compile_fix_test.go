@@ -11,6 +11,30 @@ import (
 	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
 )
 
+// TestCompileLongJumps: a jump over more instructions than an instruction
+// can address is lua5.1's "control structure too long", for the loops
+// that jump back (repeat, a numeric for's FORPREP and FORLOOP) too: their
+// jumps went out of the code (a Go panic in the VM). go-moonscript patch;
+// found by FuzzCompileAST. Under DialectLuaJIT the parser's model of
+// LuaJIT's code generator finds them first (parse_limits_on_luajit.jit.lua).
+func TestCompileLongJumps(t *testing.T) {
+	body := strings.Repeat("x = 1\n", 70000) // 140000 instructions
+	cases := []struct{ src, want string }{
+		{"for i = 1, 2 do\n" + body + "end", "src:70002: control structure too long"},
+		{"local n = 0 repeat\n" + body + "n = n + 1 until n > 1", "src:70002: control structure too long"},
+		{"while x do\n" + body + "end", "src:1: control structure too long"}, // the condition's jump
+		{"for k in pairs({}) do\n" + body + "end", "src:1: control structure too long"},
+	}
+	for _, c := range cases {
+		L := NewState(Options{SkipOpenLibs: true})
+		_, err := L.LoadChunk(strings.NewReader(c.src), "=src")
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%.20q: %v, want %s", c.src, err, c.want)
+		}
+		L.Close()
+	}
+}
+
 // From yuin/gopher-lua#556 (kimjooyoon), with Lua 5.1's limits: the parser
 // allows 200 local variables per function (LUAI_MAXVARS), and fewer than
 // 250 registers (MAXSTACK, found by the model of lua5.1's registers when
