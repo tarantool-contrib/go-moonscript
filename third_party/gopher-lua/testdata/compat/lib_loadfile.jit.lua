@@ -16,7 +16,12 @@ print("not a string dofile", pcall(dofile, {}))
 print("number name", loadfile(42))
 
 print("results", select("#", dofile("files/ret3.lua")), dofile("files/ret3.lua"))
-print("empty", pcall(dofile, "files/empty.lua"))
+do -- an empty file (made here: the patch of the vendored tree cannot hold one)
+  local name = os.tmpname()
+  assert(io.open(name, "w")):close()
+  print("empty", pcall(dofile, name))
+  os.remove(name)
+end
 local f = loadfile("files/err.lua")
 print("source", debug.getinfo(f, "S").source, debug.getinfo(f, "S").short_src)
 print("runtime error", pcall(f))
