@@ -455,6 +455,16 @@ that change.
     - callR calls a Go function (iterators, metamethods) without entering
       mainLoop.
 
+  Performance, dispatch (go-moonscript):
+    - mainLoop handles the frequent opcodes in a switch (MOVE, LOADK,
+      GETUPVAL, array GETTABLE/SETTABLE, GETGLOBAL/GETTABLEKS/SELF on
+      tables, number ADD/SUB/MUL/DIV and EQ/LT/LE, TEST/TESTSET with the
+      following JMP, JMP, FORLOOP), the others through jumpTable; the
+      frame, code, constants, base and pc are kept in locals.
+    - CALL and RETURN between Lua functions run in mainLoop, the frame
+      built in place (pushSlot); with a call/return hook, at a stack
+      segment's end or when a coroutine ends they take the general path.
+
 vm.go and state.go are generated from _vm.go and _state.go: after editing
 those, run `python3 ./_tools/go-inline *.go && gofmt -w vm.go state.go` in
 third_party/gopher-lua. parse/parser.go is no longer generated: the goyacc
@@ -625,7 +635,7 @@ regenerates the diff below; this header is edited by hand.
  		cs.segIdx--
  		cs.segSp = FramesPerSegment
  		curSeg = cs.segments[cs.segIdx]
-@@ -355,6 +425,40 @@
+@@ -355,6 +425,53 @@
  	return &curSeg.array[cs.segSp]
  }
  
@@ -651,6 +661,19 @@ regenerates the diff below; this header is edited by hand.
 +	return f
 +}
 +
++// pushSlot pushes a frame if the current segment has room for it,
++// returning it with only its Idx set, otherwise nil (go-moonscript patch:
++// mainLoop's call path sets the fields, without copying a frame).
++func (cs *autoGrowingCallFrameStack) pushSlot() *callFrame {
++	if cs.segSp >= FramesPerSegment {
++		return nil
++	}
++	f := &cs.segments[cs.segIdx].array[cs.segSp]
++	f.Idx = int(cs.segSp) + FramesPerSegment*int(cs.segIdx)
++	cs.segSp++
++	return f
++}
++
 +// popFast pops the top frame if the frame below it is in the same segment,
 +// returning both, otherwise nil, nil (go-moonscript patch: the return path
 +// without the interface calls of Pop and Last).
@@ -666,7 +689,7 @@ regenerates the diff below; this header is edited by hand.
  /* }}} */
  
  /* registry {{{ */
-@@ -543,6 +647,8 @@
+@@ -543,6 +660,8 @@
  		Global:     newLTable(0, 64),
  		builtinMts: make(map[int]LValue),
  		tempFiles:  make([]*os.File, 0, 10),
@@ -675,7 +698,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  }
  
-@@ -562,7 +668,7 @@
+@@ -562,7 +681,7 @@
  }
  
  func newLState(options Options) *LState {
@@ -684,7 +707,7 @@ regenerates the diff below; this header is edited by hand.
  	ls := &LState{
  		G:       newGlobal(),
  		Parent:  nil,
-@@ -633,15 +739,28 @@
+@@ -633,15 +752,28 @@
  } // +inline-end
  
  func (ls *LState) raiseError(level int, format string, args ...interface{}) {
@@ -717,7 +740,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	if ls.reg.IsFull() {
  		// if the registry is full then it won't be possible to push a value, in this case, force a larger size
-@@ -672,6 +791,24 @@
+@@ -672,6 +804,24 @@
  	return ""
  }
  
@@ -742,7 +765,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) where(level int, skipg bool) string {
  	dbg, ok := ls.GetStack(level)
  	if !ok {
-@@ -686,7 +823,10 @@
+@@ -686,7 +836,10 @@
  		return ls.where(level+1, skipg)
  	}
  	line := ""
@@ -754,7 +777,7 @@ regenerates the diff below; this header is edited by hand.
  		line = fmt.Sprintf("%v:", proto.DbgSourcePositions[cf.Pc-1])
  	}
  	return fmt.Sprintf("%v:%v", sourcename, line)
-@@ -732,11 +872,6 @@
+@@ -732,11 +885,6 @@
  	return fmt.Sprintf("function %s", name)
  }
  
@@ -766,7 +789,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) frameFuncName(fr *callFrame) (string, bool) {
  	frame := fr.Parent
  	if frame == nil {
-@@ -765,7 +900,7 @@
+@@ -765,7 +913,7 @@
  }
  
  func (ls *LState) isStarted() bool {
@@ -775,7 +798,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) kill() {
-@@ -828,48 +963,49 @@
+@@ -828,48 +976,49 @@
  	return string(ls.reg.array[ls.currentFrame.LocalBase+idx].(LString))
  }
  
@@ -836,11 +859,11 @@ regenerates the diff below; this header is edited by hand.
 +	uv := ls.uvcache
 +	for ; uv != nil && uv.index > idx; uv = uv.next {
 +		prev = uv
-+	}
-+	if uv != nil && uv.index == idx {
-+		return uv
  	}
 -	uv := &Upvalue{reg: ls.reg, index: idx, closed: false}
++	if uv != nil && uv.index == idx {
++		return uv
++	}
 +	nuv := &Upvalue{reg: ls.reg, index: idx, next: uv}
  	if prev != nil {
 -		prev.next = uv
@@ -857,7 +880,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) metatable(lvalue LValue, rawget bool) LValue {
-@@ -907,6 +1043,31 @@
+@@ -907,6 +1056,31 @@
  	return LNil
  }
  
@@ -889,7 +912,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) metaOp2(value1, value2 LValue, event string) LValue {
  	if mt := ls.metatable(value1, true); mt != LNil {
  		if tb, ok := mt.(*LTable); ok {
-@@ -995,7 +1156,7 @@
+@@ -995,7 +1169,7 @@
  			if CompatVarArg {
  				ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
  				if (proto.IsVarArg & VarArgNeedsArg) != 0 {
@@ -898,7 +921,7 @@ regenerates the diff below; this header is edited by hand.
  					for i := 0; i < nvarargs; i++ {
  						argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
  					}
-@@ -1019,15 +1180,24 @@
+@@ -1019,15 +1193,24 @@
  		ls.reg.Insert(fn, cf.LocalBase)
  	}
  	if cf.Fn == nil {
@@ -928,7 +951,7 @@ regenerates the diff below; this header is edited by hand.
  } // +inline-end
  
  func (ls *LState) callR(nargs, nret, rbase int) {
-@@ -1048,13 +1218,19 @@
+@@ -1048,13 +1231,19 @@
  		Parent:     ls.currentFrame,
  		TailCall:   0,
  	}, lv, meta)
@@ -948,7 +971,7 @@ regenerates the diff below; this header is edited by hand.
  	if nret != MultRet {
  		ls.reg.SetTop(rbase + nret)
  	}
-@@ -1066,14 +1242,14 @@
+@@ -1066,14 +1255,14 @@
  		tb, istable := curobj.(*LTable)
  		if istable {
  			ret := tb.RawGet(key)
@@ -966,7 +989,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return LNil
  		}
-@@ -1087,7 +1263,7 @@
+@@ -1087,7 +1276,7 @@
  			curobj = metaindex
  		}
  	}
@@ -975,7 +998,7 @@ regenerates the diff below; this header is edited by hand.
  	return nil
  }
  
-@@ -1097,14 +1273,14 @@
+@@ -1097,14 +1286,14 @@
  		tb, istable := curobj.(*LTable)
  		if istable {
  			ret := tb.RawGetString(key)
@@ -993,7 +1016,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return LNil
  		}
-@@ -1118,24 +1294,103 @@
+@@ -1118,24 +1307,103 @@
  			curobj = metaindex
  		}
  	}
@@ -1101,7 +1124,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			ls.RawSet(tb, key, value)
  			return
-@@ -1151,7 +1406,7 @@
+@@ -1151,7 +1419,7 @@
  			curobj = metaindex
  		}
  	}
@@ -1110,7 +1133,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) setFieldString(obj LValue, key string, value LValue) {
-@@ -1159,15 +1414,15 @@
+@@ -1159,15 +1427,15 @@
  	for i := 0; i < MaxTableGetLoop; i++ {
  		tb, istable := curobj.(*LTable)
  		if istable {
@@ -1129,7 +1152,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			tb.RawSetString(key, value)
  			return
-@@ -1183,7 +1438,7 @@
+@@ -1183,7 +1451,7 @@
  			curobj = metaindex
  		}
  	}
@@ -1138,7 +1161,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -1197,6 +1452,7 @@
+@@ -1197,6 +1465,7 @@
  			CallStackSize: CallStackSize,
  			RegistrySize:  RegistrySize,
  		})
@@ -1146,7 +1169,7 @@ regenerates the diff below; this header is edited by hand.
  		ls.OpenLibs()
  	} else {
  		if opts[0].CallStackSize < 1 {
-@@ -1214,6 +1470,10 @@
+@@ -1214,6 +1483,10 @@
  			}
  		}
  		ls = newLState(opts[0])
@@ -1157,7 +1180,7 @@ regenerates the diff below; this header is edited by hand.
  		if !opts[0].SkipOpenLibs {
  			ls.OpenLibs()
  		}
-@@ -1226,7 +1486,12 @@
+@@ -1226,7 +1499,12 @@
  }
  
  func (ls *LState) Close() {
@@ -1170,7 +1193,7 @@ regenerates the diff below; this header is edited by hand.
  	for _, file := range ls.G.tempFiles {
  		// ignore errors in these operations
  		file.Close()
-@@ -1399,9 +1664,8 @@
+@@ -1399,9 +1677,8 @@
  // NewThread returns a new LState that shares with the original state all global objects.
  // If the original state has context.Context, the new state has a new child context of the original state and this function returns its cancel function.
  func (ls *LState) NewThread() (*LState, context.CancelFunc) {
@@ -1182,7 +1205,7 @@ regenerates the diff below; this header is edited by hand.
  	var f context.CancelFunc = nil
  	if ls.ctx != nil {
  		thread.mainLoop = mainLoopWithContext
-@@ -1411,6 +1675,19 @@
+@@ -1411,6 +1688,19 @@
  	return thread, f
  }
  
@@ -1202,7 +1225,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) NewFunctionFromProto(proto *FunctionProto) *LFunction {
  	return newLFunctionL(proto, ls.Env, int(proto.NumUpvalues))
  }
-@@ -1473,7 +1750,7 @@
+@@ -1473,7 +1763,7 @@
  }
  
  func (ls *LState) ToString(n int) string {
@@ -1211,7 +1234,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) ToTable(n int) *LTable {
-@@ -1518,13 +1795,20 @@
+@@ -1518,13 +1808,20 @@
  }
  
  // This function is equivalent to lua_error( http://www.lua.org/manual/5.1/manual.html#lua_error ).
@@ -1236,7 +1259,7 @@ regenerates the diff below; this header is edited by hand.
  		ls.Push(lv)
  		ls.Panic(ls)
  	}
-@@ -1547,19 +1831,24 @@
+@@ -1547,19 +1844,24 @@
  		case 'f':
  			retfn = true
  		case 'S':
@@ -1269,7 +1292,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  		case 'l':
  			if !f.IsG && dbg.frame != nil {
-@@ -1572,8 +1861,10 @@
+@@ -1572,8 +1874,10 @@
  		case 'u':
  			dbg.NUpvalues = len(f.Upvalues)
  		case 'n':
@@ -1281,7 +1304,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  		default:
  			return LNil, newApiErrorS(ApiErrorRun, "invalid what: "+string(c))
-@@ -1798,8 +2089,23 @@
+@@ -1798,8 +2102,23 @@
  /* load and function call operations {{{ */
  
  func (ls *LState) Load(reader io.Reader, name string) (*LFunction, error) {
@@ -1306,7 +1329,7 @@ regenerates the diff below; this header is edited by hand.
  		return nil, newApiErrorE(ApiErrorSyntax, err)
  	}
  	proto, err := Compile(chunk, name)
-@@ -1817,16 +2123,19 @@
+@@ -1817,16 +2136,19 @@
  	err = nil
  	sp := ls.stack.Sp()
  	base := ls.reg.Top() - nargs - 1
@@ -1327,7 +1350,7 @@ regenerates the diff below; this header is edited by hand.
  			if _, ok := rcv.(*ApiError); !ok {
  				err = newApiErrorS(ApiErrorPanic, fmt.Sprint(rcv))
  				if ls.Options.IncludeGoStackTrace {
-@@ -1856,6 +2165,8 @@
+@@ -1856,6 +2178,8 @@
  							err = rcv.(*ApiError)
  							err.(*ApiError).StackTrace = ls.stackTrace(0)
  						}
@@ -1336,7 +1359,7 @@ regenerates the diff below; this header is edited by hand.
  						ls.stack.SetSp(sp)
  						ls.currentFrame = ls.stack.Last()
  						ls.reg.SetTop(base)
-@@ -1866,6 +2177,8 @@
+@@ -1866,6 +2190,8 @@
  			} else if len(err.(*ApiError).StackTrace) == 0 {
  				err.(*ApiError).StackTrace = ls.stackTrace(0)
  			}
@@ -1345,7 +1368,7 @@ regenerates the diff below; this header is edited by hand.
  			ls.stack.SetSp(sp)
  			ls.currentFrame = ls.stack.Last()
  			ls.reg.SetTop(base)
-@@ -1922,7 +2235,9 @@
+@@ -1922,7 +2248,9 @@
  		v.Metatable = mt
  	default:
  		ls.G.builtinMts[int(obj.Type())] = mt
@@ -1355,7 +1378,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -1935,7 +2250,10 @@
+@@ -1935,7 +2263,10 @@
  		status = "dead"
  	} else if ls.G.CurrentThread == th {
  		status = "running"
@@ -1367,7 +1390,7 @@ regenerates the diff below; this header is edited by hand.
  		status = "normal"
  	}
  	return status
-@@ -1943,7 +2261,7 @@
+@@ -1943,7 +2274,7 @@
  
  func (ls *LState) Resume(th *LState, fn *LFunction, args ...LValue) (ResumeState, error, []LValue) {
  	isstarted := th.isStarted()
@@ -1376,7 +1399,7 @@ regenerates the diff below; this header is edited by hand.
  		base := 0
  		th.stack.Push(callFrame{
  			Fn:         fn,
-@@ -1964,8 +2282,18 @@
+@@ -1964,8 +2295,18 @@
  	if th.Dead {
  		return ResumeError, newApiErrorS(ApiErrorRun, "can not resume a dead thread"), nil
  	}
@@ -1395,7 +1418,7 @@ regenerates the diff below; this header is edited by hand.
  	if !isstarted {
  		cf := th.stack.Last()
  		th.currentFrame = cf
-@@ -1976,10 +2304,13 @@
+@@ -1976,10 +2317,13 @@
  		cf.NArgs = len(args)
  		th.initCallFrame(cf)
  		th.Panic = panicWithoutTraceback
@@ -1409,7 +1432,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	top := ls.GetTop()
  	threadRun(th)
-@@ -1995,7 +2326,7 @@
+@@ -1995,7 +2339,7 @@
  
  	if haserror {
  		return ResumeError, newApiError(ApiErrorRun, ret[0]), nil
@@ -1418,7 +1441,7 @@ regenerates the diff below; this header is edited by hand.
  		return ResumeOK, nil, ret
  	}
  	return ResumeYield, nil, ret
-@@ -2015,8 +2346,15 @@
+@@ -2015,8 +2359,15 @@
  	}
  	top := ls.GetTop()
  	n = intMin(n, top)
@@ -1438,7 +1461,7 @@ regenerates the diff below; this header is edited by hand.
  }
 --- a/_vm.go
 +++ b/_vm.go
-@@ -3,6 +3,7 @@
+@@ -3,13 +3,11 @@
  import (
  	"fmt"
  	"math"
@@ -1446,17 +1469,372 @@ regenerates the diff below; this header is edited by hand.
  	"strings"
  )
  
-@@ -22,6 +23,9 @@
+ func mainLoop(L *LState, baseframe *callFrame) {
+-	var inst uint32
+-	var cf *callFrame
+-
+ 	if L.stack.IsEmpty() {
+ 		return
+ 	}
+@@ -20,16 +18,354 @@
+ 		return
+ 	}
  
++	// go-moonscript patch: the current frame, its function's code and
++	// constants, its registers' base and its pc are kept in locals,
++	// reloaded after an opcode that may change them (one done by its
++	// jumpTable function). cf.Pc is set from pc before each instruction,
++	// for what reads it (errors, the debug library, the opcode functions).
++	reg := L.reg
++	cf := L.currentFrame
++	code, consts := cf.Fn.Proto.Code, cf.Fn.Proto.Constants
++	lbase := cf.LocalBase
++	pc := cf.Pc
  	for {
- 		cf = L.currentFrame
+-		cf = L.currentFrame
+-		inst = cf.Fn.Proto.Code[cf.Pc]
+-		cf.Pc++
 +		if L.hookMask&hookMaskTrace != 0 { // go-moonscript patch
++			cf.Pc = pc
 +			traceExec(L, cf)
++			pc = cf.Pc
 +		}
- 		inst = cf.Fn.Proto.Code[cf.Pc]
- 		cf.Pc++
++		inst := code[pc]
++		pc++
++		cf.Pc = pc
++		// go-moonscript patch: the common cases of the frequent opcodes are
++		// handled here, without the call through jumpTable; the others, and
++		// the other cases, go to the opcode's function.
++		switch int(inst >> 26) { //GETOPCODE
++		case OP_MOVE:
++			A := int(inst>>18) & 0xff //GETA
++			B := int(inst & 0x1ff)    //GETB
++			v := reg.Get(lbase + B)
++			// +inline-call reg.Set lbase+A v
++			continue
++		case OP_LOADK:
++			A := int(inst>>18) & 0xff //GETA
++			Bx := int(inst & 0x3ffff) //GETBX
++			v := consts[Bx]
++			// +inline-call reg.Set lbase+A v
++			continue
++		case OP_GETUPVAL:
++			A := int(inst>>18) & 0xff //GETA
++			B := int(inst & 0x1ff)    //GETB
++			v := cf.Fn.Upvalues[B].Value()
++			// +inline-call reg.Set lbase+A v
++			continue
++		case OP_GETTABLE:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if tb, ok := reg.Get(lbase + B).(*LTable); ok {
++				if k, isnum := rk(reg, consts, lbase, C).(LNumber); isnum {
++					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) {
++						if v := tb.array[i-1]; v != LNil || tb.Metatable == LNil {
++							A := int(inst>>18) & 0xff //GETA
++							// +inline-call reg.Set lbase+A v
++							continue
++						}
++					}
++				}
++			}
++		case OP_GETGLOBAL:
++			Bx := int(inst & 0x3ffff) //GETBX
++			proto, env := cf.Fn.Proto, cf.Fn.Env
++			key, h := proto.stringConstants[Bx], proto.strConstHash(Bx)
++			v := env.hash.getStringH(key, h)
++			if v == LNil && env.Metatable != LNil {
++				v = L.getFieldStringKMiss(env, consts[Bx], key, h, true)
++			}
++			A := int(inst>>18) & 0xff //GETA
++			// +inline-call reg.Set lbase+A v
++			continue
++		case OP_GETTABLEKS:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if obj, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
++				proto := cf.Fn.Proto
++				k := C & ^opBitRk
++				key, h := proto.stringConstants[k], proto.strConstHash(k)
++				v := obj.hash.getStringH(key, h)
++				if v == LNil && obj.Metatable != LNil {
++					v = L.getFieldStringKMiss(obj, consts[k], key, h, true)
++				}
++				A := int(inst>>18) & 0xff //GETA
++				// +inline-call reg.Set lbase+A v
++				continue
++			}
++		case OP_SELF:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			selfobj := reg.Get(lbase + B)
++			if obj, ok := selfobj.(*LTable); ok && C&opBitRk != 0 {
++				proto := cf.Fn.Proto
++				k := C & ^opBitRk
++				key, h := proto.stringConstants[k], proto.strConstHash(k)
++				v := obj.hash.getStringH(key, h)
++				if v == LNil && obj.Metatable != LNil {
++					v = L.getFieldStringKMiss(selfobj, consts[k], key, h, true)
++				}
++				RA := lbase + int(inst>>18)&0xff //GETA
++				// +inline-call reg.Set RA v
++				// +inline-call reg.Set RA+1 selfobj
++				continue
++			}
++		case OP_SETTABLE:
++			A := int(inst>>18) & 0xff //GETA
++			B := int(inst & 0x1ff)    //GETB
++			if tb, ok := reg.Get(lbase + A).(*LTable); ok {
++				if k, isnum := rk(reg, consts, lbase, B).(LNumber); isnum {
++					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
++						C := int(inst>>9) & 0x1ff //GETC
++						tb.array[i-1] = rk(reg, consts, lbase, C)
++						continue
++					}
++				}
++			}
++		case OP_ADD:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
++				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
++					RA := lbase + int(inst>>18)&0xff //GETA
++					v := v1 + v2
++					// +inline-call reg.SetNumber RA v
++					continue
++				}
++			}
++		case OP_SUB:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
++				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
++					RA := lbase + int(inst>>18)&0xff //GETA
++					v := v1 - v2
++					// +inline-call reg.SetNumber RA v
++					continue
++				}
++			}
++		case OP_MUL:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
++				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
++					RA := lbase + int(inst>>18)&0xff //GETA
++					v := v1 * v2
++					// +inline-call reg.SetNumber RA v
++					continue
++				}
++			}
++		case OP_DIV:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
++				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
++					RA := lbase + int(inst>>18)&0xff //GETA
++					v := v1 / v2
++					// +inline-call reg.SetNumber RA v
++					continue
++				}
++			}
++		case OP_JMP:
++			pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
++			continue
++		case OP_EQ:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
++			var ret bool
++			if v1, ok1 := lhs.(LNumber); ok1 {
++				if v2, ok2 := rhs.(LNumber); ok2 {
++					ret = v1 == v2
++				}
++			} else {
++				ret = equals(L, lhs, rhs, false)
++			}
++			if ret != (int(inst>>18)&0xff != 0) { //GETA
++				pc++
++			} else {
++				pc = jmpNext(L, code, pc)
++			}
++			continue
++		case OP_LT:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
++			var ret bool
++			if v1, ok1 := lhs.(LNumber); ok1 {
++				if v2, ok2 := rhs.(LNumber); ok2 {
++					ret = v1 < v2
++				} else {
++					ret = lessThan(L, lhs, rhs)
++				}
++			} else {
++				ret = lessThan(L, lhs, rhs)
++			}
++			if ret != (int(inst>>18)&0xff != 0) { //GETA
++				pc++
++			} else {
++				pc = jmpNext(L, code, pc)
++			}
++			continue
++		case OP_LE:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
++			var ret bool
++			if v1, ok1 := lhs.(LNumber); ok1 {
++				if v2, ok2 := rhs.(LNumber); ok2 {
++					ret = v1 <= v2
++				} else {
++					ret = lessEqual(L, lhs, rhs)
++				}
++			} else {
++				ret = lessEqual(L, lhs, rhs)
++			}
++			if ret != (int(inst>>18)&0xff != 0) { //GETA
++				pc++
++			} else {
++				pc = jmpNext(L, code, pc)
++			}
++			continue
++		case OP_TEST:
++			A := int(inst>>18) & 0xff //GETA
++			C := int(inst>>9) & 0x1ff //GETC
++			if LVAsBool(reg.Get(lbase+A)) == (C == 0) {
++				pc++
++			} else {
++				pc = jmpNext(L, code, pc)
++			}
++			continue
++		case OP_TESTSET:
++			A := int(inst>>18) & 0xff //GETA
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if value := reg.Get(lbase + B); LVAsBool(value) != (C == 0) {
++				// +inline-call reg.Set lbase+A value
++				pc = jmpNext(L, code, pc)
++			} else {
++				pc++
++			}
++			continue
++		case OP_CALL:
++			// a call of a Lua function, with no "call" hook, whose frame fits
++			// in the current segment of the call stack
++			RA := lbase + int(inst>>18)&0xff //GETA
++			if fn, ok := reg.Get(RA).(*LFunction); ok && !fn.IsG && L.hookMask&MaskCall == 0 {
++				if s, ok := L.stack.(*autoGrowingCallFrameStack); ok {
++					if newcf := s.pushSlot(); newcf != nil {
++						B := int(inst & 0x1ff)    //GETB
++						C := int(inst>>9) & 0x1ff //GETC
++						nargs := B - 1
++						if B == 0 {
++							nargs = reg.Top() - (RA + 1)
++						}
++						newcf.Fn = fn
++						newcf.Parent = cf
++						newcf.Pc = 0
++						newcf.Base = RA
++						newcf.LocalBase = RA + 1
++						newcf.ReturnBase = RA
++						newcf.NArgs = nargs
++						newcf.NRet = C - 1
++						newcf.TailCall = 0
++						// +inline-call L.initCallFrame newcf
++						L.currentFrame = newcf
++						cf = newcf
++						code, consts = fn.Proto.Code, fn.Proto.Constants
++						lbase = newcf.LocalBase
++						pc = 0
++						continue
++					}
++				}
++			}
++		case OP_RETURN:
++			// a return, with no "return" hook, to a Lua function's frame in
++			// the same segment of the call stack, not the end of a coroutine
++			if L.hookMask&MaskReturn == 0 {
++				if s, ok := L.stack.(*autoGrowingCallFrameStack); ok && (L.Parent == nil || s.Sp() != 1) {
++					if popped, top := s.popFast(); top != nil {
++						RA := lbase + int(inst>>18)&0xff //GETA
++						B := int(inst & 0x1ff)           //GETB
++						// +inline-call L.closeUpvalues lbase
++						nret := B - 1
++						if B == 0 {
++							nret = reg.Top() - RA
++						}
++						n := cf.NRet
++						if n == MultRet {
++							n = nret
++						}
++						// +inline-call copyReturnValues L cf.ReturnBase RA n B
++						L.currentFrame = top
++						if baseframe == popped || top.Fn.IsG {
++							return
++						}
++						cf = top
++						code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
++						lbase = cf.LocalBase
++						pc = cf.Pc
++						continue
++					}
++				}
++			}
++		case OP_FORLOOP:
++			RA := lbase + int(inst>>18)&0xff //GETA
++			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
++				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
++					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
++						init += step
++						v := reg.alloc.LNumber2I(init) // one box for both registers
++						// +inline-call reg.Set RA v
++						if (step > 0 && init <= limit) || (step <= 0 && init >= limit) {
++							pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
++							// +inline-call reg.Set RA+3 v
++						} else {
++							// +inline-call reg.SetTop RA+1
++						}
++						continue
++					}
++				}
++			}
++		}
  		if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
-@@ -46,11 +50,14 @@
+ 			return
+ 		}
++		cf = L.currentFrame
++		code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
++		lbase = cf.LocalBase
++		pc = cf.Pc
+ 	}
+ }
+ 
++// jmpNext does the JMP that follows a test that doesn't skip it, unless
++// there is a line or count hook to call for it (go-moonscript patch: one
++// dispatch for the two).
++func jmpNext(L *LState, code []uint32, pc int) int {
++	if L.hookMask&hookMaskTrace == 0 {
++		if j := code[pc]; int(j>>26) == OP_JMP { //GETOPCODE
++			return pc + 1 + int(j&0x3ffff) - opMaxArgSbx //GETSBX
++		}
++	}
++	return pc
++}
++
++// rk is RK(idx) of an instruction of a function with constants consts and
++// its registers from lbase (go-moonscript patch: rkValue with them in
++// mainLoop's locals).
++func rk(reg *registry, consts []LValue, lbase, idx int) LValue {
++	if idx&opBitRk != 0 {
++		return consts[idx&^opBitRk]
++	}
++	return reg.array[lbase+idx]
++}
++
+ func mainLoopWithContext(L *LState, baseframe *callFrame) {
+ 	var inst uint32
+ 	var cf *callFrame
+@@ -46,11 +382,14 @@
  
  	for {
  		cf = L.currentFrame
@@ -1472,7 +1850,7 @@ regenerates the diff below; this header is edited by hand.
  			return
  		default:
  			if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
-@@ -94,17 +101,55 @@
+@@ -94,17 +433,55 @@
  	}
  	L.XMoveTo(parent, nargs)
  	L.stack.Pop()
@@ -1528,7 +1906,7 @@ regenerates the diff below; this header is edited by hand.
  	if tailcall {
  		L.currentFrame = L.RemoveCallerFrame()
  	}
-@@ -119,12 +164,21 @@
+@@ -119,12 +496,21 @@
  		wantret = gfnret
  	}
  
@@ -1551,7 +1929,7 @@ regenerates the diff below; this header is edited by hand.
  	L.stack.Pop()
  	L.currentFrame = L.stack.Last()
  	return false
-@@ -132,6 +186,16 @@
+@@ -132,6 +518,16 @@
  
  func threadRun(L *LState) {
  	if L.stack.IsEmpty() {
@@ -1568,7 +1946,7 @@ regenerates the diff below; this header is edited by hand.
  		return
  	}
  
-@@ -140,12 +204,31 @@
+@@ -140,12 +536,31 @@
  			var lv LValue
  			if v, ok := rcv.(*ApiError); ok {
  				lv = v.Object
@@ -1600,7 +1978,7 @@ regenerates the diff below; this header is edited by hand.
  					parent.Panic(L)
  				} else {
  					L.SetTop(0)
-@@ -157,6 +240,10 @@
+@@ -157,6 +572,10 @@
  			}
  		}
  	}()
@@ -1611,7 +1989,7 @@ regenerates the diff below; this header is edited by hand.
  	L.mainLoop(L, nil)
  }
  
-@@ -259,7 +346,13 @@
+@@ -259,7 +678,13 @@
  			RA := lbase + A
  			Bx := int(inst & 0x3ffff) //GETBX
  			//reg.Set(RA, L.getField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx]))
@@ -1626,7 +2004,7 @@ regenerates the diff below; this header is edited by hand.
  			// +inline-call reg.Set RA v
  			return 0
  		},
-@@ -271,7 +364,27 @@
+@@ -271,7 +696,27 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
@@ -1655,7 +2033,7 @@ regenerates the diff below; this header is edited by hand.
  			// +inline-call reg.Set RA v
  			return 0
  		},
-@@ -281,9 +394,20 @@
+@@ -281,9 +726,20 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -1679,7 +2057,7 @@ regenerates the diff below; this header is edited by hand.
  			// +inline-call reg.Set RA v
  			return 0
  		},
-@@ -295,7 +419,8 @@
+@@ -295,7 +751,8 @@
  			RA := lbase + A
  			Bx := int(inst & 0x3ffff) //GETBX
  			//L.setField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx], reg.Get(RA))
@@ -1689,7 +2067,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETUPVAL
-@@ -316,7 +441,23 @@
+@@ -316,7 +773,23 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
@@ -1714,7 +2092,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETTABLEKS
-@@ -325,9 +466,18 @@
+@@ -325,9 +798,18 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -1736,7 +2114,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_NEWTABLE
-@@ -336,10 +486,13 @@
+@@ -336,10 +818,13 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -1753,7 +2131,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SELF
-@@ -351,17 +504,26 @@
+@@ -351,17 +836,26 @@
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
  			selfobj := reg.Get(lbase + B)
@@ -1787,7 +2165,7 @@ regenerates the diff below; this header is edited by hand.
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
  			reg := L.reg
  			cf := L.currentFrame
-@@ -383,10 +545,10 @@
+@@ -383,10 +877,10 @@
  					if num, err := parseNumber(string(str)); err == nil {
  						// +inline-call reg.Set RA -num
  					} else {
@@ -1800,7 +2178,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -415,6 +577,10 @@
+@@ -415,6 +909,10 @@
  			switch lv := L.rkValue(B).(type) {
  			case LString:
  				// +inline-call reg.SetNumber RA LNumber(len(lv))
@@ -1811,7 +2189,7 @@ regenerates the diff below; this header is edited by hand.
  			default:
  				op := L.metaOp1(lv, "__len")
  				if op.Type() == LTFunction {
-@@ -428,10 +594,8 @@
+@@ -428,10 +926,8 @@
  					} else {
  						// +inline-call reg.Set RA ret
  					}
@@ -1823,7 +2201,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -448,6 +612,9 @@
+@@ -448,6 +944,9 @@
  			RB := lbase + B
  			v := stringConcat(L, RC-RB+1, RC)
  			// +inline-call reg.Set RA v
@@ -1833,21 +2211,44 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_JMP
-@@ -499,11 +666,11 @@
- 				if v2, ok2 := rhs.(LNumber); ok2 {
- 					ret = v1 <= v2
- 				} else {
+@@ -491,35 +990,7 @@
+ 			A := int(inst>>18) & 0xff //GETA
+ 			B := int(inst & 0x1ff)    //GETB
+ 			C := int(inst>>9) & 0x1ff //GETC
+-			lhs := L.rkValue(B)
+-			rhs := L.rkValue(C)
+-			ret := false
+-
+-			if v1, ok1 := lhs.(LNumber); ok1 {
+-				if v2, ok2 := rhs.(LNumber); ok2 {
+-					ret = v1 <= v2
+-				} else {
 -					L.RaiseError("attempt to compare %v with %v", lhs.Type().String(), rhs.Type().String())
-+					L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
- 				}
- 			} else {
- 				if lhs.Type() != rhs.Type() {
+-				}
+-			} else {
+-				if lhs.Type() != rhs.Type() {
 -					L.RaiseError("attempt to compare %v with %v", lhs.Type().String(), rhs.Type().String())
-+					L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
- 				}
- 				switch lhs.Type() {
- 				case LTString:
-@@ -605,7 +772,7 @@
+-				}
+-				switch lhs.Type() {
+-				case LTString:
+-					ret = strCmp(string(lhs.(LString)), string(rhs.(LString))) <= 0
+-				default:
+-					switch objectRational(L, lhs, rhs, "__le") {
+-					case 1:
+-						ret = true
+-					case 0:
+-						ret = false
+-					default:
+-						ret = !objectRationalWithError(L, rhs, lhs, "__lt")
+-					}
+-				}
+-			}
+-
++			ret := lessEqual(L, L.rkValue(B), L.rkValue(C))
+ 			v := 1
+ 			if ret {
+ 				v = 0
+@@ -605,7 +1076,7 @@
  				callable, meta = L.metaCall(lv)
  			}
  			if callable == nil {
@@ -1856,7 +2257,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			// +inline-call L.closeUpvalues lbase
  			if callable.IsG {
-@@ -646,6 +813,9 @@
+@@ -646,6 +1117,9 @@
  				// +inline-call L.reg.CopyRange base RA -1 reg.Top()-RA-1
  				cf.Base = base
  				cf.LocalBase = base + (cf.LocalBase - lbase + 1)
@@ -1866,7 +2267,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return 0
  		},
-@@ -657,6 +827,9 @@
+@@ -657,6 +1131,9 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff) //GETB
  			// +inline-call L.closeUpvalues lbase
@@ -1876,7 +2277,7 @@ regenerates the diff below; this header is edited by hand.
  			nret := B - 1
  			if B == 0 {
  				nret = reg.Top() - RA
-@@ -671,9 +844,22 @@
+@@ -671,9 +1148,22 @@
  				switchToParentThread(L, n, false, true)
  				return 1
  			}
@@ -1901,7 +2302,7 @@ regenerates the diff below; this header is edited by hand.
  			if islast || L.currentFrame == nil || L.currentFrame.Fn.IsG {
  				return 1
  			}
-@@ -689,23 +875,24 @@
+@@ -689,23 +1179,24 @@
  				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
  					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
  						init += step
@@ -1932,7 +2333,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return 0
  		},
-@@ -716,15 +903,14 @@
+@@ -716,15 +1207,14 @@
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
  			Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
@@ -1955,7 +2356,7 @@ regenerates the diff below; this header is edited by hand.
  			cf.Pc += Sbx
  			return 0
  		},
-@@ -767,9 +953,9 @@
+@@ -767,9 +1257,9 @@
  			if B == 0 {
  				nelem = reg.Top() - RA - 1
  			}
@@ -1968,7 +2369,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_CLOSE
-@@ -801,6 +987,9 @@
+@@ -801,6 +1291,9 @@
  					closure.Upvalues[i] = cf.Fn.Upvalues[B]
  				}
  			}
@@ -1978,7 +2379,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_VARARG
-@@ -828,6 +1017,99 @@
+@@ -828,6 +1321,99 @@
  	}
  }
  
@@ -2078,7 +2479,7 @@ regenerates the diff below; this header is edited by hand.
  func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_POW
  	reg := L.reg
  	cf := L.currentFrame
-@@ -851,14 +1133,34 @@
+@@ -851,14 +1437,34 @@
  	return 0
  }
  
@@ -2118,23 +2519,23 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
-@@ -906,24 +1208,12 @@
+@@ -906,24 +1512,12 @@
  		L.Call(2, 1)
  		return L.reg.Pop()
  	}
 -	if str, ok := lhs.(LString); ok {
 -		if lnum, err := parseNumber(string(str)); err == nil {
 -			lhs = lnum
+-		}
+-	}
+-	if str, ok := rhs.(LString); ok {
+-		if rnum, err := parseNumber(string(str)); err == nil {
+-			rhs = rnum
 +	if v1, ok1 := toArithNumber(lhs); ok1 {
 +		if v2, ok2 := toArithNumber(rhs); ok2 {
 +			return numberArith(L, opcode, v1, v2)
  		}
  	}
--	if str, ok := rhs.(LString); ok {
--		if rnum, err := parseNumber(string(str)); err == nil {
--			rhs = rnum
--		}
--	}
 -	if v1, ok1 := lhs.(LNumber); ok1 {
 -		if v2, ok2 := rhs.(LNumber); ok2 {
 -			return numberArith(L, opcode, LNumber(v1), LNumber(v2))
@@ -2147,7 +2548,7 @@ regenerates the diff below; this header is edited by hand.
  	return LNil
  }
  
-@@ -943,21 +1233,26 @@
+@@ -943,21 +1537,26 @@
  				total--
  				i--
  			} else {
@@ -2177,7 +2578,7 @@ regenerates the diff below; this header is edited by hand.
  			rhs = LString(strings.Join(buf, ""))
  		}
  	}
-@@ -970,10 +1265,10 @@
+@@ -970,10 +1569,10 @@
  		if v2, ok2 := rhs.(LNumber); ok2 {
  			return v1 < v2
  		}
@@ -2190,7 +2591,45 @@ regenerates the diff below; this header is edited by hand.
  		return false
  	}
  	ret := false
-@@ -1028,7 +1323,7 @@
+@@ -986,6 +1585,37 @@
+ 	return ret
+ }
+ 
++// lessEqual is lhs <= rhs, OP_LE's comparison (go-moonscript patch: a
++// function, also called by mainLoop).
++func lessEqual(L *LState, lhs, rhs LValue) bool {
++	ret := false
++	if v1, ok1 := lhs.(LNumber); ok1 {
++		if v2, ok2 := rhs.(LNumber); ok2 {
++			ret = v1 <= v2
++		} else {
++			L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
++		}
++	} else {
++		if lhs.Type() != rhs.Type() {
++			L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
++		}
++		switch lhs.Type() {
++		case LTString:
++			ret = strCmp(string(lhs.(LString)), string(rhs.(LString))) <= 0
++		default:
++			switch objectRational(L, lhs, rhs, "__le") {
++			case 1:
++				ret = true
++			case 0:
++				ret = false
++			default:
++				ret = !objectRationalWithError(L, rhs, lhs, "__lt")
++			}
++		}
++	}
++	return ret
++}
++
+ func equals(L *LState, lhs, rhs LValue, raw bool) bool {
+ 	lt := lhs.Type()
+ 	if lt != rhs.Type() {
+@@ -1028,7 +1658,7 @@
  	case 0:
  		return false
  	}
@@ -18161,7 +18600,7 @@ regenerates the diff below; this header is edited by hand.
  		cs.segIdx--
  		cs.segSp = FramesPerSegment
  		curSeg = cs.segments[cs.segIdx]
-@@ -359,6 +429,40 @@
+@@ -359,6 +429,53 @@
  	return &curSeg.array[cs.segSp]
  }
  
@@ -18187,6 +18626,19 @@ regenerates the diff below; this header is edited by hand.
 +	return f
 +}
 +
++// pushSlot pushes a frame if the current segment has room for it,
++// returning it with only its Idx set, otherwise nil (go-moonscript patch:
++// mainLoop's call path sets the fields, without copying a frame).
++func (cs *autoGrowingCallFrameStack) pushSlot() *callFrame {
++	if cs.segSp >= FramesPerSegment {
++		return nil
++	}
++	f := &cs.segments[cs.segIdx].array[cs.segSp]
++	f.Idx = int(cs.segSp) + FramesPerSegment*int(cs.segIdx)
++	cs.segSp++
++	return f
++}
++
 +// popFast pops the top frame if the frame below it is in the same segment,
 +// returning both, otherwise nil, nil (go-moonscript patch: the return path
 +// without the interface calls of Pop and Last).
@@ -18202,7 +18654,7 @@ regenerates the diff below; this header is edited by hand.
  /* }}} */
  
  /* registry {{{ */
-@@ -643,6 +747,8 @@
+@@ -643,6 +760,8 @@
  		Global:     newLTable(0, 64),
  		builtinMts: make(map[int]LValue),
  		tempFiles:  make([]*os.File, 0, 10),
@@ -18211,7 +18663,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  }
  
-@@ -662,7 +768,7 @@
+@@ -662,7 +781,7 @@
  }
  
  func newLState(options Options) *LState {
@@ -18220,7 +18672,7 @@ regenerates the diff below; this header is edited by hand.
  	ls := &LState{
  		G:       newGlobal(),
  		Parent:  nil,
-@@ -733,15 +839,28 @@
+@@ -733,15 +852,28 @@
  } // +inline-end
  
  func (ls *LState) raiseError(level int, format string, args ...interface{}) {
@@ -18253,7 +18705,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	if ls.reg.IsFull() {
  		// if the registry is full then it won't be possible to push a value, in this case, force a larger size
-@@ -772,6 +891,24 @@
+@@ -772,6 +904,24 @@
  	return ""
  }
  
@@ -18278,7 +18730,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) where(level int, skipg bool) string {
  	dbg, ok := ls.GetStack(level)
  	if !ok {
-@@ -786,7 +923,10 @@
+@@ -786,7 +936,10 @@
  		return ls.where(level+1, skipg)
  	}
  	line := ""
@@ -18290,7 +18742,7 @@ regenerates the diff below; this header is edited by hand.
  		line = fmt.Sprintf("%v:", proto.DbgSourcePositions[cf.Pc-1])
  	}
  	return fmt.Sprintf("%v:%v", sourcename, line)
-@@ -832,11 +972,6 @@
+@@ -832,11 +985,6 @@
  	return fmt.Sprintf("function %s", name)
  }
  
@@ -18302,7 +18754,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) frameFuncName(fr *callFrame) (string, bool) {
  	frame := fr.Parent
  	if frame == nil {
-@@ -865,7 +1000,7 @@
+@@ -865,7 +1013,7 @@
  }
  
  func (ls *LState) isStarted() bool {
@@ -18311,7 +18763,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) kill() {
-@@ -928,48 +1063,49 @@
+@@ -928,48 +1076,49 @@
  	return string(ls.reg.array[ls.currentFrame.LocalBase+idx].(LString))
  }
  
@@ -18372,11 +18824,11 @@ regenerates the diff below; this header is edited by hand.
 +	uv := ls.uvcache
 +	for ; uv != nil && uv.index > idx; uv = uv.next {
 +		prev = uv
-+	}
-+	if uv != nil && uv.index == idx {
-+		return uv
  	}
 -	uv := &Upvalue{reg: ls.reg, index: idx, closed: false}
++	if uv != nil && uv.index == idx {
++		return uv
++	}
 +	nuv := &Upvalue{reg: ls.reg, index: idx, next: uv}
  	if prev != nil {
 -		prev.next = uv
@@ -18393,7 +18845,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) metatable(lvalue LValue, rawget bool) LValue {
-@@ -1007,6 +1143,31 @@
+@@ -1007,6 +1156,31 @@
  	return LNil
  }
  
@@ -18425,7 +18877,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) metaOp2(value1, value2 LValue, event string) LValue {
  	if mt := ls.metatable(value1, true); mt != LNil {
  		if tb, ok := mt.(*LTable); ok {
-@@ -1111,7 +1272,7 @@
+@@ -1111,7 +1285,7 @@
  			if CompatVarArg {
  				ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
  				if (proto.IsVarArg & VarArgNeedsArg) != 0 {
@@ -18434,7 +18886,7 @@ regenerates the diff below; this header is edited by hand.
  					for i := 0; i < nvarargs; i++ {
  						argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
  					}
-@@ -1135,13 +1296,19 @@
+@@ -1135,13 +1309,19 @@
  		ls.reg.Insert(fn, cf.LocalBase)
  	}
  	if cf.Fn == nil {
@@ -18459,7 +18911,7 @@ regenerates the diff below; this header is edited by hand.
  	// this section is inlined by go-inline
  	// source function is 'func (ls *LState) initCallFrame(cf *callFrame) ' in '_state.go'
  	{
-@@ -1223,7 +1390,7 @@
+@@ -1223,7 +1403,7 @@
  				if CompatVarArg {
  					ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
  					if (proto.IsVarArg & VarArgNeedsArg) != 0 {
@@ -18468,7 +18920,7 @@ regenerates the diff below; this header is edited by hand.
  						for i := 0; i < nvarargs; i++ {
  							argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
  						}
-@@ -1241,6 +1408,9 @@
+@@ -1241,6 +1421,9 @@
  		}
  	}
  	ls.currentFrame = newcf
@@ -18478,7 +18930,7 @@ regenerates the diff below; this header is edited by hand.
  } // +inline-end
  
  func (ls *LState) callR(nargs, nret, rbase int) {
-@@ -1261,13 +1431,19 @@
+@@ -1261,13 +1444,19 @@
  		Parent:     ls.currentFrame,
  		TailCall:   0,
  	}, lv, meta)
@@ -18498,7 +18950,7 @@ regenerates the diff below; this header is edited by hand.
  	if nret != MultRet {
  		ls.reg.SetTop(rbase + nret)
  	}
-@@ -1279,14 +1455,14 @@
+@@ -1279,14 +1468,14 @@
  		tb, istable := curobj.(*LTable)
  		if istable {
  			ret := tb.RawGet(key)
@@ -18516,7 +18968,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return LNil
  		}
-@@ -1300,7 +1476,7 @@
+@@ -1300,7 +1489,7 @@
  			curobj = metaindex
  		}
  	}
@@ -18525,7 +18977,7 @@ regenerates the diff below; this header is edited by hand.
  	return nil
  }
  
-@@ -1310,14 +1486,14 @@
+@@ -1310,14 +1499,14 @@
  		tb, istable := curobj.(*LTable)
  		if istable {
  			ret := tb.RawGetString(key)
@@ -18543,7 +18995,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return LNil
  		}
-@@ -1331,24 +1507,103 @@
+@@ -1331,24 +1520,103 @@
  			curobj = metaindex
  		}
  	}
@@ -18651,7 +19103,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			ls.RawSet(tb, key, value)
  			return
-@@ -1364,7 +1619,7 @@
+@@ -1364,7 +1632,7 @@
  			curobj = metaindex
  		}
  	}
@@ -18660,7 +19112,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) setFieldString(obj LValue, key string, value LValue) {
-@@ -1372,15 +1627,15 @@
+@@ -1372,15 +1640,15 @@
  	for i := 0; i < MaxTableGetLoop; i++ {
  		tb, istable := curobj.(*LTable)
  		if istable {
@@ -18679,7 +19131,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			tb.RawSetString(key, value)
  			return
-@@ -1396,7 +1651,7 @@
+@@ -1396,7 +1664,7 @@
  			curobj = metaindex
  		}
  	}
@@ -18688,7 +19140,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -1410,6 +1665,7 @@
+@@ -1410,6 +1678,7 @@
  			CallStackSize: CallStackSize,
  			RegistrySize:  RegistrySize,
  		})
@@ -18696,7 +19148,7 @@ regenerates the diff below; this header is edited by hand.
  		ls.OpenLibs()
  	} else {
  		if opts[0].CallStackSize < 1 {
-@@ -1427,6 +1683,10 @@
+@@ -1427,6 +1696,10 @@
  			}
  		}
  		ls = newLState(opts[0])
@@ -18707,7 +19159,7 @@ regenerates the diff below; this header is edited by hand.
  		if !opts[0].SkipOpenLibs {
  			ls.OpenLibs()
  		}
-@@ -1439,7 +1699,12 @@
+@@ -1439,7 +1712,12 @@
  }
  
  func (ls *LState) Close() {
@@ -18720,7 +19172,7 @@ regenerates the diff below; this header is edited by hand.
  	for _, file := range ls.G.tempFiles {
  		// ignore errors in these operations
  		file.Close()
-@@ -1612,9 +1877,8 @@
+@@ -1612,9 +1890,8 @@
  // NewThread returns a new LState that shares with the original state all global objects.
  // If the original state has context.Context, the new state has a new child context of the original state and this function returns its cancel function.
  func (ls *LState) NewThread() (*LState, context.CancelFunc) {
@@ -18732,7 +19184,7 @@ regenerates the diff below; this header is edited by hand.
  	var f context.CancelFunc = nil
  	if ls.ctx != nil {
  		thread.mainLoop = mainLoopWithContext
-@@ -1624,6 +1888,19 @@
+@@ -1624,6 +1901,19 @@
  	return thread, f
  }
  
@@ -18752,7 +19204,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) NewFunctionFromProto(proto *FunctionProto) *LFunction {
  	return newLFunctionL(proto, ls.Env, int(proto.NumUpvalues))
  }
-@@ -1686,7 +1963,7 @@
+@@ -1686,7 +1976,7 @@
  }
  
  func (ls *LState) ToString(n int) string {
@@ -18761,7 +19213,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func (ls *LState) ToTable(n int) *LTable {
-@@ -1731,13 +2008,20 @@
+@@ -1731,13 +2021,20 @@
  }
  
  // This function is equivalent to lua_error( http://www.lua.org/manual/5.1/manual.html#lua_error ).
@@ -18786,7 +19238,7 @@ regenerates the diff below; this header is edited by hand.
  		ls.Push(lv)
  		ls.Panic(ls)
  	}
-@@ -1760,19 +2044,24 @@
+@@ -1760,19 +2057,24 @@
  		case 'f':
  			retfn = true
  		case 'S':
@@ -18819,7 +19271,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  		case 'l':
  			if !f.IsG && dbg.frame != nil {
-@@ -1785,8 +2074,10 @@
+@@ -1785,8 +2087,10 @@
  		case 'u':
  			dbg.NUpvalues = len(f.Upvalues)
  		case 'n':
@@ -18831,7 +19283,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  		default:
  			return LNil, newApiErrorS(ApiErrorRun, "invalid what: "+string(c))
-@@ -2011,8 +2302,23 @@
+@@ -2011,8 +2315,23 @@
  /* load and function call operations {{{ */
  
  func (ls *LState) Load(reader io.Reader, name string) (*LFunction, error) {
@@ -18856,7 +19308,7 @@ regenerates the diff below; this header is edited by hand.
  		return nil, newApiErrorE(ApiErrorSyntax, err)
  	}
  	proto, err := Compile(chunk, name)
-@@ -2030,16 +2336,19 @@
+@@ -2030,16 +2349,19 @@
  	err = nil
  	sp := ls.stack.Sp()
  	base := ls.reg.Top() - nargs - 1
@@ -18877,7 +19329,7 @@ regenerates the diff below; this header is edited by hand.
  			if _, ok := rcv.(*ApiError); !ok {
  				err = newApiErrorS(ApiErrorPanic, fmt.Sprint(rcv))
  				if ls.Options.IncludeGoStackTrace {
-@@ -2069,6 +2378,8 @@
+@@ -2069,6 +2391,8 @@
  							err = rcv.(*ApiError)
  							err.(*ApiError).StackTrace = ls.stackTrace(0)
  						}
@@ -18886,7 +19338,7 @@ regenerates the diff below; this header is edited by hand.
  						ls.stack.SetSp(sp)
  						ls.currentFrame = ls.stack.Last()
  						ls.reg.SetTop(base)
-@@ -2079,6 +2390,8 @@
+@@ -2079,6 +2403,8 @@
  			} else if len(err.(*ApiError).StackTrace) == 0 {
  				err.(*ApiError).StackTrace = ls.stackTrace(0)
  			}
@@ -18895,7 +19347,7 @@ regenerates the diff below; this header is edited by hand.
  			ls.stack.SetSp(sp)
  			ls.currentFrame = ls.stack.Last()
  			ls.reg.SetTop(base)
-@@ -2135,7 +2448,9 @@
+@@ -2135,7 +2461,9 @@
  		v.Metatable = mt
  	default:
  		ls.G.builtinMts[int(obj.Type())] = mt
@@ -18905,7 +19357,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  /* }}} */
-@@ -2148,7 +2463,10 @@
+@@ -2148,7 +2476,10 @@
  		status = "dead"
  	} else if ls.G.CurrentThread == th {
  		status = "running"
@@ -18917,7 +19369,7 @@ regenerates the diff below; this header is edited by hand.
  		status = "normal"
  	}
  	return status
-@@ -2156,7 +2474,7 @@
+@@ -2156,7 +2487,7 @@
  
  func (ls *LState) Resume(th *LState, fn *LFunction, args ...LValue) (ResumeState, error, []LValue) {
  	isstarted := th.isStarted()
@@ -18926,7 +19378,7 @@ regenerates the diff below; this header is edited by hand.
  		base := 0
  		th.stack.Push(callFrame{
  			Fn:         fn,
-@@ -2177,8 +2495,18 @@
+@@ -2177,8 +2508,18 @@
  	if th.Dead {
  		return ResumeError, newApiErrorS(ApiErrorRun, "can not resume a dead thread"), nil
  	}
@@ -18945,7 +19397,7 @@ regenerates the diff below; this header is edited by hand.
  	if !isstarted {
  		cf := th.stack.Last()
  		th.currentFrame = cf
-@@ -2189,10 +2517,13 @@
+@@ -2189,10 +2530,13 @@
  		cf.NArgs = len(args)
  		th.initCallFrame(cf)
  		th.Panic = panicWithoutTraceback
@@ -18959,7 +19411,7 @@ regenerates the diff below; this header is edited by hand.
  	}
  	top := ls.GetTop()
  	threadRun(th)
-@@ -2208,7 +2539,7 @@
+@@ -2208,7 +2552,7 @@
  
  	if haserror {
  		return ResumeError, newApiError(ApiErrorRun, ret[0]), nil
@@ -18968,7 +19420,7 @@ regenerates the diff below; this header is edited by hand.
  		return ResumeOK, nil, ret
  	}
  	return ResumeYield, nil, ret
-@@ -2228,8 +2559,15 @@
+@@ -2228,8 +2572,15 @@
  	}
  	top := ls.GetTop()
  	n = intMin(n, top)
@@ -36232,7 +36684,7 @@ regenerates the diff below; this header is edited by hand.
  func (ls *LState) String() string   { return fmt.Sprintf("thread: %p", ls) }
 --- a/vm.go
 +++ b/vm.go
-@@ -7,6 +7,7 @@
+@@ -7,13 +7,11 @@
  import (
  	"fmt"
  	"math"
@@ -36240,17 +36692,897 @@ regenerates the diff below; this header is edited by hand.
  	"strings"
  )
  
-@@ -26,6 +27,9 @@
+ func mainLoop(L *LState, baseframe *callFrame) {
+-	var inst uint32
+-	var cf *callFrame
+-
+ 	if L.stack.IsEmpty() {
+ 		return
+ 	}
+@@ -24,14 +22,879 @@
+ 		return
+ 	}
  
++	// go-moonscript patch: the current frame, its function's code and
++	// constants, its registers' base and its pc are kept in locals,
++	// reloaded after an opcode that may change them (one done by its
++	// jumpTable function). cf.Pc is set from pc before each instruction,
++	// for what reads it (errors, the debug library, the opcode functions).
++	reg := L.reg
++	cf := L.currentFrame
++	code, consts := cf.Fn.Proto.Code, cf.Fn.Proto.Constants
++	lbase := cf.LocalBase
++	pc := cf.Pc
  	for {
- 		cf = L.currentFrame
+-		cf = L.currentFrame
+-		inst = cf.Fn.Proto.Code[cf.Pc]
+-		cf.Pc++
 +		if L.hookMask&hookMaskTrace != 0 { // go-moonscript patch
++			cf.Pc = pc
 +			traceExec(L, cf)
++			pc = cf.Pc
 +		}
- 		inst = cf.Fn.Proto.Code[cf.Pc]
- 		cf.Pc++
++		inst := code[pc]
++		pc++
++		cf.Pc = pc
++		// go-moonscript patch: the common cases of the frequent opcodes are
++		// handled here, without the call through jumpTable; the others, and
++		// the other cases, go to the opcode's function.
++		switch int(inst >> 26) { //GETOPCODE
++		case OP_MOVE:
++			A := int(inst>>18) & 0xff //GETA
++			B := int(inst & 0x1ff)    //GETB
++			v := reg.Get(lbase + B)
++			// this section is inlined by go-inline
++			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++			{
++				rg := reg
++				regi := lbase + A
++				vali := v
++				newSize := regi + 1
++				// this section is inlined by go-inline
++				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++				{
++					requiredSize := newSize
++					if requiredSize > cap(rg.array) {
++						rg.resize(requiredSize)
++					}
++				}
++				rg.array[regi] = vali
++				if regi >= rg.top {
++					rg.top = regi + 1
++				}
++			}
++			continue
++		case OP_LOADK:
++			A := int(inst>>18) & 0xff //GETA
++			Bx := int(inst & 0x3ffff) //GETBX
++			v := consts[Bx]
++			// this section is inlined by go-inline
++			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++			{
++				rg := reg
++				regi := lbase + A
++				vali := v
++				newSize := regi + 1
++				// this section is inlined by go-inline
++				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++				{
++					requiredSize := newSize
++					if requiredSize > cap(rg.array) {
++						rg.resize(requiredSize)
++					}
++				}
++				rg.array[regi] = vali
++				if regi >= rg.top {
++					rg.top = regi + 1
++				}
++			}
++			continue
++		case OP_GETUPVAL:
++			A := int(inst>>18) & 0xff //GETA
++			B := int(inst & 0x1ff)    //GETB
++			v := cf.Fn.Upvalues[B].Value()
++			// this section is inlined by go-inline
++			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++			{
++				rg := reg
++				regi := lbase + A
++				vali := v
++				newSize := regi + 1
++				// this section is inlined by go-inline
++				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++				{
++					requiredSize := newSize
++					if requiredSize > cap(rg.array) {
++						rg.resize(requiredSize)
++					}
++				}
++				rg.array[regi] = vali
++				if regi >= rg.top {
++					rg.top = regi + 1
++				}
++			}
++			continue
++		case OP_GETTABLE:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if tb, ok := reg.Get(lbase + B).(*LTable); ok {
++				if k, isnum := rk(reg, consts, lbase, C).(LNumber); isnum {
++					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) {
++						if v := tb.array[i-1]; v != LNil || tb.Metatable == LNil {
++							A := int(inst>>18) & 0xff //GETA
++							// this section is inlined by go-inline
++							// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++							{
++								rg := reg
++								regi := lbase + A
++								vali := v
++								newSize := regi + 1
++								// this section is inlined by go-inline
++								// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++								{
++									requiredSize := newSize
++									if requiredSize > cap(rg.array) {
++										rg.resize(requiredSize)
++									}
++								}
++								rg.array[regi] = vali
++								if regi >= rg.top {
++									rg.top = regi + 1
++								}
++							}
++							continue
++						}
++					}
++				}
++			}
++		case OP_GETGLOBAL:
++			Bx := int(inst & 0x3ffff) //GETBX
++			proto, env := cf.Fn.Proto, cf.Fn.Env
++			key, h := proto.stringConstants[Bx], proto.strConstHash(Bx)
++			v := env.hash.getStringH(key, h)
++			if v == LNil && env.Metatable != LNil {
++				v = L.getFieldStringKMiss(env, consts[Bx], key, h, true)
++			}
++			A := int(inst>>18) & 0xff //GETA
++			// this section is inlined by go-inline
++			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++			{
++				rg := reg
++				regi := lbase + A
++				vali := v
++				newSize := regi + 1
++				// this section is inlined by go-inline
++				// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++				{
++					requiredSize := newSize
++					if requiredSize > cap(rg.array) {
++						rg.resize(requiredSize)
++					}
++				}
++				rg.array[regi] = vali
++				if regi >= rg.top {
++					rg.top = regi + 1
++				}
++			}
++			continue
++		case OP_GETTABLEKS:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if obj, ok := reg.Get(lbase + B).(*LTable); ok && C&opBitRk != 0 {
++				proto := cf.Fn.Proto
++				k := C & ^opBitRk
++				key, h := proto.stringConstants[k], proto.strConstHash(k)
++				v := obj.hash.getStringH(key, h)
++				if v == LNil && obj.Metatable != LNil {
++					v = L.getFieldStringKMiss(obj, consts[k], key, h, true)
++				}
++				A := int(inst>>18) & 0xff //GETA
++				// this section is inlined by go-inline
++				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++				{
++					rg := reg
++					regi := lbase + A
++					vali := v
++					newSize := regi + 1
++					// this section is inlined by go-inline
++					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++					{
++						requiredSize := newSize
++						if requiredSize > cap(rg.array) {
++							rg.resize(requiredSize)
++						}
++					}
++					rg.array[regi] = vali
++					if regi >= rg.top {
++						rg.top = regi + 1
++					}
++				}
++				continue
++			}
++		case OP_SELF:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			selfobj := reg.Get(lbase + B)
++			if obj, ok := selfobj.(*LTable); ok && C&opBitRk != 0 {
++				proto := cf.Fn.Proto
++				k := C & ^opBitRk
++				key, h := proto.stringConstants[k], proto.strConstHash(k)
++				v := obj.hash.getStringH(key, h)
++				if v == LNil && obj.Metatable != LNil {
++					v = L.getFieldStringKMiss(selfobj, consts[k], key, h, true)
++				}
++				RA := lbase + int(inst>>18)&0xff //GETA
++				// this section is inlined by go-inline
++				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++				{
++					rg := reg
++					regi := RA
++					vali := v
++					newSize := regi + 1
++					// this section is inlined by go-inline
++					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++					{
++						requiredSize := newSize
++						if requiredSize > cap(rg.array) {
++							rg.resize(requiredSize)
++						}
++					}
++					rg.array[regi] = vali
++					if regi >= rg.top {
++						rg.top = regi + 1
++					}
++				}
++				// this section is inlined by go-inline
++				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++				{
++					rg := reg
++					regi := RA + 1
++					vali := selfobj
++					newSize := regi + 1
++					// this section is inlined by go-inline
++					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++					{
++						requiredSize := newSize
++						if requiredSize > cap(rg.array) {
++							rg.resize(requiredSize)
++						}
++					}
++					rg.array[regi] = vali
++					if regi >= rg.top {
++						rg.top = regi + 1
++					}
++				}
++				continue
++			}
++		case OP_SETTABLE:
++			A := int(inst>>18) & 0xff //GETA
++			B := int(inst & 0x1ff)    //GETB
++			if tb, ok := reg.Get(lbase + A).(*LTable); ok {
++				if k, isnum := rk(reg, consts, lbase, B).(LNumber); isnum {
++					if i := int(k); LNumber(i) == k && uint(i-1) < uint(len(tb.array)) && (tb.Metatable == LNil || tb.array[i-1] != LNil) {
++						C := int(inst>>9) & 0x1ff //GETC
++						tb.array[i-1] = rk(reg, consts, lbase, C)
++						continue
++					}
++				}
++			}
++		case OP_ADD:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
++				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
++					RA := lbase + int(inst>>18)&0xff //GETA
++					v := v1 + v2
++					// this section is inlined by go-inline
++					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
++					{
++						rg := reg
++						regi := RA
++						vali := v
++						newSize := regi + 1
++						// this section is inlined by go-inline
++						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++						{
++							requiredSize := newSize
++							if requiredSize > cap(rg.array) {
++								rg.resize(requiredSize)
++							}
++						}
++						rg.array[regi] = rg.alloc.LNumber2I(vali)
++						if regi >= rg.top {
++							rg.top = regi + 1
++						}
++					}
++					continue
++				}
++			}
++		case OP_SUB:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
++				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
++					RA := lbase + int(inst>>18)&0xff //GETA
++					v := v1 - v2
++					// this section is inlined by go-inline
++					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
++					{
++						rg := reg
++						regi := RA
++						vali := v
++						newSize := regi + 1
++						// this section is inlined by go-inline
++						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++						{
++							requiredSize := newSize
++							if requiredSize > cap(rg.array) {
++								rg.resize(requiredSize)
++							}
++						}
++						rg.array[regi] = rg.alloc.LNumber2I(vali)
++						if regi >= rg.top {
++							rg.top = regi + 1
++						}
++					}
++					continue
++				}
++			}
++		case OP_MUL:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
++				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
++					RA := lbase + int(inst>>18)&0xff //GETA
++					v := v1 * v2
++					// this section is inlined by go-inline
++					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
++					{
++						rg := reg
++						regi := RA
++						vali := v
++						newSize := regi + 1
++						// this section is inlined by go-inline
++						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++						{
++							requiredSize := newSize
++							if requiredSize > cap(rg.array) {
++								rg.resize(requiredSize)
++							}
++						}
++						rg.array[regi] = rg.alloc.LNumber2I(vali)
++						if regi >= rg.top {
++							rg.top = regi + 1
++						}
++					}
++					continue
++				}
++			}
++		case OP_DIV:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if v1, ok1 := rk(reg, consts, lbase, B).(LNumber); ok1 {
++				if v2, ok2 := rk(reg, consts, lbase, C).(LNumber); ok2 {
++					RA := lbase + int(inst>>18)&0xff //GETA
++					v := v1 / v2
++					// this section is inlined by go-inline
++					// source function is 'func (rg *registry) SetNumber(regi int, vali LNumber) ' in '_state.go'
++					{
++						rg := reg
++						regi := RA
++						vali := v
++						newSize := regi + 1
++						// this section is inlined by go-inline
++						// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++						{
++							requiredSize := newSize
++							if requiredSize > cap(rg.array) {
++								rg.resize(requiredSize)
++							}
++						}
++						rg.array[regi] = rg.alloc.LNumber2I(vali)
++						if regi >= rg.top {
++							rg.top = regi + 1
++						}
++					}
++					continue
++				}
++			}
++		case OP_JMP:
++			pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
++			continue
++		case OP_EQ:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
++			var ret bool
++			if v1, ok1 := lhs.(LNumber); ok1 {
++				if v2, ok2 := rhs.(LNumber); ok2 {
++					ret = v1 == v2
++				}
++			} else {
++				ret = equals(L, lhs, rhs, false)
++			}
++			if ret != (int(inst>>18)&0xff != 0) { //GETA
++				pc++
++			} else {
++				pc = jmpNext(L, code, pc)
++			}
++			continue
++		case OP_LT:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
++			var ret bool
++			if v1, ok1 := lhs.(LNumber); ok1 {
++				if v2, ok2 := rhs.(LNumber); ok2 {
++					ret = v1 < v2
++				} else {
++					ret = lessThan(L, lhs, rhs)
++				}
++			} else {
++				ret = lessThan(L, lhs, rhs)
++			}
++			if ret != (int(inst>>18)&0xff != 0) { //GETA
++				pc++
++			} else {
++				pc = jmpNext(L, code, pc)
++			}
++			continue
++		case OP_LE:
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			lhs, rhs := rk(reg, consts, lbase, B), rk(reg, consts, lbase, C)
++			var ret bool
++			if v1, ok1 := lhs.(LNumber); ok1 {
++				if v2, ok2 := rhs.(LNumber); ok2 {
++					ret = v1 <= v2
++				} else {
++					ret = lessEqual(L, lhs, rhs)
++				}
++			} else {
++				ret = lessEqual(L, lhs, rhs)
++			}
++			if ret != (int(inst>>18)&0xff != 0) { //GETA
++				pc++
++			} else {
++				pc = jmpNext(L, code, pc)
++			}
++			continue
++		case OP_TEST:
++			A := int(inst>>18) & 0xff //GETA
++			C := int(inst>>9) & 0x1ff //GETC
++			if LVAsBool(reg.Get(lbase+A)) == (C == 0) {
++				pc++
++			} else {
++				pc = jmpNext(L, code, pc)
++			}
++			continue
++		case OP_TESTSET:
++			A := int(inst>>18) & 0xff //GETA
++			B := int(inst & 0x1ff)    //GETB
++			C := int(inst>>9) & 0x1ff //GETC
++			if value := reg.Get(lbase + B); LVAsBool(value) != (C == 0) {
++				// this section is inlined by go-inline
++				// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++				{
++					rg := reg
++					regi := lbase + A
++					vali := value
++					newSize := regi + 1
++					// this section is inlined by go-inline
++					// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++					{
++						requiredSize := newSize
++						if requiredSize > cap(rg.array) {
++							rg.resize(requiredSize)
++						}
++					}
++					rg.array[regi] = vali
++					if regi >= rg.top {
++						rg.top = regi + 1
++					}
++				}
++				pc = jmpNext(L, code, pc)
++			} else {
++				pc++
++			}
++			continue
++		case OP_CALL:
++			// a call of a Lua function, with no "call" hook, whose frame fits
++			// in the current segment of the call stack
++			RA := lbase + int(inst>>18)&0xff //GETA
++			if fn, ok := reg.Get(RA).(*LFunction); ok && !fn.IsG && L.hookMask&MaskCall == 0 {
++				if s, ok := L.stack.(*autoGrowingCallFrameStack); ok {
++					if newcf := s.pushSlot(); newcf != nil {
++						B := int(inst & 0x1ff)    //GETB
++						C := int(inst>>9) & 0x1ff //GETC
++						nargs := B - 1
++						if B == 0 {
++							nargs = reg.Top() - (RA + 1)
++						}
++						newcf.Fn = fn
++						newcf.Parent = cf
++						newcf.Pc = 0
++						newcf.Base = RA
++						newcf.LocalBase = RA + 1
++						newcf.ReturnBase = RA
++						newcf.NArgs = nargs
++						newcf.NRet = C - 1
++						newcf.TailCall = 0
++						// this section is inlined by go-inline
++						// source function is 'func (ls *LState) initCallFrame(cf *callFrame) ' in '_state.go'
++						{
++							ls := L
++							cf := newcf
++							if cf.Fn.IsG {
++								ls.reg.SetTop(cf.LocalBase + cf.NArgs)
++							} else {
++								proto := cf.Fn.Proto
++								nargs := cf.NArgs
++								np := int(proto.NumParameters)
++								if nargs < np {
++									// default any missing arguments to nil
++									newSize := cf.LocalBase + np
++									// this section is inlined by go-inline
++									// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++									{
++										rg := ls.reg
++										requiredSize := newSize
++										if requiredSize > cap(rg.array) {
++											rg.resize(requiredSize)
++										}
++									}
++									for i := nargs; i < np; i++ {
++										ls.reg.array[cf.LocalBase+i] = LNil
++									}
++									nargs = np
++									ls.reg.top = newSize
++								}
++
++								if (proto.IsVarArg & VarArgIsVarArg) == 0 {
++									if nargs < int(proto.NumUsedRegisters) {
++										nargs = int(proto.NumUsedRegisters)
++									}
++									newSize := cf.LocalBase + nargs
++									// this section is inlined by go-inline
++									// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++									{
++										rg := ls.reg
++										requiredSize := newSize
++										if requiredSize > cap(rg.array) {
++											rg.resize(requiredSize)
++										}
++									}
++									for i := np; i < nargs; i++ {
++										ls.reg.array[cf.LocalBase+i] = LNil
++									}
++									ls.reg.top = cf.LocalBase + int(proto.NumUsedRegisters)
++								} else {
++									/* swap vararg positions:
++											   closure
++											   namedparam1 <- lbase
++											   namedparam2
++											   vararg1
++											   vararg2
++
++									           TO
++
++											   closure
++											   nil
++											   nil
++											   vararg1
++											   vararg2
++											   namedparam1 <- lbase
++											   namedparam2
++									*/
++									nvarargs := nargs - np
++									if nvarargs < 0 {
++										nvarargs = 0
++									}
++
++									ls.reg.SetTop(cf.LocalBase + nargs + np)
++									for i := 0; i < np; i++ {
++										//ls.reg.Set(cf.LocalBase+nargs+i, ls.reg.Get(cf.LocalBase+i))
++										ls.reg.array[cf.LocalBase+nargs+i] = ls.reg.array[cf.LocalBase+i]
++										//ls.reg.Set(cf.LocalBase+i, LNil)
++										ls.reg.array[cf.LocalBase+i] = LNil
++									}
++
++									if CompatVarArg {
++										ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
++										if (proto.IsVarArg & VarArgNeedsArg) != 0 {
++											argtb := newLTable(nvarargs, 1) // go-moonscript patch: as luaH_new(L, nvar, 1)
++											for i := 0; i < nvarargs; i++ {
++												argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
++											}
++											argtb.RawSetString("n", LNumber(nvarargs))
++											//ls.reg.Set(cf.LocalBase+nargs+np, argtb)
++											ls.reg.array[cf.LocalBase+nargs+np] = argtb
++										} else {
++											ls.reg.array[cf.LocalBase+nargs+np] = LNil
++										}
++									}
++									cf.LocalBase += nargs
++									maxreg := cf.LocalBase + int(proto.NumUsedRegisters)
++									ls.reg.SetTop(maxreg)
++								}
++							}
++						}
++						L.currentFrame = newcf
++						cf = newcf
++						code, consts = fn.Proto.Code, fn.Proto.Constants
++						lbase = newcf.LocalBase
++						pc = 0
++						continue
++					}
++				}
++			}
++		case OP_RETURN:
++			// a return, with no "return" hook, to a Lua function's frame in
++			// the same segment of the call stack, not the end of a coroutine
++			if L.hookMask&MaskReturn == 0 {
++				if s, ok := L.stack.(*autoGrowingCallFrameStack); ok && (L.Parent == nil || s.Sp() != 1) {
++					if popped, top := s.popFast(); top != nil {
++						RA := lbase + int(inst>>18)&0xff //GETA
++						B := int(inst & 0x1ff)           //GETB
++						// this section is inlined by go-inline
++						// source function is 'func (ls *LState) closeUpvalues(idx int) ' in '_state.go'
++						{
++							ls := L
++							idx := lbase
++							for uv := ls.uvcache; uv != nil && uv.index >= idx; uv = ls.uvcache {
++								ls.uvcache = uv.next
++								uv.next = nil
++								uv.Close()
++							}
++						}
++						nret := B - 1
++						if B == 0 {
++							nret = reg.Top() - RA
++						}
++						n := cf.NRet
++						if n == MultRet {
++							n = nret
++						}
++						// this section is inlined by go-inline
++						// source function is 'func copyReturnValues(L *LState, regv, start, n, b int) ' in '_vm.go'
++						{
++							regv := cf.ReturnBase
++							start := RA
++							b := B
++							if b == 1 {
++								// this section is inlined by go-inline
++								// source function is 'func (rg *registry) FillNil(regm, n int) ' in '_state.go'
++								{
++									rg := L.reg
++									regm := regv
++									newSize := regm + n
++									// this section is inlined by go-inline
++									// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++									{
++										requiredSize := newSize
++										if requiredSize > cap(rg.array) {
++											rg.resize(requiredSize)
++										}
++									}
++									for i := 0; i < n; i++ {
++										rg.array[regm+i] = LNil
++									}
++									// values beyond top don't need to be valid LValues, so setting them to nil is fine
++									// setting them to nil rather than LNil lets us invoke the golang memclr opto
++									oldtop := rg.top
++									rg.top = regm + n
++									if rg.top < oldtop {
++										nilRange := rg.array[rg.top:oldtop]
++										for i := range nilRange {
++											nilRange[i] = nil
++										}
++									}
++								}
++							} else {
++								// this section is inlined by go-inline
++								// source function is 'func (rg *registry) CopyRange(regv, start, limit, n int) ' in '_state.go'
++								{
++									rg := L.reg
++									limit := -1
++									newSize := regv + n
++									// this section is inlined by go-inline
++									// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++									{
++										requiredSize := newSize
++										if requiredSize > cap(rg.array) {
++											rg.resize(requiredSize)
++										}
++									}
++									if limit == -1 || limit > rg.top {
++										limit = rg.top
++									}
++									for i := 0; i < n; i++ {
++										srcIdx := start + i
++										if srcIdx >= limit || srcIdx < 0 {
++											rg.array[regv+i] = LNil
++										} else {
++											rg.array[regv+i] = rg.array[srcIdx]
++										}
++									}
++
++									// values beyond top don't need to be valid LValues, so setting them to nil is fine
++									// setting them to nil rather than LNil lets us invoke the golang memclr opto
++									oldtop := rg.top
++									rg.top = regv + n
++									if rg.top < oldtop {
++										nilRange := rg.array[rg.top:oldtop]
++										for i := range nilRange {
++											nilRange[i] = nil
++										}
++									}
++								}
++								if b > 1 && n > (b-1) {
++									// this section is inlined by go-inline
++									// source function is 'func (rg *registry) FillNil(regm, n int) ' in '_state.go'
++									{
++										rg := L.reg
++										regm := regv + b - 1
++										n := n - (b - 1)
++										newSize := regm + n
++										// this section is inlined by go-inline
++										// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++										{
++											requiredSize := newSize
++											if requiredSize > cap(rg.array) {
++												rg.resize(requiredSize)
++											}
++										}
++										for i := 0; i < n; i++ {
++											rg.array[regm+i] = LNil
++										}
++										// values beyond top don't need to be valid LValues, so setting them to nil is fine
++										// setting them to nil rather than LNil lets us invoke the golang memclr opto
++										oldtop := rg.top
++										rg.top = regm + n
++										if rg.top < oldtop {
++											nilRange := rg.array[rg.top:oldtop]
++											for i := range nilRange {
++												nilRange[i] = nil
++											}
++										}
++									}
++								}
++							}
++						}
++						L.currentFrame = top
++						if baseframe == popped || top.Fn.IsG {
++							return
++						}
++						cf = top
++						code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
++						lbase = cf.LocalBase
++						pc = cf.Pc
++						continue
++					}
++				}
++			}
++		case OP_FORLOOP:
++			RA := lbase + int(inst>>18)&0xff //GETA
++			if init, ok1 := reg.Get(RA).(LNumber); ok1 {
++				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
++					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
++						init += step
++						v := reg.alloc.LNumber2I(init) // one box for both registers
++						// this section is inlined by go-inline
++						// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++						{
++							rg := reg
++							regi := RA
++							vali := v
++							newSize := regi + 1
++							// this section is inlined by go-inline
++							// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++							{
++								requiredSize := newSize
++								if requiredSize > cap(rg.array) {
++									rg.resize(requiredSize)
++								}
++							}
++							rg.array[regi] = vali
++							if regi >= rg.top {
++								rg.top = regi + 1
++							}
++						}
++						if (step > 0 && init <= limit) || (step <= 0 && init >= limit) {
++							pc += int(inst&0x3ffff) - opMaxArgSbx //GETSBX
++							// this section is inlined by go-inline
++							// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
++							{
++								rg := reg
++								regi := RA + 3
++								vali := v
++								newSize := regi + 1
++								// this section is inlined by go-inline
++								// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++								{
++									requiredSize := newSize
++									if requiredSize > cap(rg.array) {
++										rg.resize(requiredSize)
++									}
++								}
++								rg.array[regi] = vali
++								if regi >= rg.top {
++									rg.top = regi + 1
++								}
++							}
++						} else {
++							// this section is inlined by go-inline
++							// source function is 'func (rg *registry) SetTop(topi int) ' in '_state.go'
++							{
++								rg := reg
++								topi := RA + 1
++								// this section is inlined by go-inline
++								// source function is 'func (rg *registry) checkSize(requiredSize int) ' in '_state.go'
++								{
++									requiredSize := topi
++									if requiredSize > cap(rg.array) {
++										rg.resize(requiredSize)
++									}
++								}
++								oldtopi := rg.top
++								rg.top = topi
++								for i := oldtopi; i < rg.top; i++ {
++									rg.array[i] = LNil
++								}
++								// values beyond top don't need to be valid LValues, so setting them to nil is fine
++								// setting them to nil rather than LNil lets us invoke the golang memclr opto
++								if rg.top < oldtopi {
++									nilRange := rg.array[rg.top:oldtopi]
++									for i := range nilRange {
++										nilRange[i] = nil
++									}
++								}
++								//for i := rg.top; i < oldtop; i++ {
++								//	rg.array[i] = LNil
++								//}
++							}
++						}
++						continue
++					}
++				}
++			}
++		}
  		if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
-@@ -50,11 +54,14 @@
+ 			return
+ 		}
++		cf = L.currentFrame
++		code, consts = cf.Fn.Proto.Code, cf.Fn.Proto.Constants
++		lbase = cf.LocalBase
++		pc = cf.Pc
++	}
++}
++
++// jmpNext does the JMP that follows a test that doesn't skip it, unless
++// there is a line or count hook to call for it (go-moonscript patch: one
++// dispatch for the two).
++func jmpNext(L *LState, code []uint32, pc int) int {
++	if L.hookMask&hookMaskTrace == 0 {
++		if j := code[pc]; int(j>>26) == OP_JMP { //GETOPCODE
++			return pc + 1 + int(j&0x3ffff) - opMaxArgSbx //GETSBX
++		}
+ 	}
++	return pc
++}
++
++// rk is RK(idx) of an instruction of a function with constants consts and
++// its registers from lbase (go-moonscript patch: rkValue with them in
++// mainLoop's locals).
++func rk(reg *registry, consts []LValue, lbase, idx int) LValue {
++	if idx&opBitRk != 0 {
++		return consts[idx&^opBitRk]
++	}
++	return reg.array[lbase+idx]
+ }
+ 
+ func mainLoopWithContext(L *LState, baseframe *callFrame) {
+@@ -50,11 +913,14 @@
  
  	for {
  		cf = L.currentFrame
@@ -36266,7 +37598,7 @@ regenerates the diff below; this header is edited by hand.
  			return
  		default:
  			if jumpTable[int(inst>>26)](L, inst, baseframe) == 1 {
-@@ -189,17 +196,55 @@
+@@ -189,17 +1055,55 @@
  	}
  	L.XMoveTo(parent, nargs)
  	L.stack.Pop()
@@ -36322,7 +37654,7 @@ regenerates the diff below; this header is edited by hand.
  	if tailcall {
  		L.currentFrame = L.RemoveCallerFrame()
  	}
-@@ -214,7 +259,10 @@
+@@ -214,7 +1118,10 @@
  		wantret = gfnret
  	}
  
@@ -36334,7 +37666,7 @@ regenerates the diff below; this header is edited by hand.
  		switchToParentThread(L, wantret, false, true)
  		return true
  	}
-@@ -259,6 +307,12 @@
+@@ -259,6 +1166,12 @@
  			}
  		}
  	}
@@ -36347,7 +37679,7 @@ regenerates the diff below; this header is edited by hand.
  	L.stack.Pop()
  	L.currentFrame = L.stack.Last()
  	return false
-@@ -266,6 +320,16 @@
+@@ -266,6 +1179,16 @@
  
  func threadRun(L *LState) {
  	if L.stack.IsEmpty() {
@@ -36364,7 +37696,7 @@ regenerates the diff below; this header is edited by hand.
  		return
  	}
  
-@@ -274,12 +338,31 @@
+@@ -274,12 +1197,31 @@
  			var lv LValue
  			if v, ok := rcv.(*ApiError); ok {
  				lv = v.Object
@@ -36396,7 +37728,7 @@ regenerates the diff below; this header is edited by hand.
  					parent.Panic(L)
  				} else {
  					L.SetTop(0)
-@@ -291,6 +374,10 @@
+@@ -291,6 +1233,10 @@
  			}
  		}
  	}()
@@ -36407,7 +37739,7 @@ regenerates the diff below; this header is edited by hand.
  	L.mainLoop(L, nil)
  }
  
-@@ -545,7 +632,13 @@
+@@ -545,7 +1491,13 @@
  			RA := lbase + A
  			Bx := int(inst & 0x3ffff) //GETBX
  			//reg.Set(RA, L.getField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx]))
@@ -36422,7 +37754,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -576,7 +669,46 @@
+@@ -576,7 +1528,46 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
@@ -36470,7 +37802,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -605,9 +737,39 @@
+@@ -605,9 +1596,39 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -36513,7 +37845,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -638,7 +800,8 @@
+@@ -638,7 +1659,8 @@
  			RA := lbase + A
  			Bx := int(inst & 0x3ffff) //GETBX
  			//L.setField(cf.Fn.Env, cf.Fn.Proto.Constants[Bx], reg.Get(RA))
@@ -36523,7 +37855,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETUPVAL
-@@ -659,7 +822,23 @@
+@@ -659,7 +1681,23 @@
  			RA := lbase + A
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
@@ -36548,7 +37880,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SETTABLEKS
-@@ -668,9 +847,18 @@
+@@ -668,9 +1706,18 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -36570,7 +37902,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_NEWTABLE
-@@ -679,9 +867,9 @@
+@@ -679,9 +1726,9 @@
  			lbase := cf.LocalBase
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
@@ -36583,7 +37915,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -702,6 +890,9 @@
+@@ -702,6 +1749,9 @@
  					rg.top = regi + 1
  				}
  			}
@@ -36593,7 +37925,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_SELF
-@@ -713,7 +904,16 @@
+@@ -713,7 +1763,16 @@
  			B := int(inst & 0x1ff)    //GETB
  			C := int(inst>>9) & 0x1ff //GETC
  			selfobj := reg.Get(lbase + B)
@@ -36611,7 +37943,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func (rg *registry) Set(regi int, vali LValue) ' in '_state.go'
  			{
-@@ -756,12 +956,12 @@
+@@ -756,12 +1815,12 @@
  			}
  			return 0
  		},
@@ -36630,7 +37962,7 @@ regenerates the diff below; this header is edited by hand.
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_UNM
  			reg := L.reg
  			cf := L.currentFrame
-@@ -840,10 +1040,10 @@
+@@ -840,10 +1899,10 @@
  							}
  						}
  					} else {
@@ -36643,7 +37975,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -929,6 +1129,29 @@
+@@ -929,6 +1988,29 @@
  						rg.top = regi + 1
  					}
  				}
@@ -36673,7 +38005,7 @@ regenerates the diff below; this header is edited by hand.
  			default:
  				op := L.metaOp1(lv, "__len")
  				if op.Type() == LTFunction {
-@@ -980,29 +1203,8 @@
+@@ -980,29 +2062,8 @@
  							}
  						}
  					}
@@ -36704,7 +38036,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -1038,6 +1240,9 @@
+@@ -1038,6 +2099,9 @@
  					rg.top = regi + 1
  				}
  			}
@@ -36714,21 +38046,44 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_JMP
-@@ -1089,11 +1294,11 @@
- 				if v2, ok2 := rhs.(LNumber); ok2 {
- 					ret = v1 <= v2
- 				} else {
+@@ -1081,35 +2145,7 @@
+ 			A := int(inst>>18) & 0xff //GETA
+ 			B := int(inst & 0x1ff)    //GETB
+ 			C := int(inst>>9) & 0x1ff //GETC
+-			lhs := L.rkValue(B)
+-			rhs := L.rkValue(C)
+-			ret := false
+-
+-			if v1, ok1 := lhs.(LNumber); ok1 {
+-				if v2, ok2 := rhs.(LNumber); ok2 {
+-					ret = v1 <= v2
+-				} else {
 -					L.RaiseError("attempt to compare %v with %v", lhs.Type().String(), rhs.Type().String())
-+					L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
- 				}
- 			} else {
- 				if lhs.Type() != rhs.Type() {
+-				}
+-			} else {
+-				if lhs.Type() != rhs.Type() {
 -					L.RaiseError("attempt to compare %v with %v", lhs.Type().String(), rhs.Type().String())
-+					L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
- 				}
- 				switch lhs.Type() {
- 				case LTString:
-@@ -1198,13 +1403,19 @@
+-				}
+-				switch lhs.Type() {
+-				case LTString:
+-					ret = strCmp(string(lhs.(LString)), string(rhs.(LString))) <= 0
+-				default:
+-					switch objectRational(L, lhs, rhs, "__le") {
+-					case 1:
+-						ret = true
+-					case 0:
+-						ret = false
+-					default:
+-						ret = !objectRationalWithError(L, rhs, lhs, "__lt")
+-					}
+-				}
+-			}
+-
++			ret := lessEqual(L, L.rkValue(B), L.rkValue(C))
+ 			v := 1
+ 			if ret {
+ 				v = 0
+@@ -1198,13 +2234,19 @@
  					ls.reg.Insert(fn, cf.LocalBase)
  				}
  				if cf.Fn == nil {
@@ -36753,7 +38108,7 @@ regenerates the diff below; this header is edited by hand.
  				// this section is inlined by go-inline
  				// source function is 'func (ls *LState) initCallFrame(cf *callFrame) ' in '_state.go'
  				{
-@@ -1286,7 +1497,7 @@
+@@ -1286,7 +2328,7 @@
  							if CompatVarArg {
  								ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
  								if (proto.IsVarArg & VarArgNeedsArg) != 0 {
@@ -36762,7 +38117,7 @@ regenerates the diff below; this header is edited by hand.
  									for i := 0; i < nvarargs; i++ {
  										argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
  									}
-@@ -1304,6 +1515,9 @@
+@@ -1304,6 +2346,9 @@
  					}
  				}
  				ls.currentFrame = newcf
@@ -36772,7 +38127,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			if callable.IsG && callGFunction(L, false) {
  				return 1
-@@ -1331,26 +1545,17 @@
+@@ -1331,26 +2376,17 @@
  				callable, meta = L.metaCall(lv)
  			}
  			if callable == nil {
@@ -36804,7 +38159,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			if callable.IsG {
-@@ -1468,7 +1673,7 @@
+@@ -1468,7 +2504,7 @@
  							if CompatVarArg {
  								ls.reg.SetTop(cf.LocalBase + nargs + np + 1)
  								if (proto.IsVarArg & VarArgNeedsArg) != 0 {
@@ -36813,7 +38168,7 @@ regenerates the diff below; this header is edited by hand.
  									for i := 0; i < nvarargs; i++ {
  										argtb.RawSetInt(i+1, ls.reg.Get(cf.LocalBase+np+i))
  									}
-@@ -1527,6 +1732,9 @@
+@@ -1527,6 +2563,9 @@
  				}
  				cf.Base = base
  				cf.LocalBase = base + (cf.LocalBase - lbase + 1)
@@ -36823,7 +38178,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return 0
  		},
-@@ -1542,21 +1750,15 @@
+@@ -1542,21 +2581,15 @@
  			{
  				ls := L
  				idx := lbase
@@ -36852,7 +38207,7 @@ regenerates the diff below; this header is edited by hand.
  			nret := B - 1
  			if B == 0 {
  				nret = reg.Top() - RA
-@@ -1676,7 +1878,16 @@
+@@ -1676,7 +2709,16 @@
  				switchToParentThread(L, n, false, true)
  				return 1
  			}
@@ -36870,7 +38225,7 @@ regenerates the diff below; this header is edited by hand.
  			// this section is inlined by go-inline
  			// source function is 'func copyReturnValues(L *LState, regv, start, n, b int) ' in '_vm.go'
  			{
-@@ -1783,7 +1994,11 @@
+@@ -1783,7 +2825,11 @@
  					}
  				}
  			}
@@ -36883,7 +38238,7 @@ regenerates the diff below; this header is edited by hand.
  			if islast || L.currentFrame == nil || L.currentFrame.Fn.IsG {
  				return 1
  			}
-@@ -1799,9 +2014,10 @@
+@@ -1799,9 +2845,10 @@
  				if limit, ok2 := reg.Get(RA + 1).(LNumber); ok2 {
  					if step, ok3 := reg.Get(RA + 2).(LNumber); ok3 {
  						init += step
@@ -36896,7 +38251,7 @@ regenerates the diff below; this header is edited by hand.
  						{
  							rg := reg
  							regi := RA
-@@ -1815,7 +2031,7 @@
+@@ -1815,7 +2862,7 @@
  									rg.resize(requiredSize)
  								}
  							}
@@ -36905,7 +38260,7 @@ regenerates the diff below; this header is edited by hand.
  							if regi >= rg.top {
  								rg.top = regi + 1
  							}
-@@ -1824,7 +2040,7 @@
+@@ -1824,7 +2871,7 @@
  							Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
  							cf.Pc += Sbx
  							// this section is inlined by go-inline
@@ -36914,7 +38269,7 @@ regenerates the diff below; this header is edited by hand.
  							{
  								rg := reg
  								regi := RA + 3
-@@ -1838,7 +2054,7 @@
+@@ -1838,7 +2885,7 @@
  										rg.resize(requiredSize)
  									}
  								}
@@ -36923,7 +38278,7 @@ regenerates the diff below; this header is edited by hand.
  								if regi >= rg.top {
  									rg.top = regi + 1
  								}
-@@ -1876,13 +2092,13 @@
+@@ -1876,13 +2923,13 @@
  							}
  						}
  					} else {
@@ -36940,7 +38295,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			return 0
  		},
-@@ -1893,33 +2109,32 @@
+@@ -1893,33 +2940,32 @@
  			A := int(inst>>18) & 0xff //GETA
  			RA := lbase + A
  			Sbx := int(inst&0x3ffff) - opMaxArgSbx //GETSBX
@@ -36998,7 +38353,7 @@ regenerates the diff below; this header is edited by hand.
  			}
  			cf.Pc += Sbx
  			return 0
-@@ -2068,9 +2283,9 @@
+@@ -2068,9 +3114,9 @@
  			if B == 0 {
  				nelem = reg.Top() - RA - 1
  			}
@@ -37011,7 +38366,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_CLOSE
-@@ -2083,19 +2298,10 @@
+@@ -2083,19 +3129,10 @@
  			{
  				ls := L
  				idx := RA
@@ -37035,7 +38390,7 @@ regenerates the diff below; this header is edited by hand.
  				}
  			}
  			return 0
-@@ -2140,6 +2346,9 @@
+@@ -2140,6 +3177,9 @@
  					closure.Upvalues[i] = cf.Fn.Upvalues[B]
  				}
  			}
@@ -37045,7 +38400,7 @@ regenerates the diff below; this header is edited by hand.
  			return 0
  		},
  		func(L *LState, inst uint32, baseframe *callFrame) int { //OP_VARARG
-@@ -2206,6 +2415,213 @@
+@@ -2206,6 +3246,213 @@
  	}
  }
  
@@ -37259,7 +38614,7 @@ regenerates the diff below; this header is edited by hand.
  func opArith(L *LState, inst uint32, baseframe *callFrame) int { //OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_POW
  	reg := L.reg
  	cf := L.currentFrame
-@@ -2267,14 +2683,34 @@
+@@ -2267,14 +3514,34 @@
  	return 0
  }
  
@@ -37299,7 +38654,7 @@ regenerates the diff below; this header is edited by hand.
  }
  
  func numberArith(L *LState, opcode int, lhs, rhs LNumber) LNumber {
-@@ -2322,24 +2758,12 @@
+@@ -2322,24 +3589,12 @@
  		L.Call(2, 1)
  		return L.reg.Pop()
  	}
@@ -37311,16 +38666,16 @@ regenerates the diff below; this header is edited by hand.
 -	if str, ok := rhs.(LString); ok {
 -		if rnum, err := parseNumber(string(str)); err == nil {
 -			rhs = rnum
+-		}
+-	}
+-	if v1, ok1 := lhs.(LNumber); ok1 {
+-		if v2, ok2 := rhs.(LNumber); ok2 {
+-			return numberArith(L, opcode, LNumber(v1), LNumber(v2))
 +	if v1, ok1 := toArithNumber(lhs); ok1 {
 +		if v2, ok2 := toArithNumber(rhs); ok2 {
 +			return numberArith(L, opcode, v1, v2)
  		}
  	}
--	if v1, ok1 := lhs.(LNumber); ok1 {
--		if v2, ok2 := rhs.(LNumber); ok2 {
--			return numberArith(L, opcode, LNumber(v1), LNumber(v2))
--		}
--	}
 -	L.RaiseError(fmt.Sprintf("cannot perform %v operation between %v and %v",
 -		strings.TrimLeft(event, "_"), lhs.Type().String(), rhs.Type().String()))
 -
@@ -37328,7 +38683,7 @@ regenerates the diff below; this header is edited by hand.
  	return LNil
  }
  
-@@ -2359,21 +2783,26 @@
+@@ -2359,21 +3614,26 @@
  				total--
  				i--
  			} else {
@@ -37358,7 +38713,7 @@ regenerates the diff below; this header is edited by hand.
  			rhs = LString(strings.Join(buf, ""))
  		}
  	}
-@@ -2386,10 +2815,10 @@
+@@ -2386,10 +3646,10 @@
  		if v2, ok2 := rhs.(LNumber); ok2 {
  			return v1 < v2
  		}
@@ -37371,7 +38726,45 @@ regenerates the diff below; this header is edited by hand.
  		return false
  	}
  	ret := false
-@@ -2444,7 +2873,7 @@
+@@ -2402,6 +3662,37 @@
+ 	return ret
+ }
+ 
++// lessEqual is lhs <= rhs, OP_LE's comparison (go-moonscript patch: a
++// function, also called by mainLoop).
++func lessEqual(L *LState, lhs, rhs LValue) bool {
++	ret := false
++	if v1, ok1 := lhs.(LNumber); ok1 {
++		if v2, ok2 := rhs.(LNumber); ok2 {
++			ret = v1 <= v2
++		} else {
++			L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
++		}
++	} else {
++		if lhs.Type() != rhs.Type() {
++			L.orderError(lhs, rhs) // go-moonscript patch: Lua 5.1's message
++		}
++		switch lhs.Type() {
++		case LTString:
++			ret = strCmp(string(lhs.(LString)), string(rhs.(LString))) <= 0
++		default:
++			switch objectRational(L, lhs, rhs, "__le") {
++			case 1:
++				ret = true
++			case 0:
++				ret = false
++			default:
++				ret = !objectRationalWithError(L, rhs, lhs, "__lt")
++			}
++		}
++	}
++	return ret
++}
++
+ func equals(L *LState, lhs, rhs LValue, raw bool) bool {
+ 	lt := lhs.Type()
+ 	if lt != rhs.Type() {
+@@ -2444,7 +3735,7 @@
  	case 0:
  		return false
  	}
