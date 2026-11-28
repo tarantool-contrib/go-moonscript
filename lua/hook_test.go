@@ -1,7 +1,7 @@
 package lua
 
 // go-moonscript patch: tests of the debug hooks (hook.go). Their event
-// sequences are compared with PUC Lua 5.1's in go-moonscript/runtime
+// sequences are compared with PUC Lua 5.1's in moonscript/runtime
 // (TestHooks); these check the Go API and that hooks don't disturb the code
 // they observe.
 

@@ -4,6 +4,21 @@
 
 # go-moonscript
 
+The monorepo of the Go Lua tooling of tarantool-contrib (the repository is
+to be renamed): one Go module, `github.com/tarantool-contrib/go-moonscript`, whose trees
+share one Lua front end and VM, the gopher-lua fork.
+
+| Tree | What |
+| --- | --- |
+| [`lua/`](lua) | the gopher-lua fork: a Lua 5.1 and LuaJIT 2.1 VM in Go (package `lua`), its parser (`lua/parse`, `lua/ast`), name resolution (`lua/scope`), printing and formatting (`lua/format`), control and data flow (`lua/flow`), sandboxes (`lua/sandbox`); its changes to gopher-lua v1.1.2 are in [`lua/moonscript.patch`](lua/moonscript.patch) |
+| [`moonscript/`](moonscript), [`cmd/moonc`](cmd/moonc), [`cmd/moon`](cmd/moon) | the MoonScript port, the subject of the rest of this file |
+| [`luascope/`](luascope) | static analysis of Lua code: globals, required modules, allowlists ([README](luascope/README.md)); was [bigbes/go-luascope](https://github.com/bigbes/go-luascope) |
+| [`luamerge/`](luamerge) | bundles a multi-file Lua project into one self-contained file: a library and the `luamerge` CLI ([README](luamerge/README.md)); was [tarantool/go-luamerge](https://github.com/tarantool/go-luamerge) |
+| [`internal/`](internal) | the Lua test suites run on the VM, the code generators and tools |
+
+luascope and luamerge came with their history (`git log --follow` reaches
+into it) and keep their own README, CHANGELOG, CONTRIBUTING and LICENSE.
+
 A native Go port of [MoonScript](https://moonscript.org) v0.8.0, the
 language that compiles to Lua. It needs no Lua, LuaRocks or C toolchain:
 
@@ -17,7 +32,8 @@ language that compiles to Lua. It needs no Lua, LuaRocks or C toolchain:
   (a Lua 5.1 VM in Go), with upstream's error rewriting (tracebacks point at
   `.moon` lines), the `.moon` module loader and `moon -c` coverage;
 - **packages** for Go programs: the compiler (`moonscript`), the parser
-  (`parse`), the linter (`lint`) and the Lua runtime (`runtime`).
+  (`moonscript/parse`), the linter (`moonscript/lint`) and the Lua runtime
+  (`moonscript/runtime`).
 
 It is for Go programs and tools that need to compile or run MoonScript:
 build pipelines, editors and language tooling, applications embedding Lua.
@@ -35,7 +51,7 @@ go install github.com/tarantool-contrib/go-moonscript/cmd/moon@latest
 `go install` puts `moonc` and `moon` into `$(go env GOPATH)/bin` (or
 `$GOBIN`); add that directory to `PATH`. Use a release tag instead of
 `@latest` to pin a version, e.g. `@v0.1.0`. There are no prebuilt binaries
-yet.
+of them yet (luamerge's are released, see its README).
 
 From a checkout:
 
@@ -51,10 +67,12 @@ go build ./cmd/moonc ./cmd/moon     # ./moonc and ./moon
 go get github.com/tarantool-contrib/go-moonscript@latest
 ```
 
-The module has no dependencies outside the Go standard library.
+The MoonScript packages and the fork import nothing outside the Go standard
+library; the module's requirements (go-config, pflag, testify) are
+luamerge's.
 
-Supported Go versions: **1.26 and 1.27** (the two latest releases; CI
-tests both).
+Supported Go versions: **1.26 (1.26.5 or later) and 1.27** (the two latest
+releases; CI tests both).
 
 ## Quick start
 
@@ -154,7 +172,7 @@ loaded: there are no C modules (and no `lpeg`).
 ### Compiling from Go
 
 ```go
-import moonscript "github.com/tarantool-contrib/go-moonscript"
+import moonscript "github.com/tarantool-contrib/go-moonscript/moonscript"
 
 code, posmap, err := moonscript.ToLua(`greet = (name) -> print "hello #{name}"`, moonscript.Options{})
 if err != nil {
@@ -175,7 +193,7 @@ if err != nil {
 Linting from Go:
 
 ```go
-import "github.com/tarantool-contrib/go-moonscript/lint"
+import "github.com/tarantool-contrib/go-moonscript/moonscript/lint"
 
 report, found, err := lint.Code(src, "input.moon", nil, lint.Options{})
 // found: there is something to report; report is moonc -l's text
@@ -187,8 +205,8 @@ The `runtime` package runs MoonScript on the gopher-lua in this module:
 
 ```go
 import (
-	"github.com/tarantool-contrib/go-moonscript/runtime"
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/runtime"
 )
 
 L := runtime.NewState() // standard libraries, and the moonscript and moon modules
@@ -220,8 +238,8 @@ if err := L.PCall(0, 0, nil); err != nil {
 `ReverseLineNumber` map Lua lines back to MoonScript lines, as `moon` does.
 In Lua, `require "moonscript"` gives upstream's `moonscript.base` API
 (`to_lua`, `loadstring`, `loadfile`, `dofile`, ...). See the
-[package documentation](https://pkg.go.dev/github.com/tarantool-contrib/go-moonscript/runtime)
-and the [examples](example_test.go).
+[package documentation](https://pkg.go.dev/github.com/tarantool-contrib/go-moonscript/moonscript/runtime)
+and the [examples](moonscript/example_test.go).
 
 The VM implements one of two Lua dialects, chosen when the state is
 created:
@@ -254,18 +272,18 @@ the [`moon` documentation](cmd/moon/main.go).
 
 Programs that build or transform Lua code can hand the VM the syntax tree
 instead of printing Lua source and loading it again: `parse.ParseBytes`
-(package `third_party/gopher-lua/parse`) gives the tree of a chunk,
+(package `lua/parse`) gives the tree of a chunk,
 `L.LoadAST(chunk, chunkname)` loads a tree as `L.LoadChunk` loads source
 (the tree of a parsed chunk gives the same function), and
 `lua.CompileAST(chunk, chunkname, dialect)` compiles one into a prototype.
 A tree built or changed by hand is checked first, so that a broken one is a
 compile error at its line rather than a crash; nodes without lines take the
-line of the code before them. See `third_party/gopher-lua/compileast.go` and
-its [examples](third_party/gopher-lua/compileast_example_test.go).
+line of the code before them. See `lua/compileast.go` and
+its [examples](lua/compileast_example_test.go).
 
 **Use this module's gopher-lua, not `github.com/yuin/gopher-lua`.** The Lua
 types of the API (`*lua.LState`, `lua.LValue`, ...) belong to the patched
-copy in `third_party/gopher-lua`. They are not interchangeable with the
+copy in `lua/`. They are not interchangeable with the
 upstream package's types, so a program using both cannot pass states or
 values between them.
 
@@ -294,7 +312,7 @@ Known differences:
   one on Lua 5.1 (its line hook is a tail call). This is fixed on purpose.
 - **`moonc --watch` and `--transform`** are accepted but not supported.
 
-gopher-lua is vendored in [`third_party/gopher-lua`](third_party/gopher-lua)
+gopher-lua is forked in [`lua/`](lua)
 and patched towards PUC Lua 5.1's behaviour: a fix for upvalues closed by
 errors caught with `pcall`, `debug.sethook`/`debug.gethook`, luac's line
 numbers, Lua 5.1's table layout (`#`, `next`, sparse keys) and pattern
@@ -302,7 +320,7 @@ matcher, coroutine and compiler fixes, Lua 5.1's runtime error messages,
 `string.format`, number formatting,
 and fixes collected from other gopher-lua forks and pull requests. Every
 change, with its source, is in
-[`moonscript.patch`](third_party/gopher-lua/moonscript.patch); the official
+[`moonscript.patch`](lua/moonscript.patch); the official
 Lua 5.1 and LuaJIT test suites run against it in
 [`internal/luasuites`](internal/luasuites). On LuaJIT's benchmark suite it
 is about 2.6 times slower than PUC Lua 5.1 (geometric mean; MoonScript
@@ -317,4 +335,6 @@ generated code and the reference outputs, and the corpus tools.
 
 BSD-2-Clause, see [LICENSE](LICENSE). The port is derived from MoonScript
 and includes a modified gopher-lua, both under the MIT license; see
-[NOTICE](NOTICE).
+[NOTICE](NOTICE). luascope and luamerge are under the BSD-2-Clause licenses
+of their projects, in [luascope/LICENSE](luascope/LICENSE) and
+[luamerge/LICENSE](luamerge/LICENSE).

@@ -1,16 +1,31 @@
 go-moonscript
 Copyright (C) 2026, Tarantool contributors (see LICENSE)
 
-This product includes software derived from the following projects, used
-under their licenses below.
+This repository is the monorepo of the Go Lua tooling of tarantool-contrib.
+Two of its trees are projects of their own, imported with their history,
+each under its license, whose text is in the tree:
+
+  - luascope/ is go-luascope (https://github.com/bigbes/go-luascope),
+    BSD 2-Clause License, Copyright (c) 2026, Eugene Blikh; see
+    luascope/LICENSE. Its parser is a port of LuaJIT's lexer and parser
+    (lj_lex.c, lj_parse.c; MIT License, Copyright (C) 2005-2017 Mike
+    Pall, the MIT License text is the one below), and its test corpora
+    keep their own licenses: see luascope/parser/testdata/corpus/SOURCES.md.
+  - luamerge/ is go-luamerge (https://github.com/tarantool/go-luamerge),
+    BSD 2-Clause License, Copyright (c) 2026, Tarantool AUTHORS; see
+    luamerge/LICENSE.
+
+The rest of this product includes software derived from the following
+projects, used under their licenses below.
 
 -------------------------------------------------------------------------------
 MoonScript v0.8.0 (https://github.com/leafo/moonscript)
 
 The parser, the compiler, the linter, the moon and moonc commands and the
-runtime modules are ports of MoonScript; runtime/moonsrc holds its Lua
-library sources, and testdata/ holds its specs, spec inputs and outputs and
-the code examples of its documentation.
+runtime modules (moonscript/, cmd/moon, cmd/moonc) are ports of
+MoonScript; moonscript/runtime/moonsrc holds its Lua library sources, and
+moonscript/testdata/ holds its specs, spec inputs and outputs and the code
+examples of its documentation.
 
 MIT License
 
@@ -37,8 +52,8 @@ THE SOFTWARE.
 -------------------------------------------------------------------------------
 gopher-lua v1.1.2 (https://github.com/yuin/gopher-lua)
 
-third_party/gopher-lua is a modified copy (see
-third_party/gopher-lua/moonscript.patch for the changes).
+lua/ is a modified copy, the fork of gopher-lua of this repository (see
+lua/moonscript.patch for the changes).
 
 The MIT License (MIT)
 
@@ -65,7 +80,7 @@ SOFTWARE.
 -------------------------------------------------------------------------------
 Lua 5.1.5 (https://www.lua.org) and LuaJIT 2.1 (https://luajit.org)
 
-third_party/gopher-lua/parse is a port of their lexers and parsers: the
+lua/parse is a port of their lexers and parsers: the
 lexer (lexer.go) of Lua 5.1's llex.c and LuaJIT's lj_lex.c, the parser
 (parser.go) of Lua 5.1's lparser.c and LuaJIT's lj_parse.c, the model of
 Lua 5.1's register allocation (lua51regs.go) of lcode.c, and the model of
@@ -78,21 +93,20 @@ Copyright (C) 1994-2012 Lua.org, PUC-Rio.
 Copyright (C) 2005-2017 Mike Pall. All rights reserved.
 
 -------------------------------------------------------------------------------
-go-luascope (https://github.com/bigbes/go-luascope)
+go-luascope (https://github.com/bigbes/go-luascope, now luascope/)
 
-third_party/gopher-lua/parse/strscan.go, the number scanner of the LuaJIT
-dialect, is adapted from go-luascope's parser/number.go, a port of LuaJIT's
+lua/parse/strscan.go, the number scanner of the LuaJIT dialect, is
+adapted from go-luascope's parser/number.go, a port of LuaJIT's
 lj_strscan.c (LuaJIT, Copyright (C) 2005-2017 Mike Pall, MIT License; the
 MIT License text is the one above, with that copyright line).
 
-third_party/gopher-lua/parse/jitcode.go, the model of LuaJIT's code
-generator the parser runs in the LuaJIT dialect, and its calls in
-third_party/gopher-lua/parse/parser.go are adapted from go-luascope's
-parser/codegen.go, parser/bytecode.go, parser/scope.go and
-parser/parser_stmt.go, ports of LuaJIT's lj_parse.c and lj_bc.h (same
-copyright and license as lj_strscan.c above);
-third_party/gopher-lua/parse/jitcode_test.go has go-luascope's limit and
-code generator snippets (parser/snippets_test.go) and their results.
+lua/parse/jitcode.go, the model of LuaJIT's code generator the parser runs
+in the LuaJIT dialect, and its calls in lua/parse/parser.go are adapted
+from go-luascope's parser/codegen.go, parser/bytecode.go, parser/scope.go
+and parser/parser_stmt.go, ports of LuaJIT's lj_parse.c and lj_bc.h (same
+copyright and license as lj_strscan.c above); lua/parse/jitcode_test.go
+has go-luascope's limit and code generator snippets
+(parser/snippets_test.go) and their results.
 
 BSD 2-Clause License
 
@@ -121,10 +135,10 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 -------------------------------------------------------------------------------
-Benchmark programs (testdata/bench/lua)
+Benchmark programs (moonscript/testdata/bench/lua)
 
 coroutine-ring.lua is from The Computer Language Benchmarks Game (BSD
 3-Clause License, Copyright (c) 2004-2008 Brent Fulgham, 2005-2025 Isaac
 Gouy) and life.lua from the Lua 5.1 distribution (MIT License, Copyright
 (C) 1994-2012 Lua.org, PUC-Rio), both by way of LuaJIT-test-cleanup; see
-testdata/bench/lua/SOURCES.md for the full license texts.
+moonscript/testdata/bench/lua/SOURCES.md for the full license texts.

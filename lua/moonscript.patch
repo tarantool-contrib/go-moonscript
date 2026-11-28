@@ -23244,7 +23244,7 @@ regenerates the diff below; this header is edited by hand.
 +	if err != nil {
 +		b.Fatal(err)
 +	}
-+	// the options go-moonscript/runtime uses
++	// the options moonscript/runtime uses
 +	L := NewState(Options{
 +		CallStackSize:       20000,
 +		MinimizeStackMemory: true,
@@ -23281,7 +23281,7 @@ regenerates the diff below; this header is edited by hand.
 +package lua
 +
 +// go-moonscript patch: tests of the debug hooks (hook.go). Their event
-+// sequences are compared with PUC Lua 5.1's in go-moonscript/runtime
++// sequences are compared with PUC Lua 5.1's in moonscript/runtime
 +// (TestHooks); these check the Go API and that hooks don't disturb the code
 +// they observe.
 +

@@ -1,8 +1,7 @@
 # go-luascope
 
-[![CI](https://github.com/bigbes/go-luascope/actions/workflows/ci.yml/badge.svg)](https://github.com/bigbes/go-luascope/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/bigbes/go-luascope.svg)](https://pkg.go.dev/github.com/bigbes/go-luascope)
-[![Go Report Card](https://goreportcard.com/badge/github.com/bigbes/go-luascope)](https://goreportcard.com/report/github.com/bigbes/go-luascope)
+[![CI](https://github.com/tarantool-contrib/go-moonscript/actions/workflows/ci.yml/badge.svg)](https://github.com/tarantool-contrib/go-moonscript/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/tarantool-contrib/go-moonscript/luascope.svg)](https://pkg.go.dev/github.com/tarantool-contrib/go-moonscript/luascope)
 
 Static analysis of Lua code written for [Tarantool](https://www.tarantool.io).
 
@@ -23,10 +22,15 @@ modules the code uses and checks them against allow-lists.
 | `globals` | Global variables, their fields, and `require` calls used by a chunk. |
 | `allowlist` | Checks the globals and modules of a chunk against allow-lists. |
 
+go-luascope lives in `luascope/` of the monorepo of the Go Lua tooling of
+tarantool-contrib (it was [bigbes/go-luascope](https://github.com/bigbes/go-luascope)):
+its packages are `github.com/tarantool-contrib/go-moonscript/luascope/...`, its
+versions are the module's.
+
 ## Quick start
 
 ```sh
-go get github.com/bigbes/go-luascope
+go get github.com/tarantool-contrib/go-moonscript
 ```
 
 ```go
@@ -36,9 +40,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bigbes/go-luascope/allowlist"
-	"github.com/bigbes/go-luascope/globals"
-	"github.com/bigbes/go-luascope/parser"
+	"github.com/tarantool-contrib/go-moonscript/luascope/allowlist"
+	"github.com/tarantool-contrib/go-moonscript/luascope/globals"
+	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
 func main() {
@@ -172,7 +176,7 @@ checked against the modules.
 
 ## Documentation
 
-The reference is on [pkg.go.dev](https://pkg.go.dev/github.com/bigbes/go-luascope),
+The reference is on [pkg.go.dev](https://pkg.go.dev/github.com/tarantool-contrib/go-moonscript/luascope),
 including runnable examples for every package. Locally:
 
 ```sh
@@ -181,13 +185,14 @@ pkgsite -http=:6060  # or: go run golang.org/x/pkgsite/cmd/pkgsite@latest
 ```
 
 `go doc` and `pkgsite` render the same comments that
-[pkg.go.dev](https://pkg.go.dev/github.com/bigbes/go-luascope) shows.
+[pkg.go.dev](https://pkg.go.dev/github.com/tarantool-contrib/go-moonscript/luascope) shows.
 
 ## Requirements
 
-- Go 1.24 or later, no C toolchain and no Tarantool installation: the
-  library is pure Go.
-- The only dependency is `github.com/stretchr/testify`, used by the tests.
+- Go 1.26.5 or later (the module's), no C toolchain and no Tarantool
+  installation: the library is pure Go.
+- The only dependency of the packages is `github.com/stretchr/testify`,
+  used by the tests; the module's other requirements are luamerge's.
 - Linux, macOS and Windows are supported; CI runs the tests on Linux.
 
 ## Testing
@@ -219,7 +224,7 @@ make golden LUAJIT=/tmp/luajit-build/src/luajit
 `make test` runs the tests, `make testrace` runs them a hundred times with
 the race detector, `make cover` prints the statement coverage, `make lint`
 runs golangci-lint, `make spell` runs codespell, and `make fuzz` runs the
-parser fuzzer.
+parser fuzzer, all in `luascope/`.
 
 The statement coverage of the library is above 98%, and every package has
 tests.

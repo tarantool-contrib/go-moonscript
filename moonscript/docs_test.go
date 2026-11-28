@@ -19,7 +19,7 @@ import (
 // the doc and line each block comes from. Regenerate with
 // scripts/gen-docs-golden.sh (needs Docker and the moonref:0.8.0 image).
 //
-//	go test -run Docs .
+//	go test -run Docs ./moonscript
 //	go test -run 'Docs/reference_04' .
 func TestDocs(t *testing.T) {
 	sources := docsManifest(t)

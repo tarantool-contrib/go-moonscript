@@ -3,8 +3,8 @@
 //	moon [-h] [--coverage] [-d] [--execute <execute>] [--version] [<script>] [<args>] ...
 //
 // It runs upstream bin/moon.moon (cmd/moon/moon.moon, compiled into
-// moon.lua by `go generate ./runtime`) on a Lua state set up by
-// go-moonscript/runtime, so script arguments (the global arg: arg[0] the
+// moon.lua by `go generate ./moonscript/runtime`) on a Lua state set up by
+// moonscript/runtime, so script arguments (the global arg: arg[0] the
 // script, arg[1..] its arguments, arg[-1] the moon program), -e/--execute,
 // -d, -v/--version, -h/--help, the .moon module loader and the rewritten
 // error tracebacks ("moon: file.moon:12: (34) message") behave like the

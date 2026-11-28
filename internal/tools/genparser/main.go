@@ -3,7 +3,7 @@
 // rule, with every combinator expanded inline into straight-line code that
 // runs on the runtime in parse/peg.go.
 //
-//	go generate ./parse
+//	go generate ./moonscript/parse
 //
 // The generated code keeps the semantics of the combinators exactly (see
 // the interpreter in parse/interp_test.go, the differential oracle). It

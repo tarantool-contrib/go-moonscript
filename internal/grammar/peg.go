@@ -1,6 +1,6 @@
 // Package grammar describes the MoonScript v0.8.0 grammar as a tree of PEG
 // combinators with pgen semantics. It is pure data: the parser in
-// go-moonscript/parse is generated from it (internal/tools/genparser), and
+// moonscript/parse is generated from it (internal/tools/genparser), and
 // the parse tests interpret it directly as a differential oracle for the
 // generated code.
 //

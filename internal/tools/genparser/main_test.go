@@ -9,7 +9,7 @@ import (
 )
 
 // TestUpToDate checks that moonscript/parse/parser_gen.go is what the generator
-// produces from the current grammar (run go generate ./parse otherwise).
+// produces from the current grammar (run go generate ./moonscript/parse otherwise).
 func TestUpToDate(t *testing.T) {
 	want, err := Generate(grammar.Moon())
 	if err != nil {

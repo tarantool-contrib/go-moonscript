@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The first version: a native Go port of MoonScript v0.8.0.
+The first version: a native Go port of MoonScript v0.8.0, in the monorepo
+of the Go Lua tooling of tarantool-contrib.
+
+### Changed
+
+- The repository is the monorepo of the Go Lua tooling (to be renamed),
+  one Go module, `github.com/tarantool-contrib/go-moonscript`:
+  - the gopher-lua fork moves from `third_party/gopher-lua` to `lua/`:
+    its packages are `.../lua`, `.../lua/ast`, `.../lua/parse`,
+    `.../lua/scope`, `.../lua/format`, `.../lua/flow`, `.../lua/sandbox`
+    and `.../lua/pm`, and `moonscript.patch` is `lua/moonscript.patch`;
+  - the MoonScript packages move from the root to `moonscript/`:
+    `.../moonscript` (`ToLua`), `.../moonscript/parse`,
+    `.../moonscript/compiler`, `.../moonscript/lint`,
+    `.../moonscript/runtime`, `.../moonscript/ast`, with their
+    `testdata/`; `cmd/moonc` and `cmd/moon` stay where they are;
+  - [go-luascope](https://github.com/bigbes/go-luascope) is `luascope/`
+    and [go-luamerge](https://github.com/tarantool/go-luamerge) is
+    `luamerge/`, imported with their history; luamerge parses with the
+    fork instead of gopher-lua v1.1.2 (see `luamerge/CHANGELOG.md`).
+- The module requires Go 1.26.5 (luamerge's dependency jsonschema
+  v0.9.8 does) and has dependencies, luamerge's: go-config, pflag and
+  testify.
 
 ### Added
 
@@ -25,7 +47,7 @@ The first version: a native Go port of MoonScript v0.8.0.
   upstream Lua modules (`moonscript`, `moonscript.base`, `moonscript.errors`,
   `moonscript.util`, `moon`, ...), the `.moon` loader, line tables and
   traceback rewriting, and `moon -c` coverage.
-- A patched gopher-lua v1.1.2 in `third_party/gopher-lua`, moved towards
+- A patched gopher-lua v1.1.2 in `lua/`, moved towards
   PUC Lua 5.1 (and LuaJIT 2.1's extensions where they don't change 5.1
   programs), each change tested against real Lua 5.1/LuaJIT and listed with
   its source in `moonscript.patch`:

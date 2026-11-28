@@ -15,7 +15,7 @@ func BenchmarkVM(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	// the options go-moonscript/runtime uses
+	// the options moonscript/runtime uses
 	L := NewState(Options{
 		CallStackSize:       20000,
 		MinimizeStackMemory: true,

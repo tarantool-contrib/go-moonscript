@@ -1,6 +1,5 @@
 [![Go Reference][godoc-badge]][godoc-url]
 [![Actions Status][actions-badge]][actions-url]
-[![Code Coverage][coverage-badge]][coverage-url]
 [![Telegram EN][telegram-badge]][telegram-en-url]
 [![Telegram RU][telegram-badge]][telegram-ru-url]
 
@@ -38,17 +37,22 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 
 ## Installation
 
+luamerge lives in `luamerge/` of the monorepo of the Go Lua tooling of
+tarantool-contrib (it was [tarantool/go-luamerge](https://github.com/tarantool/go-luamerge));
+its package is `github.com/tarantool-contrib/go-moonscript/luamerge`, its versions are the
+module's.
+
 ```bash
 # Latest release
-go install github.com/tarantool/go-luamerge/cmd/luamerge@latest
+go install github.com/tarantool-contrib/go-moonscript/luamerge/cmd/luamerge@latest
 
 # Docker
-docker pull ghcr.io/tarantool/go-luamerge:latest
+docker pull ghcr.io/tarantool-contrib/luamerge:latest
 
 # From source
-git clone https://github.com/tarantool/go-luamerge
-cd go-luamerge
-go install ./cmd/luamerge
+git clone git@github.com:tarantool-contrib/go-moonscript.git
+cd go-moonscript
+go install ./luamerge/cmd/luamerge
 ```
 
 The Docker image is built by the release workflow via GoReleaser, which
@@ -357,7 +361,7 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/tarantool/go-luamerge"
+	"github.com/tarantool-contrib/go-moonscript/luamerge"
 )
 
 func build() error {
@@ -384,7 +388,7 @@ func build() error {
 }
 ```
 
-Public API — every type is declared in package `luamerge` itself, so `go doc github.com/tarantool/go-luamerge Options` lists each setting with its documentation:
+Public API — every type is declared in package `luamerge` itself, so `go doc github.com/tarantool-contrib/go-moonscript/luamerge Options` lists each setting with its documentation:
 
 - `luamerge.Options` — all bundling settings (entry, root, path, `Transform` (a `TransformOptions`), `Debug`, `Fallback`, `Shebang`, `NoArgFix`, prefixes, skip/include, …). Only `Entry` must be set: `luamerge.Options{Entry: "src/main.lua"}` bundles like `luamerge --entry src/main.lua` with no configuration. `Bundle` writes to the `io.Writer` you give it and ignores `Options.Output`.
 - `luamerge.DefaultOptions() Options` — defaults matching the CLI, with `Path` (`?.lua;?/init.lua`) and `Output` (`-`) spelled out; `Bundle` treats them exactly as the zero value.
@@ -410,7 +414,7 @@ Implementation packages live under `internal/` and are intentionally not importa
 
 ## Finding requires
 
-Every file is read with a lexer that knows the syntax of Lua 5.1 to 5.5, LuaJIT and Tarantool, and the [gopher-lua](https://github.com/yuin/gopher-lua) parser, which reads Lua 5.1, gets a copy of it with the newer syntax written the Lua 5.1 way: the operators of Lua 5.3 (`//`, `&`, `|`, `~`, `<<`, `>>`), the attributes of Lua 5.4 and 5.5 (`<const>`, `<close>`), the `global` declarations of Lua 5.5, hexadecimal floats, the numerals of LuaJIT and Tarantool (`1LL`, `0x10ULL`, `2i`, `0b101`), a statement after `break` (Lua 5.2), names beyond ASCII (LuaJIT), the syntax LuaJIT 2.1 builds of 2026 add (`!=`, `!`, `&&`, `||`, `c ? a : b`, `??`, `~>>`, compound assignments such as `x += 1`, `continue`) and the string escapes Lua 5.1 does not have. Every token of the copy stays on its line, so a warning names the line of the file. The copy is only read to find the requires: the bundle embeds every file as it is.
+Every file is read with a lexer that knows the syntax of Lua 5.1 to 5.5, LuaJIT and Tarantool, and the parser of this repository's [gopher-lua fork](../lua), which reads Lua 5.1 (in its LuaJIT dialect, with `goto` and labels), gets a copy of it with the newer syntax written the Lua 5.1 way: the operators of Lua 5.3 (`//`, `&`, `|`, `~`, `<<`, `>>`), the attributes of Lua 5.4 and 5.5 (`<const>`, `<close>`), the `global` declarations of Lua 5.5, hexadecimal floats, the numerals of LuaJIT and Tarantool (`1LL`, `0x10ULL`, `2i`, `0b101`), a statement after `break`, empty statements (`;;`) and a call across a line break (Lua 5.2), names beyond ASCII (LuaJIT), the syntax LuaJIT 2.1 builds of 2026 add (`!=`, `!`, `&&`, `||`, `c ? a : b`, `??`, `~>>`, compound assignments such as `x += 1`, `continue`) and the string escapes Lua 5.1 does not have. Every token of the copy stays on its line (but the `(` of a call across a line break, which goes to the line before), so a warning names the line of the file. The copy is only read to find the requires: the bundle embeds every file as it is.
 
 Where the dialects read the same text differently, it is read the way the dialect that accepts it reads it. A string is decoded as Lua 5.2 and later, LuaJIT and Tarantool decode it: `require("\x61x")` loads the module `ax`, where Lua 5.1 reads an escape it does not know as the character after the backslash, `x61x`. `goto` is a name where it cannot start a `goto` statement (Lua 5.1, LuaJIT), and `global` wherever it does not start a Lua 5.5 declaration. A numeral ends before `..` where Lua 5.1 ends it (`1e5..x`), and before a letter where Lua 5.2 and 5.3 end it (`3then`).
 
@@ -589,12 +593,10 @@ that execute generated bundles run them on every Lua interpreter on `PATH`
 
 BSD 2-Clause — see [LICENSE](LICENSE).
 
-[godoc-badge]: https://pkg.go.dev/badge/github.com/tarantool/go-luamerge.svg
-[godoc-url]: https://pkg.go.dev/github.com/tarantool/go-luamerge
-[actions-badge]: https://github.com/tarantool/go-luamerge/actions/workflows/testing.yaml/badge.svg
-[actions-url]: https://github.com/tarantool/go-luamerge/actions/workflows/testing.yaml
-[coverage-badge]: https://coveralls.io/repos/github/tarantool/go-luamerge/badge.svg?branch=master
-[coverage-url]: https://coveralls.io/github/tarantool/go-luamerge?branch=master
+[godoc-badge]: https://pkg.go.dev/badge/github.com/tarantool-contrib/go-moonscript/luamerge.svg
+[godoc-url]: https://pkg.go.dev/github.com/tarantool-contrib/go-moonscript/luamerge
+[actions-badge]: https://github.com/tarantool-contrib/go-moonscript/actions/workflows/ci.yml/badge.svg
+[actions-url]: https://github.com/tarantool-contrib/go-moonscript/actions/workflows/ci.yml
 [telegram-badge]: https://img.shields.io/badge/Telegram-join%20chat-blue.svg
 [telegram-en-url]: http://telegram.me/tarantool
 [telegram-ru-url]: http://telegram.me/tarantoolru

@@ -8,6 +8,15 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- go-luascope moved into the monorepo of the Go Lua tooling of
+  tarantool-contrib, as `luascope/` of the module
+  `github.com/tarantool-contrib/go-moonscript`: the packages are
+  `github.com/tarantool-contrib/go-moonscript/luascope/parser`, `.../luascope/ast`,
+  `.../luascope/globals` and `.../luascope/allowlist`, the versions are the
+  module's, and it needs Go 1.26.5.
+
 ### Fixed
 
 - `globals`: `require` named through the constant fields of `_G`, the table

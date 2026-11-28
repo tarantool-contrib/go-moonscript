@@ -1,6 +1,9 @@
 # Contributing
 
-Issues and pull requests are welcome.
+Issues and pull requests are welcome. go-luascope is `luascope/` of the
+monorepo of the Go Lua tooling (one Go module): the rules of this file apply
+to `luascope/`, the `make` targets run there, and the root
+[CONTRIBUTING.md](../CONTRIBUTING.md) says what the whole repository runs.
 
 ## Reporting a bug
 
@@ -72,8 +75,8 @@ and `ci`.
 - An exported API change updates the examples in the doc comment and the
   callers in `README.md`, `doc.go` and the `ExampleXxx` functions: they are
   compiled, so a stale one breaks the build.
-- `golangci-lint` runs in CI with the configuration from `.golangci.yml`;
-  run `make lint` before pushing.
+- `golangci-lint` runs in CI with the configuration from
+  `luascope/.golangci.yml`; run `make lint` before pushing.
 - Use the standard library unless a dependency earns its place.
 
 [style]: https://google.github.io/styleguide/go/guide

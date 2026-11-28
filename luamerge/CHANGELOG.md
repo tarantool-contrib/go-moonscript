@@ -7,13 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- luamerge moved into the monorepo of the Go Lua tooling of
+  tarantool-contrib, as `luamerge/` of the module
+  `github.com/tarantool-contrib/go-moonscript`: the package is
+  `github.com/tarantool-contrib/go-moonscript/luamerge`, the CLI
+  `github.com/tarantool-contrib/go-moonscript/luamerge/cmd/luamerge`, the Docker image
+  `ghcr.io/tarantool-contrib/luamerge`, and the versions are the module's.
+- The requires are found with the parser of the monorepo's gopher-lua fork
+  (in its LuaJIT dialect) instead of gopher-lua v1.1.2. It reads what
+  Lua 5.1 and LuaJIT read: the copy written for it turns empty
+  statements (Lua 5.2) into `do end` and puts the `(` of a call across a
+  line break (Lua 5.2) on the line before, as gopher-lua took both; a
+  file that LuaJIT does not compile (a `goto` into the scope of a local)
+  is read by the token scanner, with a warning. The reasons of those
+  warnings are Lua's messages: `unexpected symbol near "="` where
+  gopher-lua said `syntax error near "="`, `'end' expected (to close
+  'function' at line 1) at the end of the file`.
+
 ### Added
 
 - Initial public release of `luamerge`, a Go library and CLI that merges a
   multi-file Lua project into a single self-contained `.lua` file while
   preserving exact `require()` semantics (run-once caching, circular
   dependencies, module identity).
-- Static `require()` analysis via the gopher-lua parser: modules are discovered
+- Static `require()` analysis via a Lua parser: modules are discovered
   by parsing source, without running the program.
 - Public Go API (`Bundle`, `Options`, `Result`, `LoadOptions`,
   `DefaultOptions`, classifiable errors and warnings) with the implementation

@@ -2,12 +2,14 @@
 
 ## First steps
 
-The project requires Go 1.26.5 or later. Clone the repository and install
-dependencies.
+The project requires Go 1.26.5 or later. It is `luamerge/` of the monorepo
+of the Go Lua tooling (one Go module; see the root
+[CONTRIBUTING.md](../CONTRIBUTING.md) for what the whole repository runs).
+Clone the repository and run the commands of this file in `luamerge/`:
 
 ```sh
-$ git clone https://github.com/tarantool/go-luamerge
-$ cd go-luamerge
+$ git clone git@github.com:tarantool-contrib/go-moonscript.git
+$ cd go-moonscript/luamerge
 $ go mod tidy
 ```
 
@@ -195,4 +197,4 @@ Closes #1337
 If you have questions, feel free to open an issue or reach out via Telegram
 ([English](http://telegram.me/tarantool) / [Russian](http://telegram.me/tarantoolru)).
 
-[godoc-url]: https://pkg.go.dev/github.com/tarantool/go-luamerge
+[godoc-url]: https://pkg.go.dev/github.com/tarantool-contrib/go-moonscript/luamerge

@@ -172,7 +172,7 @@ func nestedIfs(n int) string {
 // FuzzDifferential compares the generated parser with the interpreter on
 // arbitrary inputs:
 //
-//	go test ./parse -run XXX -fuzz FuzzDifferential
+//	go test ./moonscript/parse -run XXX -fuzz FuzzDifferential
 func FuzzDifferential(f *testing.F) {
 	for _, src := range diffInputs(f) {
 		f.Add(src)
