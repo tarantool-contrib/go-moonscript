@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerates testdata/corpus/manifest.tsv and testdata/corpus/expected.tsv,
+# Regenerates moonscript/testdata/corpus/manifest.tsv and moonscript/testdata/corpus/expected.tsv,
 # the committed manifest and expected results of the corpus check that CI
 # runs (scripts/check-corpus.sh), from a full local corpus (see
 # internal/tools/corpus/main.go: fetch.sh, then corpus collect):
@@ -42,4 +42,4 @@ if [ $ref = 1 ]; then
 	"$work/corpus-bin" ref -corpus "$corpus" -image "$image"
 	"$work/corpus-bin" ref -lint -corpus "$corpus" -image "$image"
 fi
-"$work/corpus-bin" export -corpus "$corpus" -pinned testdata/corpus
+"$work/corpus-bin" export -corpus "$corpus" -pinned moonscript/testdata/corpus

@@ -451,7 +451,7 @@ func TestCheckTestdata(t *testing.T) {
 	}
 	runChecks(t, "gopher-lua testdata", files, format.Options{})
 	// go-moonscript's, if the fork is in it
-	if dir := filepath.Join("..", "..", "testdata"); isDir(dir) {
+	if dir := filepath.Join("..", "..", "moonscript", "testdata"); isDir(dir) {
 		runChecks(t, "go-moonscript testdata", luaFiles(t, dir), format.Options{})
 	}
 }

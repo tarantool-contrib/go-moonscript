@@ -1,8 +1,8 @@
 // Command gendispatch extracts the FIRST-byte dispatch tables that pgen
 // emitted into moonscript/parse/slow.lua and writes them as Go source
-// (parse/dispatch_gen.go), so DAlt can skip and record exactly like pgen.
+// (moonscript/parse/dispatch_gen.go), so DAlt can skip and record exactly like pgen.
 //
-//	go run ./internal/tools/gendispatch -slow path/to/slow.lua -o parse/dispatch_gen.go
+//	go run ./internal/tools/gendispatch -slow path/to/slow.lua -o moonscript/parse/dispatch_gen.go
 package main
 
 import (
@@ -52,7 +52,7 @@ func bits(s string) uint64 {
 
 func main() {
 	slow := flag.String("slow", "", "path to moonscript/parse/slow.lua")
-	out := flag.String("o", "parse/dispatch_gen.go", "output file")
+	out := flag.String("o", "moonscript/parse/dispatch_gen.go", "output file")
 	flag.Parse()
 
 	f, err := os.Open(*slow)

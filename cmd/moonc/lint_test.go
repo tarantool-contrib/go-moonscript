@@ -1,7 +1,7 @@
 package main
 
-// Golden tests for moonc -l: testdata/lint/COMMANDS.tsv lists moonc
-// invocations, testdata/lint/NAME.out holds the reference moonc's exit
+// Golden tests for moonc -l: moonscript/testdata/lint/COMMANDS.tsv lists moonc
+// invocations, moonscript/testdata/lint/NAME.out holds the reference moonc's exit
 // status and stderr (regenerate with scripts/gen-lint-golden.sh).
 
 import (
@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tarantool-contrib/go-moonscript/lint"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/lint"
 )
 
 func TestLintGolden(t *testing.T) {
-	dir, err := filepath.Abs("../../testdata/lint")
+	dir, err := filepath.Abs("../../moonscript/testdata/lint")
 	if err != nil {
 		t.Fatal(err)
 	}

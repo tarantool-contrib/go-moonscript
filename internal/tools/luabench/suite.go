@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	moonscript "github.com/tarantool-contrib/go-moonscript"
+	moonscript "github.com/tarantool-contrib/go-moonscript/moonscript"
 )
 
 // The benchmark suite: LuaJIT-test-cleanup's bench/ at a pinned commit.
@@ -156,7 +156,7 @@ func (w *workspace) prepare(benches []*bench) error {
 			}
 		case b.file != "":
 		case vendored[b.script()]:
-			src := filepath.Join(w.root, "testdata", "bench", "lua", b.script())
+			src := filepath.Join(w.root, "moonscript", "testdata", "bench", "lua", b.script())
 			if err := copyFile(src, filepath.Join(w.dir, b.script())); err != nil {
 				return err
 			}
@@ -183,7 +183,7 @@ func (w *workspace) prepare(benches []*bench) error {
 // engine; the moonscript.util it requires is our runtime's.
 func (w *workspace) compileMoon(b *bench) error {
 	name := strings.TrimPrefix(b.name, "moon/")
-	src, err := os.ReadFile(filepath.Join(w.root, "testdata", "bench", "moon", name+".moon"))
+	src, err := os.ReadFile(filepath.Join(w.root, "moonscript", "testdata", "bench", "moon", name+".moon"))
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func (w *workspace) compileMoon(b *bench) error {
 	if err := os.WriteFile(filepath.Join(w.dir, b.script()), []byte(code), 0o644); err != nil {
 		return err
 	}
-	return copyFile(filepath.Join(w.root, "runtime", "lua", "moonscript", "util.lua"),
+	return copyFile(filepath.Join(w.root, "moonscript", "runtime", "lua", "moonscript", "util.lua"),
 		filepath.Join(w.dir, "moonscript", "util.lua"))
 }
 

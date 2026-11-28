@@ -16909,7 +16909,7 @@ regenerates the diff below; this header is edited by hand.
 +	}
 +	runChecks(t, "gopher-lua testdata", files, format.Options{})
 +	// go-moonscript's, if the fork is in it
-+	if dir := filepath.Join("..", "..", "testdata"); isDir(dir) {
++	if dir := filepath.Join("..", "..", "moonscript", "testdata"); isDir(dir) {
 +		runChecks(t, "go-moonscript testdata", luaFiles(t, dir), format.Options{})
 +	}
 +}
@@ -25455,7 +25455,7 @@ regenerates the diff below; this header is edited by hand.
 +
 +func TestDumpRoundTrip(t *testing.T) {
 +	var files []string
-+	for _, root := range []string{"testdata", "../runtime/lua"} {
++	for _, root := range []string{"testdata", "../moonscript/runtime/lua"} {
 +		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 +			if err == nil && !d.IsDir() && strings.HasSuffix(p, ".lua") {
 +				files = append(files, p)

@@ -29,8 +29,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tarantool-contrib/go-moonscript/ast"
-	"github.com/tarantool-contrib/go-moonscript/parse"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/ast"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/parse"
 )
 
 // result is what moonc -T would show: a tree (ok) or an error message.
@@ -403,7 +403,7 @@ func main() {
 	if err != nil {
 		cache = "."
 	}
-	corpusDir := flag.String("corpus", "testdata/parse", "corpus directory (*.moon, recursive)")
+	corpusDir := flag.String("corpus", "moonscript/testdata/parse", "corpus directory (*.moon, recursive)")
 	n := flag.Int("n", 5000, "number of mutants")
 	seed := flag.Int64("seed", 1, "random seed")
 	workers := flag.Int("j", 4, "parallel workers (one reference container each)")

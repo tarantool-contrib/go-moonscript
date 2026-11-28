@@ -20,7 +20,7 @@ import (
 
 func TestDumpRoundTrip(t *testing.T) {
 	var files []string
-	for _, root := range []string{"testdata", "../runtime/lua"} {
+	for _, root := range []string{"testdata", "../moonscript/runtime/lua"} {
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 			if err == nil && !d.IsDir() && strings.HasSuffix(p, ".lua") {
 				files = append(files, p)

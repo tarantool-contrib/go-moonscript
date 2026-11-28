@@ -31,7 +31,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tarantool-contrib/go-moonscript/lint"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/lint"
 )
 
 //go:embed reflint.lua

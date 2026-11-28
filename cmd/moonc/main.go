@@ -16,11 +16,11 @@ import (
 	"syscall"
 	"time"
 
-	moonscript "github.com/tarantool-contrib/go-moonscript"
-	"github.com/tarantool-contrib/go-moonscript/ast"
-	"github.com/tarantool-contrib/go-moonscript/compiler"
-	"github.com/tarantool-contrib/go-moonscript/lint"
-	"github.com/tarantool-contrib/go-moonscript/parse"
+	moonscript "github.com/tarantool-contrib/go-moonscript/moonscript"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/ast"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/compiler"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/lint"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/parse"
 )
 
 const version = "0.8.0"

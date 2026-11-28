@@ -2,9 +2,9 @@
 # Regenerates the reference outputs of the debug hook tests (needs Docker
 # and the moonref:0.8.0 image, which has PUC Lua 5.1.5 as lua5.1):
 #
-#   runtime/testdata/hooks/ref/<name>.out
+#   moonscript/runtime/testdata/hooks/ref/<name>.out
 #       standard output of `lua5.1 <name>.lua` for every script in
-#       runtime/testdata/hooks, run in that directory (TestHooks)
+#       moonscript/runtime/testdata/hooks, run in that directory (TestHooks)
 #
 # The scripts must run without error. The tests themselves run without
 # Docker.
@@ -22,5 +22,5 @@ for f in *.lua; do
 done
 '
 
-docker run --rm --user "$(id -u):$(id -g)" -v "$root/runtime/testdata/hooks":/data "$image" bash -c "$run"
-echo "hooks: $(ls "$root"/runtime/testdata/hooks/ref/*.out | wc -l) scripts"
+docker run --rm --user "$(id -u):$(id -g)" -v "$root/moonscript/runtime/testdata/hooks":/data "$image" bash -c "$run"
+echo "hooks: $(ls "$root"/moonscript/runtime/testdata/hooks/ref/*.out | wc -l) scripts"

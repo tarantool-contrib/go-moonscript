@@ -6,12 +6,12 @@ package main
 // are recorded by scripts/gen-moon-runner-ref.sh (needs Docker) in ref/ and
 // ref_luajit/; these tests run without it.
 //
-// TestMoonRunner runs every case of testdata/moon_runner/cases.tsv (scripts
+// TestMoonRunner runs every case of moonscript/testdata/moon_runner/cases.tsv (scripts
 // written for this suite: classes, modules through package.moonpath, script
 // arguments, the moon standard library, runtime errors and their rewritten
 // tracebacks, syntax errors in required modules, the CLI flags) and
 // TestMoonSmoke runs the upstream scripts listed in
-// testdata/moon_smoke/scripts.txt (docs examples, spec inputs);
+// moonscript/testdata/moon_smoke/scripts.txt (docs examples, spec inputs);
 // TestMoonRunnerLuaJIT and TestMoonSmokeLuaJIT run the same in the LuaJIT
 // dialect. Each runs
 // the test binary itself as moon (TestMain) in the case's directory and
@@ -195,7 +195,7 @@ func compareResults(t *testing.T, want, got result) {
 	}
 }
 
-const runnerDir = "../../testdata/moon_runner"
+const runnerDir = "../../moonscript/testdata/moon_runner"
 
 type runnerCase struct {
 	name string
@@ -282,7 +282,7 @@ func testRunner(t *testing.T, d dialect, knownDiffs map[string]string) {
 	}
 }
 
-const smokeDir = "../../testdata"
+const smokeDir = "../../moonscript/testdata"
 
 // smokeSkips are upstream scripts whose output can't match, with the reason.
 var smokeSkips = map[string]string{

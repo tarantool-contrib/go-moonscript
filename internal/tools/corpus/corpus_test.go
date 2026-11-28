@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tarantool-contrib/go-moonscript/ast"
-	"github.com/tarantool-contrib/go-moonscript/compiler"
-	"github.com/tarantool-contrib/go-moonscript/parse"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/ast"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/compiler"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/parse"
 )
 
 // goRef builds a reference result from the Go port itself, so the synthetic
@@ -90,7 +90,7 @@ func TestBuckets(t *testing.T) {
 	if b != `in chain: want "call" | got "index"` {
 		t.Errorf("treeDiff bucket %q", b)
 	}
-	if got := faultFrame("boom\ngoroutine 1:\npanic({0x1, 0x2})\n\t/x/panic.go:1\ngithub.com/tarantool-contrib/go-moonscript/compiler.(*Block).value(0x1)\n\t/x/b.go:3\n"); got != "compiler.(*Block).value" {
+	if got := faultFrame("boom\ngoroutine 1:\npanic({0x1, 0x2})\n\t/x/panic.go:1\ngithub.com/tarantool-contrib/go-moonscript/moonscript/compiler.(*Block).value(0x1)\n\t/x/b.go:3\n"); got != "compiler.(*Block).value" {
 		t.Errorf("faultFrame %q", got)
 	}
 	if got := normInternal("failed to compile: /usr/share/lua/5.1/moonscript/compile.lua:12: attempt to index nil\nstack"); got != "attempt to index nil" {

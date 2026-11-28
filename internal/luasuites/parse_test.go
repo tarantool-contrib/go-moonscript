@@ -9,7 +9,7 @@ import (
 
 	lua "github.com/tarantool-contrib/go-moonscript/lua"
 
-	moonrt "github.com/tarantool-contrib/go-moonscript/runtime"
+	moonrt "github.com/tarantool-contrib/go-moonscript/moonscript/runtime"
 )
 
 // isLuaFile tells the files of the archives the parse check compiles: Lua

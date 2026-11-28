@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The real-world corpus check without a local corpus, as CI runs it: fetches
-# the files listed in testdata/corpus/manifest.tsv from their GitHub
+# the files listed in moonscript/testdata/corpus/manifest.tsv from their GitHub
 # repositories (only the ones not there yet), regenerates their mutants and
 # compares the parser, the compiler and the linter with the digests of the
-# reference outputs in testdata/corpus/expected.tsv. It fails on any
+# reference outputs in moonscript/testdata/corpus/expected.tsv. It fails on any
 # difference; repositories that are gone are reported and skipped (the
 # fetch fails only when less than 90% of the files are there).
 #
@@ -18,7 +18,7 @@
 #   FETCH_JOBS   parallel repository fetches (default 16)
 #   JOBS         parallel check workers (default: CPUs - 1)
 #   PINNED       directory of manifest.tsv and expected.tsv (default
-#                testdata/corpus; e.g. a subset of the manifest)
+#                moonscript/testdata/corpus; e.g. a subset of the manifest)
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,7 +29,7 @@ steps=("$@")
 mkdir -p "$corpus"
 cd "$root"
 go build -o "$corpus/corpus-bin" ./internal/tools/corpus
-common=(-corpus "$corpus" -pinned "${PINNED:-$root/testdata/corpus}")
+common=(-corpus "$corpus" -pinned "${PINNED:-$root/moonscript/testdata/corpus}")
 jobs=()
 [ -z "${JOBS:-}" ] || jobs=(-j "$JOBS")
 

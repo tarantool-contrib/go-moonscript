@@ -174,7 +174,7 @@ func TestGreedyCover(t *testing.T) {
 // TestPinnedCorpus checks the committed manifest and expected results:
 // formats, and an entry for every file.
 func TestPinnedCorpus(t *testing.T) {
-	dir := filepath.Join("..", "..", "..", "testdata", "corpus")
+	dir := filepath.Join("..", "..", "..", "moonscript", "testdata", "corpus")
 	repos, err := readPinManifest(filepath.Join(dir, "manifest.tsv"))
 	if err != nil {
 		t.Fatal(err)

@@ -12,7 +12,7 @@ import (
 
 	lua "github.com/tarantool-contrib/go-moonscript/lua"
 
-	moonrt "github.com/tarantool-contrib/go-moonscript/runtime"
+	moonrt "github.com/tarantool-contrib/go-moonscript/moonscript/runtime"
 )
 
 // childEnv, set to the program name, makes the test binary act as a Lua

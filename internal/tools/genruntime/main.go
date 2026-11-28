@@ -1,8 +1,9 @@
 // Command genruntime compiles the MoonScript sources of the runtime's
-// pure-Lua modules (runtime/moonsrc/**.moon -> runtime/lua/**.lua) and of the
+// pure-Lua modules (moonscript/runtime/moonsrc/**.moon ->
+// moonscript/runtime/lua/**.lua) and of the
 // moon CLI driver (cmd/moon/moon.moon -> cmd/moon/moon.lua) with this port.
 // The outputs are embedded with go:embed; run it through `go generate
-// ./runtime` after changing a source or the compiler.
+// ./moonscript/runtime` after changing a source or the compiler.
 //
 // The generated Lua carries no header comment so that its line numbers are
 // those of the reference compiler's output (they show up in error messages
@@ -16,7 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/tarantool-contrib/go-moonscript/runtime/gen"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/runtime/gen"
 )
 
 func main() {

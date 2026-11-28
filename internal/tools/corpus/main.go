@@ -76,7 +76,7 @@ var (
 	flagNoMutants  = flag.Bool("no-mutants", false, "ignore the derived mutant files (repo ~mutant/...)")
 	flagLint       = flag.Bool("lint", false, "lint mode: ref/run/-diff compare moonc -l instead of the compiler (see lint.go)")
 	flagStrict     = flag.Bool("strict", false, "run, -lint: exit with status 1 unless every file matches")
-	flagPinned     = flag.String("pinned", "testdata/corpus", "export, fetch, prepare: directory of the committed manifest.tsv and expected.tsv")
+	flagPinned     = flag.String("pinned", "moonscript/testdata/corpus", "export, fetch, prepare: directory of the committed manifest.tsv and expected.tsv")
 	flagBlobIDs    = flag.Bool("blob-ids", true, "export: write the git blob ids too (fetch can then skip the commit trees)")
 	flagGitURL     = flag.String("git-url", "https://github.com/%s.git", "fetch: repository URL, %s is owner/name")
 	flagFetchJobs  = flag.Int("fetch-j", 16, "fetch: parallel repositories")

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tarantool-contrib/go-moonscript/ast"
-	"github.com/tarantool-contrib/go-moonscript/compiler"
-	"github.com/tarantool-contrib/go-moonscript/parse"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/ast"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/compiler"
+	"github.com/tarantool-contrib/go-moonscript/moonscript/parse"
 )
 
 // Parse stage outcomes.
@@ -326,6 +326,7 @@ func faultFrame(stack string) string {
 				fn = fn[:i]
 			}
 			fn = strings.TrimPrefix(fn, "github.com/tarantool-contrib/go-moonscript/")
+			fn = strings.TrimPrefix(fn, "moonscript/")
 			if afterPanic {
 				return fn
 			}

@@ -4,15 +4,15 @@
 # PUC Lua 5.1.5; for the LuaJIT references, luajitref:2.1, which is
 # moonref:0.8.0 plus Debian's luajit 2.1, built here if missing):
 #
-#   testdata/moon_runner/ref/<name>.{stdout,stderr,exit}
-#       for every case in testdata/moon_runner/cases.tsv, run in
-#       testdata/moon_runner (TestMoonRunner)
-#   testdata/moon_smoke/ref/<name>.{stdout,stderr,exit}
-#       for every script listed in testdata/moon_smoke/scripts.txt (upstream
+#   moonscript/testdata/moon_runner/ref/<name>.{stdout,stderr,exit}
+#       for every case in moonscript/testdata/moon_runner/cases.tsv, run in
+#       moonscript/testdata/moon_runner (TestMoonRunner)
+#   moonscript/testdata/moon_smoke/ref/<name>.{stdout,stderr,exit}
+#       for every script listed in moonscript/testdata/moon_smoke/scripts.txt (upstream
 #       docs examples and spec inputs), run in testdata; <name> is the path
 #       with "/" replaced by "_" (TestMoonSmoke; a script still running after
 #       10s is killed and recorded with exit status 124, the test skips it)
-#   testdata/moon_runner/ref_luajit/, testdata/moon_smoke/ref_luajit/
+#   moonscript/testdata/moon_runner/ref_luajit/, moonscript/testdata/moon_smoke/ref_luajit/
 #       the same with upstream bin/moon run by luajit instead of lua5.1
 #       (TestMoonRunnerLuaJIT, TestMoonSmokeLuaJIT: the port with
 #       MOON_LUA=luajit). The launcher is the image's LuaRocks wrapper,
@@ -20,7 +20,7 @@
 #       /usr/bin/luajit; LuaJIT loads the Lua 5.1 lpeg and lfs C modules.
 #
 # The reference runs with the port's moonscript.cmd.coverage
-# (runtime/lua/moonscript/cmd/coverage.lua) mounted over the installed one:
+# (moonscript/runtime/lua/moonscript/cmd/coverage.lua) mounted over the installed one:
 # upstream's hooks a tail call and never reports anything on Lua 5.1, the
 # port fixes that on purpose, and the moon -c cases check the fixed module
 # on the reference interpreter.
@@ -76,12 +76,12 @@ export PATH=/tmp/jitbin:$PATH
 
 # reference image ref-dir setup-script
 reference() {
-	timeout 1800 docker run --rm --user "$(id -u):$(id -g)" -v "$root/testdata":/data \
-		-v "$root/runtime/lua/moonscript/cmd/coverage.lua":/usr/local/share/lua/5.1/moonscript/cmd/coverage.lua:ro \
+	timeout 1800 docker run --rm --user "$(id -u):$(id -g)" -v "$root/moonscript/testdata":/data \
+		-v "$root/moonscript/runtime/lua/moonscript/cmd/coverage.lua":/usr/local/share/lua/5.1/moonscript/cmd/coverage.lua:ro \
 		"$1" bash -c "$3$run_cases" bash "$2" 2>&1 | head -c 100000
-	echo "moon_runner/$2: $(ls "$root/testdata/moon_runner/$2"/*.exit | wc -l) cases"
-	echo "moon_smoke/$2: $(ls "$root/testdata/moon_smoke/$2"/*.exit | wc -l) scripts," \
-		"$(grep -l '^0$' "$root/testdata/moon_smoke/$2"/*.exit | wc -l) exit 0"
+	echo "moon_runner/$2: $(ls "$root/moonscript/testdata/moon_runner/$2"/*.exit | wc -l) cases"
+	echo "moon_smoke/$2: $(ls "$root/moonscript/testdata/moon_smoke/$2"/*.exit | wc -l) scripts," \
+		"$(grep -l '^0$' "$root/moonscript/testdata/moon_smoke/$2"/*.exit | wc -l) exit 0"
 }
 
 if [ "$which" != luajit ]; then

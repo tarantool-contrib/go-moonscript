@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Regenerates testdata/docs/ (used by docs_test.go, `go test -run Docs .`)
+# Regenerates moonscript/testdata/docs/ (used by moonscript/docs_test.go,
+# `go test -run Docs ./moonscript`)
 # from the upstream documentation and the reference compiler.
 #
 # Every ```moon, ```moononly and ```moonret block of docs/*.md becomes
-# testdata/docs/<doc>_<NNN>.moon; the reference moonscript.base.to_lua output
+# moonscript/testdata/docs/<doc>_<NNN>.moon; the reference moonscript.base.to_lua output
 # is stored next to it as <doc>_<NNN>.lua (exact code) or <doc>_<NNN>.err
 # (exact error message). MANIFEST.tsv records where each block comes from.
 #
@@ -15,7 +16,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-out="$root/testdata/docs"
+out="$root/moonscript/testdata/docs"
 moon_src=${MOON_SRC:-${XDG_CACHE_HOME:-$HOME/.cache}/go-moonscript/moonscript-0.8.0}
 image=${MOONREF:-moonref:0.8.0}
 

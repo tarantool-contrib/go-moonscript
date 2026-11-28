@@ -75,7 +75,7 @@ import (
 
 	lua "github.com/tarantool-contrib/go-moonscript/lua"
 
-	moonrt "github.com/tarantool-contrib/go-moonscript/runtime"
+	moonrt "github.com/tarantool-contrib/go-moonscript/moonscript/runtime"
 )
 
 //go:embed moon.lua

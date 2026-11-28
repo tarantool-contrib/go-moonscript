@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Regenerates the reference outputs under testdata/upstream_spec/ref/ used by
+# Regenerates the reference outputs under moonscript/testdata/upstream_spec/ref/ used by
 # spec_runtime_test.go (needs Docker and the moonref:0.8.0 image):
 #
 #   ref/<name>.lua            reference to_lua output for each
-#                             testdata/upstream_spec/{,lib/}*.moon
+#                             moonscript/testdata/upstream_spec/{,lib/}*.moon
 #   ref/runtime_compiles.json every compile.tree call the specs make while
 #                             running on the reference (scripts/refspecrun.lua
 #                             runs them with the same busted stand-in; this
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-data="$root/testdata/upstream_spec"
+data="$root/moonscript/testdata/upstream_spec"
 image=${MOONREF:-moonref:0.8.0}
 
 mkdir -p "$data/ref"

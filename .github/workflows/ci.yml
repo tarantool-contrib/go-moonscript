@@ -2,13 +2,13 @@ name: CI
 
 # lint: golangci-lint (go vet, staticcheck, ...; formatting) and go vet over
 # every package but the vendored gopher-lua.
-# generate: the generated files (parse/parser_gen.go, runtime/lua), go.mod
+# generate: the generated files (moonscript/parse/parser_gen.go, moonscript/runtime/lua), go.mod
 # and lua/moonscript.patch are up to date.
 # test: the test suite on the oldest and the newest supported Go, and
 # pristine gopher-lua's own suites against the patched copy; the race
 # detector and coverage on the newest.
 # corpus: the parser, the compiler and the linter against upstream moonc
-# 0.8.0 on real-world code (scripts/check-corpus.sh, testdata/corpus/).
+# 0.8.0 on real-world code (scripts/check-corpus.sh, moonscript/testdata/corpus/).
 #
 # Weekly, everything runs again, against the latest patch release of each
 # Go version.
@@ -120,7 +120,7 @@ jobs:
     # The real-world corpus: 19,960 files of 1,609 GitHub repositories and
     # 55,595 mutants of them, compared with digests of upstream moonc
     # 0.8.0's outputs. The sources are not committed: they are fetched from
-    # their repositories at pinned commits (testdata/corpus/manifest.tsv)
+    # their repositories at pinned commits (moonscript/testdata/corpus/manifest.tsv)
     # and cached under the manifest's hash, so a fetch happens only when
     # the manifest changes or the cache was evicted. Repositories that are
     # gone are reported and skipped.
@@ -139,7 +139,7 @@ jobs:
         id: cache
         with:
           path: .corpus/files
-          key: corpus-v1-${{ hashFiles('testdata/corpus/manifest.tsv') }}
+          key: corpus-v1-${{ hashFiles('moonscript/testdata/corpus/manifest.tsv') }}
           # else an older corpus: only the files it lacks are fetched
           restore-keys: corpus-v1-
 

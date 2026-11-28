@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Regenerates the parser golden files under testdata/parse/ with the
+# Regenerates the parser golden files under moonscript/testdata/parse/ with the
 # reference implementation (Docker image moonref:0.8.0).
 #
-# Layout: testdata/parse/<group>/<name>.moon is an input; next to it the
+# Layout: moonscript/testdata/parse/<group>/<name>.moon is an input; next to it the
 # reference output is stored as <name>.tree (what `moonc -T` prints) or
-# <name>.err (the exact parse.string error message). parse/golden_test.go
+# <name>.err (the exact parse.string error message). moonscript/parse/golden_test.go
 # compares the Go parser against these files.
 #
 # Differential fuzzing against the same reference lives in
@@ -13,10 +13,10 @@
 # Usage:
 #   scripts/gen-parse-golden.sh            regenerate expected outputs only
 #   scripts/gen-parse-golden.sh --import   first (re)copy the external corpus:
-#       testdata/spec/inputs        -> testdata/parse/spec/
-#       testdata/spec/error_inputs  -> testdata/parse/spec_errors/
-#       upstream *.moon, bin/*      -> testdata/parse/upstream/
-#       ```moon blocks in docs/*.md -> testdata/parse/docs/
+#       moonscript/testdata/spec/inputs        -> moonscript/testdata/parse/spec/
+#       moonscript/testdata/spec/error_inputs  -> moonscript/testdata/parse/spec_errors/
+#       upstream *.moon, bin/*      -> moonscript/testdata/parse/upstream/
+#       ```moon blocks in docs/*.md -> moonscript/testdata/parse/docs/
 #     (snippets/ and fuzz/ are maintained by hand / by the fuzzer)
 #
 # Environment:
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-golden="$root/testdata/parse"
+golden="$root/moonscript/testdata/parse"
 moon_src=${MOON_SRC:-${XDG_CACHE_HOME:-$HOME/.cache}/go-moonscript/moonscript-0.8.0}
 image=${MOONREF:-moonref:0.8.0}
 
@@ -37,8 +37,8 @@ import_corpus() {
 	rm -rf "$golden/spec" "$golden/spec_errors" "$golden/upstream" "$golden/docs"
 	mkdir -p "$golden/spec" "$golden/spec_errors" "$golden/upstream" "$golden/docs"
 
-	cp "$root"/testdata/spec/inputs/*.moon "$golden/spec/"
-	cp "$root"/testdata/spec/error_inputs/*.moon "$golden/spec_errors/"
+	cp "$root"/moonscript/testdata/spec/inputs/*.moon "$golden/spec/"
+	cp "$root"/moonscript/testdata/spec/error_inputs/*.moon "$golden/spec_errors/"
 
 	# every MoonScript source of the upstream repo (spec/inputs is already
 	# covered above), plus the bin/ scripts (some are Lua: they make good

@@ -44,8 +44,8 @@ linters:
     paths:
       - ^lua/ # the gopher-lua fork, kept close to upstream
       - testdata/
-      - parse/parser_gen\.go$ # internal/tools/genparser
-      - parse/dispatch_gen\.go$ # internal/tools/gendispatch
+      - ^moonscript/parse/parser_gen\.go$ # internal/tools/genparser
+      - ^moonscript/parse/dispatch_gen\.go$ # internal/tools/gendispatch
 
 formatters:
   enable:
@@ -60,5 +60,5 @@ formatters:
     paths:
       - ^lua/
       - testdata/
-      - parse/parser_gen\.go$
-      - parse/dispatch_gen\.go$
+      - ^moonscript/parse/parser_gen\.go$
+      - ^moonscript/parse/dispatch_gen\.go$
