@@ -45,7 +45,8 @@ govulncheck ./...                   # v1.8.0
 ```
 
 `scripts/ci/run.sh all` runs all of them once, as the full checks do
-(the coverage run, and luascope and luamerge with `-race -count=100`),
+(the coverage run, luascope with `-race -count=30` and luamerge with
+`-race -count=100`),
 and prints the time each took; `scripts/ci/run.sh JOB` runs one (`-h`
 lists them).
 

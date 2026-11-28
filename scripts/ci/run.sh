@@ -129,7 +129,7 @@ job_fuzz() {
 
 job_all() {
 	local jobs=(
-		"vet" "test" "gopher-lua" "coverage" "testrace luascope" "testrace luamerge"
+		"vet" "test" "gopher-lua" "coverage" "testrace luascope 30" "testrace luamerge 100"
 		"generate" "govulncheck" "lint root" "lint luascope" "lint luamerge" "codespell"
 	)
 	local failed=() times=() j start status

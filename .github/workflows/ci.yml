@@ -28,8 +28,8 @@ name: CI
 #                 newest supported Go; with the Lua interpreters if luamerge
 #                 is affected; pristine gopher-lua's suites for lua/
 #   coverage      full checks: go test -race ./... with coverage
-#   testrace      luascope and luamerge with -race -count=100 (full
-#                 checks; 10 on a pull request)
+#   testrace      luascope and luamerge with -race -count=N: in the full
+#                 checks 100 (luascope 30), on a pull request 10
 #   govulncheck   the module's dependencies and code against the Go
 #                 vulnerability database
 #   codespell     luascope/ and luamerge/ (.codespellrc)
@@ -280,9 +280,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.race-trees != '[]'
     runs-on: ubuntu-24.04
-    # luascope's suite takes 22 minutes with -race -count=100 on a GitHub
-    # runner; timeout-minutes = go test -timeout + 5 leaves room for a slow
-    # one.
+    # luascope's suite on the fork takes about 24 seconds per -race run
+    # (5 CPUs), so 100 runs would pass go test's 40 minutes: it runs 30;
+    # timeout-minutes = go test -timeout + 5 leaves room for a slow one.
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -303,11 +303,11 @@ jobs:
           interpreters: ${{ env.LUATEST_INTERPRETERS }}
 
       # -count shakes out tests that depend on the order of execution: 100
-      # in the full checks, 10 on a pull request
+      # (luascope 30) in the full checks, 10 on a pull request
       - name: go test -race -count=N
         env:
           TREE: ${{ matrix.tree }}
-          COUNT: ${{ needs.changes.outputs.all == 'true' && '100' || '10' }}
+          COUNT: ${{ needs.changes.outputs.all != 'true' && '10' || matrix.tree == 'luascope' && '30' || '100' }}
         run: scripts/ci/run.sh testrace "$TREE" "$COUNT"
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
