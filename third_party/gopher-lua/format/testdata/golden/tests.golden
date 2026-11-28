@@ -1,0 +1,34 @@
+local t = require('luatest')
+local g = t.group('format', {{engine = 'memtx'}, {engine = 'vinyl'}})
+
+g.before_all(function(cg)
+    cg.server = server:new({alias = 'master', box_cfg = {memtx_use_mvcc_engine = true}})
+    cg.server:start()
+end)
+
+g.after_all(function(cg) cg.server:drop() end)
+
+g.test_insert = function(cg)
+    cg.server:exec(function(engine)
+        local s = box.schema.space.create('test', {engine = engine})
+        s:create_index('pk')
+        s:insert{1, 'one'} -- table call sugar is kept
+        t.assert_equals(s:get(1), {1, 'one'})
+        t.assert_error_msg_content_equals(
+            "Duplicate key exists in unique index \"pk\" in space \"test\"",
+            s.insert,
+            s,
+            {1, 'two'}
+        )
+    end, {cg.params.engine})
+end
+
+local function check(cases) for _, c in ipairs(cases) do t.assert_equals(c[1], c[2], c.msg) end end
+
+check{
+    {1 + 1, 2, msg = 'sum'},
+    {('x'):rep(3), 'xxx'},
+    {#{n = 1}, 0},
+    {-2 ^ 2, -4},
+    {(-2) ^ 2, 4},
+}

@@ -1,0 +1,41 @@
+-- A module in the style of Tarantool's.
+local log = require('log')
+local fiber = require 'fiber'
+
+local M = {}
+local DEFAULT_TIMEOUT=0.5   -- seconds
+
+
+
+--- Calls fn until it returns true or the timeout ends.
+-- @param fn the function
+function M.retry(fn,timeout,...)
+    timeout = timeout or DEFAULT_TIMEOUT
+    local deadline=fiber.clock()+timeout
+    repeat
+        local ok,res = pcall(fn,...)
+        if ok and res then return res end
+        if not ok then log.warn('retry: %s',res) end
+        fiber.sleep(0.01)
+    until fiber.clock()>deadline
+    return nil,'timed out after '..timeout..' seconds waiting for the condition to hold'
+end
+
+local cfg = {
+    listen = 3301,
+    memtx_memory = 256 * 1024 * 1024; -- 256 MiB
+
+    -- replication
+    replication = {'replicator:password@127.0.0.1:3301','replicator:password@127.0.0.1:3302'},
+    read_only = false,
+}
+
+function M:start(opts)
+    opts=opts or {}
+    for k,v in pairs(cfg) do if opts[k]==nil then opts[k]=v end end
+    box.cfg(opts)
+    box.schema.user.grant('guest','read,write,execute','universe',nil,{if_not_exists=true})
+    self.started = true
+end
+
+return M

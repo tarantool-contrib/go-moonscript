@@ -1,0 +1,26 @@
+#!/usr/bin/env luajit
+-- LuaJIT: goto, labels, hexadecimal floats, escapes and cdata numerals.
+local bit = require("bit")
+
+for i = 1, 3 do
+    for j = 1, 3 do
+        if (i + j) % 2 == 0 then goto continue end
+        io.write(i, j, "\n")
+        ::continue::
+    end
+end
+
+local x = 0x1p4 + 0x.8 + 1e-3 -- 16.5 and a bit
+local s = "tab\tbell\a\x41\u{20AC}\z
+           continued"
+local big = 1LL
+local mask = bit.band(bit.bor(0xff, 0x100), bit.lshift(1, 8))
+
+local t = {
+    -- the dot form and the bracket form are the author's
+    a = 1,
+    ["b"] = 2,
+    [ [[c]] ] = 3,
+    nested = {x = {y = {z = "deep"}}},
+}
+print(t.a, t["b"], t[ [[c]] ], x .. "", #s, big, mask)

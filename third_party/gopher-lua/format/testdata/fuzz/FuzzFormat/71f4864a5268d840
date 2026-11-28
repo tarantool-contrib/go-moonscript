@@ -1,0 +1,3 @@
+go test fuzz v1
+[]byte("function A(...)loca,A0=0 do A(...)A=(0)A0\"0\"end retur.A0()end function A(...)A((A(...)))loca,A0=0 %A000000()end do do A(A..\"\"..A00\"\")(\"\"..A..\"\"..0,0,0,A\"\")(\"\"..0%0%0,function(...)retur.A0(\"\"%...)end)end end")
+bool(true)
