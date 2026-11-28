@@ -392,6 +392,109 @@ func TestLexer_Tokens_Symbols(t *testing.T) {
 	testLexCases(t, tests)
 }
 
+// TestLexer_Tokens_ShiftsAndEquals: the fork's lexer reads "<<=" as "<" and
+// "<=", which are "<<" and "=", and that "=" starts "==" when "=" follows.
+func TestLexer_Tokens_ShiftsAndEquals(t *testing.T) {
+	t.Parallel()
+
+	testLexCases(t, []lexCase{
+		{name: "shift assignments", src: "a<<=b>>=c", tokens: []tok{
+			name("a"), symbol("<<"), symbol("="), name("b"), symbol(">>"), symbol("="), name("c"),
+		}},
+		{name: "shift before an equality", src: "a<<==b>>===c", tokens: []tok{
+			name("a"), symbol("<<"), symbol("=="), name("b"), symbol(">>"), symbol("=="), symbol("="), name("c"),
+		}},
+		{name: "three of them", src: "a<<<b>>>=c///d", tokens: []tok{
+			name("a"), symbol("<<"), symbol("<"), name("b"), symbol(">>"), symbol(">="), name("c"),
+			symbol("//"), symbol("/"), name("d"),
+		}},
+		{name: "spaced", src: "a < < b / / c", tokens: []tok{
+			name("a"), symbol("<"), symbol("<"), name("b"), symbol("/"), symbol("/"), name("c"),
+		}},
+	})
+}
+
+// TestLexer_Tokens_NotLuaJIT: a token that LuaJIT's lexer refuses and
+// another dialect reads is read whole, marked, and the lexer reads on after
+// it, as from the start of a file but for its header: a "#" or a byte order
+// mark there is a token.
+func TestLexer_Tokens_NotLuaJIT(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		src  string
+		// marked are the texts of the tokens NotLuaJIT marks.
+		marked []string
+		tokens []tok
+	}{
+		{
+			name: "escapes only Lua 5.1 reads", src: `f("\.", '\%', "\x4") x`,
+			marked: []string{`"\."`, `'\%'`, `"\x4"`},
+			tokens: []tok{
+				name("f"), symbol("("), on(lex.String, `"\."`, 1), symbol(","), on(lex.String, `'\%'`, 1),
+				symbol(","), on(lex.String, `"\x4"`, 1), symbol(")"), name("x"),
+			},
+		},
+		{
+			name: "escapes only Lua 5.4 reads", src: `"\u{D800}" "\u{7FFFFFFF}"`,
+			marked: []string{`"\u{D800}"`, `"\u{7FFFFFFF}"`},
+			tokens: []tok{on(lex.String, `"\u{D800}"`, 1), on(lex.String, `"\u{7FFFFFFF}"`, 1)},
+		},
+		{
+			name: "a refused string over lines", src: "'\\q\\\n\\z\n  x' y",
+			marked: []string{"'\\q\\\n\\z\n  x'"},
+			tokens: []tok{{Kind: lex.String, Text: "'\\q\\\n\\z\n  x'", Line: 1, EndLine: 3}, on(lex.Name, "y", 3)},
+		},
+		{
+			name: "numerals other dialects end", src: "1e5..x 3then y 0x10else",
+			marked: []string{"1e5..x", "3then", "0x10else"},
+			tokens: []tok{number("1e5..x"), number("3then"), name("y"), number("0x10else")},
+		},
+		{
+			name: "a hash after a refused token", src: `'\q'#t`,
+			marked: []string{`'\q'`},
+			tokens: []tok{on(lex.String, `'\q'`, 1), symbol("#"), name("t")},
+		},
+		{
+			name: "a byte order mark after a refused numeral", src: "1e5..\xEF\xBB\xBFx#",
+			marked: []string{"1e5..\xEF\xBB\xBFx"},
+			tokens: []tok{number("1e5..\xEF\xBB\xBFx"), symbol("#")},
+		},
+		{
+			name: "a byte order mark after a refused string", src: "'\\q'\xEF\xBB\xBFx #",
+			marked: []string{`'\q'`},
+			tokens: []tok{on(lex.String, `'\q'`, 1), name("\xEF\xBB\xBFx"), symbol("#")},
+		},
+		{
+			name: "LuaJIT's own", src: "\"\\x41\\z  \" 0x1p4 1ULL \xD0\xBF",
+			marked: nil,
+			tokens: []tok{on(lex.String, "\"\\x41\\z  \"", 1), number("0x1p4"), number("1ULL"), name("\xD0\xBF")},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tt.tokens, testTokens(t, lex.New([]byte(tt.src)), tt.src))
+
+			tokens, err := lex.New([]byte(tt.src)).Tokens()
+			require.NoError(t, err)
+
+			var marked []string
+
+			for _, token := range tokens {
+				if token.NotLuaJIT {
+					marked = append(marked, tt.src[token.Start:token.End])
+				}
+			}
+
+			assert.Equal(t, tt.marked, marked)
+		})
+	}
+}
+
 func TestLexer_Tokens_LineBreaks(t *testing.T) {
 	t.Parallel()
 
@@ -429,12 +532,12 @@ func TestLexer_Next_EOF(t *testing.T) {
 
 	first, err := lexer.Next()
 	require.NoError(t, err)
-	assert.Equal(t, lex.Token{Kind: lex.Name, Start: 0, End: 1, Line: 1, EndLine: 1}, first)
+	assert.Equal(t, lex.Token{Kind: lex.Name, Start: 0, End: 1, Line: 1, EndLine: 1, NotLuaJIT: false}, first)
 
 	for range 2 {
 		eof, err := lexer.Next()
 		require.NoError(t, err)
-		assert.Equal(t, lex.Token{Kind: lex.EOF, Start: 3, End: 3, Line: 3, EndLine: 3}, eof,
+		assert.Equal(t, lex.Token{Kind: lex.EOF, Start: 3, End: 3, Line: 3, EndLine: 3, NotLuaJIT: false}, eof,
 			"EOF is at the end of the source, on its last line, every time")
 	}
 }

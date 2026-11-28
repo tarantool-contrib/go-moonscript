@@ -102,7 +102,7 @@ type gopherToken struct {
 // and leaves out the trivia (white space, line breaks, comments) and the end
 // of the source.
 func gopherTokens(src []byte) ([]gopherToken, error) {
-	options := parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false}
+	options := parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false, Lua52Compat: false}
 
 	lexemes, err := parse.Tokenize(src, "corpus", options)
 	if err != nil {
@@ -150,10 +150,12 @@ func sameAsGopher(mine lex.Token, text string, theirs gopherToken) bool {
 	}
 }
 
-// TestLexer_Tokens_MatchGopherLua checks the lexer against an independent
-// one: over the corpus, in every line-ending style, it reads the same tokens
-// on the same lines as gopher-lua's scanner, comments left out. gopher-lua
-// reads Lua 5.1 (with goto); every file of the corpus is Lua 5.1.
+// TestLexer_Tokens_MatchGopherLua checks the tokens of the lexer against the
+// tokens of the fork's lexer that it reads them with, and their lines
+// against the lines that the syntax tree's positions give (ast.Lines): over
+// the corpus, in every line-ending style, the same tokens on the same lines,
+// comments left out. The corpus is Lua 5.1 (with goto), which the fork reads
+// without a lexical error, so every token is the fork's.
 func TestLexer_Tokens_MatchGopherLua(t *testing.T) {
 	t.Parallel()
 
