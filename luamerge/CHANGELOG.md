@@ -16,15 +16,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `github.com/tarantool-contrib/go-moonscript/luamerge/cmd/luamerge`, the Docker image
   `ghcr.io/tarantool-contrib/luamerge`, and the versions are the module's.
 - The requires are found with the parser of the monorepo's gopher-lua fork
-  (in its LuaJIT dialect) instead of gopher-lua v1.1.2. It reads what
-  Lua 5.1 and LuaJIT read: the copy written for it turns empty
-  statements (Lua 5.2) into `do end` and puts the `(` of a call across a
-  line break (Lua 5.2) on the line before, as gopher-lua took both; a
-  file that LuaJIT does not compile (a `goto` into the scope of a local)
-  is read by the token scanner, with a warning. The reasons of those
-  warnings are Lua's messages: `unexpected symbol near "="` where
+  in its LuaJIT dialect instead of gopher-lua v1.1.2, on the file as it
+  is, about twice as fast: the position of a module name is the span of
+  its literal. A file it refuses, one written for Lua 5.2 and later or for
+  LuaJIT 2.1 builds of 2026, is parsed again in the syntax of LuaJIT built
+  with `LUAJIT_ENABLE_LUA52COMPAT`, which reads the empty statements, the
+  statements after `break` and the calls across a line break of Lua 5.2
+  as they are, from a copy with the rest of the newer syntax written the
+  Lua 5.1 way, as before. A file that neither reads, or that LuaJIT does
+  not compile (a `...` outside a vararg function, a `break` outside a
+  loop, a `goto` into the scope of a local), is read by the token
+  scanner, with a warning. The reasons of those warnings are the parser's
+  messages and name the file's tokens: `unexpected symbol near "="` where
   gopher-lua said `syntax error near "="`, `'end' expected (to close
   'function' at line 1) at the end of the file`.
+- Files are read that went to the token scanner: LuaJIT's numerals with
+  a suffix such as `1LLU`, and `goto` used as a name right after a name,
+  as in `x = goto goto l`.
+- The source transforms read the tokens of the fork's lexer, with the
+  strings and numerals that only other dialects read as before; their
+  output is the same.
 
 ### Added
 
