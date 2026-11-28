@@ -74,6 +74,14 @@ type Options struct {
 	// 12 bytes a token (a source has about one per 4 bytes) and a tenth of
 	// the parse time, and nothing when they are not asked for.
 	Tokens bool
+	// Lua52Compat, under LuaJIT, reads the syntax of LuaJIT built with
+	// LUAJIT_ENABLE_LUA52COMPAT (LJ_52), as its lj_parse.c does: ";" is
+	// a statement of its own, which does nothing, "break" need not be the
+	// last statement of its block, a call's "(" may start a line (there is
+	// no "ambiguous syntax (function call x new statement)"), and goto is
+	// a keyword everywhere, never a name. A source that parses either way
+	// has the same tree both ways. Under Lua51 it changes nothing.
+	Lua52Compat bool
 }
 
 // ParseChunk parses a chunk held in memory into its tree, with the
@@ -98,6 +106,7 @@ func ParseChunk(src []byte, name string, opts Options) (*ast.Chunk, error) {
 func parseSource(src []byte, name string, opts Options) (chunk []ast.Stmt, block ast.Span, ls *lexer, err error) {
 	dialect := opts.Dialect
 	p := &parser{jit: dialect == LuaJIT}
+	p.lj52 = p.jit && opts.Lua52Compat
 	sc := scratchPool.Get().(*scratch)
 	p.fsCache, p.bcstack, p.lnstack = sc.fsCache, sc.bcstack, sc.lnstack
 	p.stmtStack, p.exprStack, p.fieldStack = sc.stmtStack, sc.exprStack, sc.fieldStack
@@ -254,6 +263,7 @@ type parser struct {
 	fs     *funcState
 	jit    bool
 	r51    bool // the model of Lua 5.1's registers runs (Lua51Overflow)
+	lj52   bool // LuaJIT's LJ_52 syntax (Options.Lua52Compat); go-moonscript patch
 	level  int
 	nextID int
 	// LuaJIT's code generator: the bytecode of the functions being parsed,
@@ -319,9 +329,10 @@ func (p *parser) checkMatch(what, who, where int) {
 	}
 }
 
-// isName: LuaJIT's goto is a name where a name is expected.
+// isName: LuaJIT's goto is a name where a name is expected (lex_str), but
+// under LJ_52.
 func (p *parser) isName() bool {
-	return p.ls.t.typ == tkName || p.ls.t.typ == tkGoto
+	return p.ls.t.typ == tkName || p.ls.t.typ == tkGoto && !p.lj52
 }
 
 // strCheckName is str_checkname / lex_str: the name, its line and its
@@ -805,11 +816,17 @@ func (p *parser) statement() bool {
 		st := &ast.BreakStmt{}
 		st.SetLine(tokLine)
 		add(st)
-		return true
+		return !p.lj52 // the last statement of its block, but under LJ_52
+	case ';':
+		if !p.lj52 {
+			add(p.exprStat()) // an unexpected symbol
+			break
+		}
+		p.next() // LJ_52's empty statement
 	case tkLabel:
 		p.labelStat()
 	case tkGoto:
-		if ls.lookahead() == tkName {
+		if p.lj52 || ls.lookahead() == tkName {
 			p.next()
 			name, _, nameSpan := p.strCheckName()
 			if l := p.golaFindLabel(name); l >= 0 { // a backward goto in the scope is a loop
@@ -1237,7 +1254,8 @@ func (p *parser) assignAdjust(nvars, nexps int, e *expDesc) {
 	}
 }
 
-// labelStat parses LuaJIT's '::' NAME '::' and the labels right after it.
+// labelStat parses LuaJIT's '::' NAME '::' and the labels right after it,
+// with the ";" between them under LJ_52.
 func (p *parser) labelStat() {
 	ls := p.ls
 	line, start := ls.t.line, ls.t.start
@@ -1255,10 +1273,16 @@ func (p *parser) labelStat() {
 	st.SetLine(line)
 	st.SetSpan(p.spanFrom(start))
 	p.stmtStack = append(p.stmtStack, st)
-	if ls.t.typ == tkLabel {
-		p.enterLevel()
-		p.labelStat()
-		p.leaveLevel()
+	for { // the labels right after it, and under LJ_52 the ";"
+		if ls.t.typ == tkLabel {
+			p.enterLevel()
+			p.labelStat()
+			p.leaveLevel()
+		} else if p.lj52 && ls.t.typ == ';' {
+			p.next()
+		} else {
+			break
+		}
 	}
 	// a label at the end of a block is out of the scope of its locals
 	if blockFollow(ls.t.typ) && ls.t.typ != tkUntil {
@@ -1488,7 +1512,7 @@ func (p *parser) funcArgs(e *expDesc) (args []ast.Expr, line, endLine int) {
 	where := ls.linenumber
 	switch ls.t.typ {
 	case '(':
-		if where != ls.lastline {
+		if where != ls.lastline && !p.lj52 {
 			ls.syntaxError("ambiguous syntax (function call x new statement)")
 		}
 		line = ls.t.line
