@@ -84,12 +84,12 @@ linters:
             - "!**/internal/luatest/*.go"
           allow:
             - $gostd
-            - "github.com/tarantool/go-luamerge"
+            - "github.com/tarantool-contrib/go-moonscript/luamerge"
             - "github.com/tarantool/go-config"
             - "github.com/spf13/pflag"
-            - "github.com/yuin/gopher-lua"
+            - "github.com/tarantool-contrib/go-moonscript/lua/"
           deny:
-            - pkg: "github.com/tarantool/go-luamerge/internal/luatest"
+            - pkg: "github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
               desc: test support code, import it only from _test.go files
         # internal/luatest is the differential test harness: test support code
         # that only _test.go files import (the main list denies it to every
@@ -99,15 +99,15 @@ linters:
             - "**/internal/luatest/*.go"
           allow:
             - $gostd
-            - "github.com/tarantool/go-luamerge"
+            - "github.com/tarantool-contrib/go-moonscript/luamerge"
             - "github.com/stretchr/testify"
         test:
           files:
             - "$test"
           allow:
             - $gostd
-            - "github.com/tarantool/go-luamerge"
+            - "github.com/tarantool-contrib/go-moonscript/luamerge"
             - "github.com/tarantool/go-config"
             - "github.com/spf13/pflag"
             - "github.com/stretchr/testify"
-            - "github.com/yuin/gopher-lua"
+            - "github.com/tarantool-contrib/go-moonscript/lua/"

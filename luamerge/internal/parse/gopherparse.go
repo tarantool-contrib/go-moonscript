@@ -1,19 +1,19 @@
 // Package parse extracts require(...) call information from Lua source code
-// using the gopher-lua parser. gopher-lua reads Lua 5.1; the source is read
-// with a lexer that knows every dialect first, and gopher-lua gets a copy of
-// it written in Lua 5.1 (see normalize).
+// using the parser of the gopher-lua fork of this repository (lua/parse),
+// which reads Lua 5.1 and LuaJIT 2.1; the source is read with a lexer that
+// knows every dialect first, and gopher-lua gets a copy of it written in Lua
+// 5.1 (see normalize).
 package parse
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/yuin/gopher-lua/ast"
-	"github.com/yuin/gopher-lua/parse"
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/parse"
 
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
@@ -39,21 +39,42 @@ type gopherParser struct{}
 
 // Parse reads source with the lexer, gives gopher-lua the copy of it written
 // in Lua 5.1 (see normalize), each string literal marked with its token (see
-// markedCopy), and walks the syntax tree for the uses of require. When
-// gopher-lua cannot read the copy, the token scanner finds them instead (see
-// scanRequires): a module must not fail the build because of its syntax. Only
-// a lexical error does, as no dialect reads such a file.
+// markedCopy), and walks the syntax tree for the uses of require. gopher-lua
+// reads the copy in its LuaJIT dialect, Lua 5.1 with goto and labels, which
+// the copy keeps. Where it rejects a call across a line break as ambiguous,
+// which Lua 5.2 reads as a call, the copy has the "(" on the line before, and
+// gopher-lua reads the copy again. When gopher-lua cannot read the copy, the
+// token scanner finds them instead (see scanRequires): a module must not fail
+// the build because of its syntax. Only a lexical error does, as no dialect
+// reads such a file.
 func (p *gopherParser) Parse(source []byte, filename string) (Result, error) {
 	tokens, err := significantTokens(source)
 	if err != nil {
 		return Result{}, fmt.Errorf("parsing lua source %q: %w", filename, err)
 	}
 
-	normalized := markedCopy(source, tokens)
+	var (
+		chunk []ast.Stmt
+		joins map[int]bool
+	)
 
-	chunk, err := parse.Parse(bytes.NewReader(normalized), filename)
+	for {
+		chunk, err = parse.ParseBytes(markedCopy(source, tokens, joins), filename, parse.LuaJIT)
+
+		line, ambiguous := ambiguousCall(err)
+		if !ambiguous || joins[line] {
+			break
+		}
+
+		if joins == nil {
+			joins = map[int]bool{}
+		}
+
+		joins[line] = true
+	}
+
 	if err != nil {
-		return Result{Requires: scanRequires(source, tokens), Fallback: newFallback(err, normalized)}, nil
+		return Result{Requires: scanRequires(source, tokens), Fallback: newFallback(err)}, nil
 	}
 
 	requires, err := findRequires(chunk, tokens)
@@ -64,13 +85,25 @@ func (p *gopherParser) Parse(source []byte, filename string) (Result, error) {
 	return Result{Requires: requires, Fallback: nil}, nil
 }
 
-// newFallback describes err, the error gopher-lua reports for normalized,
-// the marked copy of a source, as the Fallback of the source. The copy has
-// the lines of the source, but not its columns or its tokens, so only the
-// line and the token gopher-lua read are kept, a string without its mark. At
-// the end of the copy gopher-lua names no line: that is the line of the last
-// token.
-func newFallback(err error, normalized []byte) *Fallback {
+// ambiguousCall returns the line of the "(" that err, an error gopher-lua
+// reports, rejects as the start of an ambiguous call across a line break.
+func ambiguousCall(err error) (int, bool) {
+	var syntaxErr *parse.Error
+	if !errors.As(err, &syntaxErr) || syntaxErr.Token != "(" ||
+		syntaxErr.Message != "ambiguous syntax (function call x new statement)" {
+		return 0, false
+	}
+
+	return syntaxErr.Pos.Line, true
+}
+
+// newFallback describes err, the error gopher-lua reports for the marked copy
+// of a source, as the Fallback of the source. The copy has the lines of the
+// source, but not its columns or its tokens, so only the line and the token
+// gopher-lua read are kept, a string without its mark (see errorToken). At
+// the end of the copy gopher-lua names the token "<eof>", on the line of the
+// end; an error of a limit names no token.
+func newFallback(err error) *Fallback {
 	var syntaxErr *parse.Error
 	if !errors.As(err, &syntaxErr) {
 		// Not a syntax error: the parser failed some other way.
@@ -82,13 +115,34 @@ func newFallback(err error, normalized []byte) *Fallback {
 		message = strings.ToLower(message[:1]) + message[1:]
 	}
 
-	if syntaxErr.Pos.Line == parse.EOF {
-		return &Fallback{Line: bytes.Count(normalized, []byte("\n")) + 1, Reason: message + " at the end of the file"}
+	switch syntaxErr.Token {
+	case "<eof>":
+		return &Fallback{Line: syntaxErr.Pos.Line, Reason: message + " at the end of the file"}
+	case "":
+		return &Fallback{Line: syntaxErr.Pos.Line, Reason: message}
+	default:
+		reason := fmt.Sprintf("%s near %q", message, errorToken(syntaxErr.Token))
+
+		return &Fallback{Line: syntaxErr.Pos.Line, Reason: reason}
+	}
+}
+
+// errorToken returns the token a syntax error of gopher-lua names, a string
+// as its value without its mark. gopher-lua names a token as Lua prints it: a
+// string by its opening quote and its value up to the first NUL byte, where
+// the mark of a string of the marked copy starts (see markValue), so a value
+// with a NUL byte of its own is cut there.
+func errorToken(token string) string {
+	if token == "" || token[0] != '"' && token[0] != '\'' {
+		return token
 	}
 
-	token, _, _ := cutMark(syntaxErr.Token)
+	value := token[1:]
+	if before, _, marked := strings.Cut(value, string(markSeparator)); marked {
+		return before
+	}
 
-	return &Fallback{Line: syntaxErr.Pos.Line, Reason: fmt.Sprintf("%s near %q", message, token)}
+	return strings.TrimSuffix(value, token[:1])
 }
 
 // findRequires walks a parsed chunk and returns every use of require in it.

@@ -38,7 +38,7 @@ func TestBundle_TokenScanWarning(t *testing.T) {
 	assert.Equal(t, "token-scan", w.Kind.String())
 	assert.Equal(t, filepath.Join(dir, "broken.lua"), w.File)
 	assert.Equal(t, 1, w.Line, "the line the parser failed on")
-	assert.Contains(t, w.Message, `syntax error near "="`)
+	assert.Contains(t, w.Message, `unexpected symbol near "="`)
 	assert.Contains(t, out, `package.preload["broken"]`)
 	assert.Contains(t, out, `package.preload["module"]`, "the require the token scanner found is embedded")
 }

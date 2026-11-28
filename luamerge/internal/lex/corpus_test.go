@@ -2,6 +2,7 @@ package lex_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -11,26 +12,21 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yuin/gopher-lua/ast"
-	"github.com/yuin/gopher-lua/parse"
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/parse"
 
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 // testCorpus returns the Lua files the lexer is checked on: the test suites
-// of Lua 5.1 and of gopher-lua, which ship with the gopher-lua module (a
-// dependency, so it is in the module cache wherever this module builds), and
-// the testdata of this repository.
+// of Lua 5.1 and of gopher-lua, which ship with the gopher-lua module v1.1.2,
+// and the testdata of this repository. The fork of gopher-lua in lua/ has
+// neither suite and is no module of its own, so the module comes from the
+// module cache (go mod download fetches it when it is not there).
 func testCorpus(t *testing.T) []string {
 	t.Helper()
 
-	// #nosec G204 -- fixed arguments.
-	out, err := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Dir}}",
-		"github.com/yuin/gopher-lua").Output()
-	require.NoError(t, err, "locate the gopher-lua module")
-
-	module := strings.TrimSpace(string(out))
-	require.NotEmpty(t, module, "the gopher-lua module is not in the module cache")
+	module := gopherLuaModule(t)
 
 	roots := []string{
 		filepath.Join(module, "_lua5.1-tests"),
@@ -73,53 +69,80 @@ func lineEndings() map[string]func(src []byte) []byte {
 	}
 }
 
-// gopherTokens reads src with gopher-lua's scanner, which leaves comments out.
-func gopherTokens(src []byte) ([]ast.Token, error) {
-	scanner := parse.NewScanner(bytes.NewReader(src), "corpus")
-	lexer := new(parse.Lexer) // Scan only keeps the previous token type in it.
+// gopherLuaModule returns the directory of the gopher-lua module v1.1.2 in
+// the module cache.
+func gopherLuaModule(t *testing.T) string {
+	t.Helper()
 
-	var tokens []ast.Token
+	// #nosec G204 -- fixed arguments.
+	out, err := exec.CommandContext(t.Context(), "go", "mod", "download", "-json",
+		"github.com/yuin/gopher-lua@v1.1.2").Output()
+	require.NoError(t, err, "download the gopher-lua module")
 
-	for {
-		token, err := scanner.Scan(lexer)
-		if err != nil {
-			return nil, err
-		}
-
-		if token.Type == parse.EOF {
-			return tokens, nil
-		}
-
-		lexer.PrevTokenType = token.Type
-		tokens = append(tokens, token)
+	var module struct {
+		Dir string `json:"Dir"` //nolint:tagliatelle // the name go mod download -json gives it.
 	}
+
+	require.NoError(t, json.Unmarshal(out, &module), "read the output of go mod download -json")
+	require.NotEmpty(t, module.Dir, "the gopher-lua module is not in the module cache")
+
+	return module.Dir
 }
 
-// gopherText is the source text of a name or symbol gopher-lua read. Only "."
-// comes without it.
-func gopherText(token ast.Token) string {
-	if token.Str == "" && token.Type == '.' {
-		return "."
+// gopherToken is a token the lexer of the gopher-lua fork read: its kind, its
+// source text and the line it starts on.
+type gopherToken struct {
+	kind ast.TokenKind
+	text string
+	line int
+}
+
+// gopherTokens reads src with the lexer of the gopher-lua fork (lua/parse) in
+// its LuaJIT dialect, which reads goto and labels as gopher-lua v1.1.2 did,
+// and leaves out the trivia (white space, line breaks, comments) and the end
+// of the source.
+func gopherTokens(src []byte) ([]gopherToken, error) {
+	options := parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false}
+
+	lexemes, err := parse.Tokenize(src, "corpus", options)
+	if err != nil {
+		return nil, err
 	}
 
-	return token.Str
+	lines := ast.NewLines(src)
+
+	var tokens []gopherToken
+
+	for _, lexeme := range lexemes {
+		if lexeme.Kind.IsTrivia() || lexeme.Kind == ast.TokenEOF {
+			continue
+		}
+
+		tokens = append(tokens, gopherToken{
+			kind: lexeme.Kind,
+			text: string(lexeme.Text(src)),
+			line: lines.Pos(lexeme.Span().Start).Line,
+		})
+	}
+
+	return tokens, nil
 }
 
 // sameAsGopher reports whether mine, whose source text is text, is the token
-// gopher-lua read. Strings and numerals are compared by kind: gopher-lua keeps
-// the decoded value of a string, and drops the leading zeros of a numeral.
-func sameAsGopher(mine lex.Token, text string, theirs ast.Token) bool {
-	if mine.Line != theirs.Pos.Line {
+// the fork read: the same text on the same line, and a string or a numeral
+// where the fork read one.
+func sameAsGopher(mine lex.Token, text string, theirs gopherToken) bool {
+	if mine.Line != theirs.line || text != theirs.text {
 		return false
 	}
 
 	switch mine.Kind {
 	case lex.String, lex.LongString:
-		return theirs.Type == parse.TString
+		return theirs.kind == ast.TokenString
 	case lex.Number:
-		return theirs.Type == parse.TNumber
+		return theirs.kind == ast.TokenNumber
 	case lex.Name, lex.Symbol:
-		return theirs.Type != parse.TString && theirs.Type != parse.TNumber && text == gopherText(theirs)
+		return theirs.kind != ast.TokenString && theirs.kind != ast.TokenNumber
 	case lex.EOF, lex.Comment, lex.LongComment, lex.Invalid:
 		return false
 	default:
@@ -168,9 +191,9 @@ func TestLexer_Tokens_MatchGopherLua(t *testing.T) {
 			for i, token := range significant {
 				text := string(converted[token.Start:token.End])
 				if !assert.True(t, sameAsGopher(token, text, theirs[i]),
-					"%s (%s): token %d is %s %q on line %d, gopher-lua reads %q (type %d) on line %d",
+					"%s (%s): token %d is %s %q on line %d, gopher-lua reads %q (%s) on line %d",
 					file, style, i, token.Kind, text, token.Line,
-					theirs[i].Str, theirs[i].Type, theirs[i].Pos.Line) {
+					theirs[i].text, theirs[i].kind, theirs[i].line) {
 					break
 				}
 			}

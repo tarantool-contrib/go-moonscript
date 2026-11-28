@@ -62,6 +62,8 @@ type normalizer struct {
 	// mark, when set, marks every string literal of the copy with the index
 	// of its token (see markedCopy).
 	mark bool
+	// joinLines are the lines whose "(" goes on the line before (see markedCopy).
+	joinLines map[int]bool
 }
 
 // edit is how the copy writes a token other than by its kind alone.
@@ -98,9 +100,12 @@ type edit struct {
 //     in Lua 5.1, and "3then" is "3 then" in Lua 5.2 and 5.3;
 //   - a Lua 5.5 global declaration becomes a local declaration of the global
 //     values of its names ("global a" is "local a = _ENV.a"), or the
-//     function definition it declares, or ";" for "global *";
+//     function definition it declares, or "do end" for "global *";
 //   - a "break" before the end of its block, which Lua 5.2 allows, becomes
 //     "do break end";
+//   - an empty statement, which Lua 5.2 allows, becomes "do end" where it
+//     can be nothing else: a ";" at the start of the source, after another
+//     or after "do", "then", "else" or "repeat";
 //   - a name with bytes beyond ASCII (LuaJIT) becomes an ASCII name, and
 //     goto where it names a variable (Lua 5.1, LuaJIT) another name;
 //   - the syntax of LuaJIT 2.1 builds of 2026 becomes the Lua 5.1 syntax
@@ -141,7 +146,7 @@ func significantTokens(src []byte) ([]lex.Token, error) {
 // normalizeTokens returns the copy of src (see normalize) whose tokens,
 // without comments, are tokens.
 func normalizeTokens(src []byte, tokens []lex.Token) []byte {
-	return copySource(src, tokens, false)
+	return copySource(src, tokens, false, nil)
 }
 
 // markedCopy returns the copy of src (see normalize) whose tokens, without
@@ -151,20 +156,25 @@ func normalizeTokens(src []byte, tokens []lex.Token) []byte {
 // the walker finds the literal of a require in src, where a line may hold
 // several of the same text. The mark changes the value of a string only, and
 // the walker takes it off (see cutMark).
-func markedCopy(src []byte, tokens []lex.Token) []byte {
-	return copySource(src, tokens, true)
+//
+// A "(" that starts a line of joins is written at the end of the line before:
+// the "(" of a call across a line break, which Lua 5.2 reads as a call and
+// Lua 5.1 and LuaJIT reject as ambiguous (see gopherParser.Parse).
+func markedCopy(src []byte, tokens []lex.Token, joins map[int]bool) []byte {
+	return copySource(src, tokens, true, joins)
 }
 
 // copySource returns the copy of src whose tokens, without comments, are
 // tokens, marked when mark is set (see markedCopy).
-func copySource(src []byte, tokens []lex.Token, mark bool) []byte {
+func copySource(src []byte, tokens []lex.Token, mark bool, joins map[int]bool) []byte {
 	n := &normalizer{
-		src:    src,
-		tokens: tokens,
-		edits:  make([]edit, len(tokens)),
-		out:    make([]byte, 0, len(src)),
-		line:   1,
-		mark:   mark,
+		src:       src,
+		tokens:    tokens,
+		edits:     make([]edit, len(tokens)),
+		out:       make([]byte, 0, len(src)),
+		line:      1,
+		mark:      mark,
+		joinLines: joins,
 	}
 
 	for i := range n.tokens {
@@ -237,8 +247,33 @@ func (n *normalizer) plan(i int) {
 		n.planContinue(i)
 	}
 
+	if n.isSymbol(i, ";") && n.emptyStatement(i) {
+		n.edits[i].text = []byte(doNothing)
+	}
+
 	n.planLuaJIT(i)
 }
+
+// doNothing is the statement of Lua 5.1 that does nothing, written in
+// place of what does nothing in another dialect.
+const doNothing = "do end"
+
+// emptyStatement reports whether the ";" at i is an empty statement, which
+// Lua 5.1 does not have, where it can be nothing else: at the start of the
+// source, after another ";" or after a keyword a block starts with. A ";"
+// after a statement ends it, as in Lua 5.1, and one in a table constructor
+// separates its fields.
+func (n *normalizer) emptyStatement(i int) bool {
+	if i == 0 || n.isSymbol(i-1, ";") {
+		return true
+	}
+
+	return strings.Contains(blockStartKeywords, " "+n.name(i-1)+" ")
+}
+
+// blockStartKeywords are the keywords a block starts after, each between
+// spaces, but "function" (its parameters come first).
+const blockStartKeywords = " do then else repeat "
 
 // endsBlock reports whether the block ends at i, after the semicolons there:
 // at "end", "else", "elseif", "until", or at the end of the source.
@@ -278,7 +313,7 @@ func (n *normalizer) planGlobal(i int) {
 	case n.isSymbol(start, "*"):
 		// global *, global <const> *: free names are global, as they are
 		// without a declaration.
-		n.edits[i].text = []byte(";")
+		n.edits[i].text = []byte(doNothing)
 		n.drop(i+1, start+1)
 		n.edits[start].ends = true
 	case n.isIdentifier(start):
@@ -421,7 +456,13 @@ func (n *normalizer) emit(i int, tok lex.Token) {
 			text = n.copyOf(tok.Kind, n.text(i))
 		}
 
-		n.write(tok.Line, text)
+		line := tok.Line
+		if n.joinLines[line] && n.line < line && tok.Kind == lex.Symbol && string(n.text(i)) == "(" {
+			// The "(" of a call across a line break: see markedCopy.
+			line = n.line
+		}
+
+		n.write(line, text)
 	}
 
 	if edit.after != nil {

@@ -15,9 +15,11 @@ func buildInfo(version string, settings ...debug.BuildSetting) *debug.BuildInfo 
 	return &debug.BuildInfo{
 		GoVersion: "go1.27.1",
 		Path:      "github.com/tarantool-contrib/go-moonscript/luamerge/cmd/luamerge",
-		Main:      debug.Module{Path: "github.com/tarantool-contrib/go-moonscript/luamerge", Version: version, Sum: "", Replace: nil},
-		Deps:      nil,
-		Settings:  settings,
+		Main: debug.Module{
+			Path: "github.com/tarantool-contrib/go-moonscript", Version: version, Sum: "", Replace: nil,
+		},
+		Deps:     nil,
+		Settings: settings,
 	}
 }
 

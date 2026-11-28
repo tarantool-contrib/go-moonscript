@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yuin/gopher-lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
 
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
 )

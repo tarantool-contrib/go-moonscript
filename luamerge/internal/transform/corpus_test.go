@@ -2,7 +2,7 @@ package transform_test
 
 import (
 	"bufio"
-	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yuin/gopher-lua/ast"
-	"github.com/yuin/gopher-lua/parse"
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/parse"
 
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
@@ -42,18 +42,14 @@ func corpusTransforms() []corpusTransform {
 
 // testCorpus returns the absolute paths of the Lua files the transforms are
 // checked on: the test suites of Lua 5.1 and of gopher-lua, which ship with
-// the gopher-lua module (a dependency, so it is in the module cache wherever
-// this module builds), and the testdata of this repository.
+// the gopher-lua module v1.1.2, and the testdata of this repository. The fork
+// of gopher-lua in lua/ has neither suite and is no module of its own, so the
+// module comes from the module cache (go mod download fetches it when it is
+// not there).
 func testCorpus(t *testing.T) []string {
 	t.Helper()
 
-	// #nosec G204 -- fixed arguments.
-	out, err := exec.CommandContext(t.Context(), "go", "list", "-m", "-f", "{{.Dir}}",
-		"github.com/yuin/gopher-lua").Output()
-	require.NoError(t, err, "locate the gopher-lua module")
-
-	module := strings.TrimSpace(string(out))
-	require.NotEmpty(t, module, "the gopher-lua module is not in the module cache")
+	module := gopherLuaModule(t)
 
 	testdata, err := filepath.Abs(filepath.Join("..", "..", "testdata"))
 	require.NoError(t, err)
@@ -108,38 +104,59 @@ func significant(t *testing.T, src []byte, lines bool) []string {
 	return spelled
 }
 
-// gopherTokens is what gopher-lua's scanner reads from a Lua file, header
-// left out (gopher-lua knows none): type and value of each token, which for a
-// string is its decoded value, and its line when lines is set.
+// gopherLuaModule returns the directory of the gopher-lua module v1.1.2 in
+// the module cache.
+func gopherLuaModule(t *testing.T) string {
+	t.Helper()
+
+	// #nosec G204 -- fixed arguments.
+	out, err := exec.CommandContext(t.Context(), "go", "mod", "download", "-json",
+		"github.com/yuin/gopher-lua@v1.1.2").Output()
+	require.NoError(t, err, "download the gopher-lua module")
+
+	var module struct {
+		Dir string `json:"Dir"` //nolint:tagliatelle // the name go mod download -json gives it.
+	}
+
+	require.NoError(t, json.Unmarshal(out, &module), "read the output of go mod download -json")
+	require.NotEmpty(t, module.Dir, "the gopher-lua module is not in the module cache")
+
+	return module.Dir
+}
+
+// gopherTokens is what the lexer of the gopher-lua fork (lua/parse) reads
+// from a Lua file in its LuaJIT dialect, which reads goto and labels as
+// gopher-lua v1.1.2 did, header left out: kind and source text of each token
+// other than trivia (white space, line breaks, comments), and its line when
+// lines is set.
 func gopherTokens(src []byte, lines bool) ([]string, error) {
-	scanner := parse.NewScanner(bytes.NewReader(src[lex.Header(src):]), "corpus")
-	lexer := new(parse.Lexer) // Scan only keeps the previous token type in it.
+	body := src[lex.Header(src):]
+
+	options := parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false}
+
+	lexemes, err := parse.Tokenize(body, "corpus", options)
+	if err != nil {
+		return nil, fmt.Errorf("gopher-lua: %w", err)
+	}
+
+	positions := ast.NewLines(body)
 
 	var tokens []string
 
-	for {
-		token, err := scanner.Scan(lexer)
-		if err != nil {
-			return nil, fmt.Errorf("gopher-lua: %w", err)
+	for _, lexeme := range lexemes {
+		if lexeme.Kind.IsTrivia() || lexeme.Kind == ast.TokenEOF {
+			continue
 		}
 
-		if token.Type == parse.EOF {
-			return tokens, nil
+		text := fmt.Sprintf("%s %q", lexeme.Kind, lexeme.Text(body))
+		if lines {
+			text += " line " + strconv.Itoa(positions.Pos(lexeme.Span().Start).Line)
 		}
 
-		lexer.PrevTokenType = token.Type
-		tokens = append(tokens, spellGopher(token, lines))
-	}
-}
-
-// spellGopher spells a gopher-lua token for comparison.
-func spellGopher(token ast.Token, lines bool) string {
-	text := fmt.Sprintf("%d %q", token.Type, token.Str)
-	if lines {
-		text += " line " + strconv.Itoa(token.Pos.Line)
+		tokens = append(tokens, text)
 	}
 
-	return text
+	return tokens, nil
 }
 
 // assertSameTokensf asserts that two token lists are equal and names the
@@ -163,8 +180,7 @@ func assertSameTokensf(t *testing.T, want, got []string, format string, args ...
 // TestTransformers_CorpusTokens: over the corpus, every transform keeps the
 // tokens other than comments, byte for byte and in order, and those that
 // keep lines keep each on its line. Two lexers judge it: this package's and,
-// independently, gopher-lua's, which also compares the decoded value of every
-// string.
+// independently, the gopher-lua fork's.
 func TestTransformers_CorpusTokens(t *testing.T) {
 	t.Parallel()
 

@@ -29,7 +29,7 @@ func TestBuild_TokenScanWarning(t *testing.T) {
 			Module: "",
 			File:   filepath.Join(dir, "m.lua"),
 			Line:   1,
-			Message: `the parser cannot read the file: syntax error near "="; ` +
+			Message: `the parser cannot read the file: unexpected symbol near "="; ` +
 				"its requires were found by the token scanner, which takes a local named require for the global one",
 		},
 	}, g.Warnings)

@@ -5,7 +5,7 @@ package parse
 // tests and does not change the package's API.
 
 import (
-	"github.com/yuin/gopher-lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
 
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )

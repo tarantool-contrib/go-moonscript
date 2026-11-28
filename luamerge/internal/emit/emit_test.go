@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	gopherparse "github.com/yuin/gopher-lua/parse"
+	gopherparse "github.com/tarantool-contrib/go-moonscript/lua/parse"
 
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/emit"
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/graph"

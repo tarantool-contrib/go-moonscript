@@ -27,19 +27,22 @@ func TestParse_TokenScanFallback(t *testing.T) {
 			name:     "syntax error before the requires",
 			source:   "local x = = 1\nlocal a = require(\"a\")\nlocal b = require \"b\"\n",
 			want:     []parse.RequireInfo{testStatic("a", 2), testStatic("b", 3)},
-			fallback: parse.Fallback{Line: 1, Reason: `syntax error near "="`},
+			fallback: parse.Fallback{Line: 1, Reason: `unexpected symbol near "="`},
 		},
 		{
 			name:     "a character that starts no token",
 			source:   "local a = require(\"a\") $\n",
 			want:     []parse.RequireInfo{testStatic("a", 1)},
-			fallback: parse.Fallback{Line: 1, Reason: `invalid token near "$"`},
+			fallback: parse.Fallback{Line: 1, Reason: `unexpected symbol near "$"`},
 		},
 		{
-			name:     "end of the file inside a function",
-			source:   "local f = function()\n  return require(\"a\")\n\n-- the end\n",
-			want:     []parse.RequireInfo{testStatic("a", 2)},
-			fallback: parse.Fallback{Line: 2, Reason: "syntax error at the end of the file"},
+			name:   "end of the file inside a function",
+			source: "local f = function()\n  return require(\"a\")\n\n-- the end\n",
+			want:   []parse.RequireInfo{testStatic("a", 2)},
+			fallback: parse.Fallback{
+				Line:   2,
+				Reason: "'end' expected (to close 'function' at line 1) at the end of the file",
+			},
 		},
 		{
 			// The parser reads string literals marked with their token; the
@@ -47,7 +50,7 @@ func TestParse_TokenScanFallback(t *testing.T) {
 			name:     "syntax error at a string",
 			source:   "local a = require(\"a\")\nlocal x = 1 \"b\"\n",
 			want:     []parse.RequireInfo{testStatic("a", 1)},
-			fallback: parse.Fallback{Line: 2, Reason: `syntax error near "b"`},
+			fallback: parse.Fallback{Line: 2, Reason: `unexpected symbol near "b"`},
 		},
 	}
 

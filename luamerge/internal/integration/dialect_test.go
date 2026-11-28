@@ -336,7 +336,7 @@ func TestCLI_TokenScanFallback(t *testing.T) {
 		"fine.lua":   "return \"fine\"\n",
 	}
 	scanned := testCLIBundler(
-		[]string{`broken\.lua:1: the parser cannot read the file: syntax error near "="; ` +
+		[]string{`broken\.lua:1: the parser cannot read the file: unexpected symbol near "="; ` +
 			`its requires were found by the token scanner`},
 		"--entry", "main.lua", "--strict", "--debug")
 

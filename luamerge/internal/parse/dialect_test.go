@@ -166,6 +166,21 @@ func TestParse_DialectSyntax(t *testing.T) {
 			source: "local f = function() return print end\nf()\n(require(\"a\"))\n",
 			want:   []parse.RequireInfo{testStatic("a", 3)},
 		},
+		{
+			// The copy writes the long string on one line.
+			name:   "call across a line break after a long string",
+			source: "local f = function() return print end\nf [[\n]](require(\"a\"))\nf \"b\"\n(require(\"b\"))\n",
+			want:   []parse.RequireInfo{testStatic("a", 3), testStatic("b", 5)},
+		},
+		{
+			name: "empty statements",
+			source: ";local a = require(\"a\");;\n" +
+				"do; require(\"b\") end\n" +
+				"if a then ; elseif b then;; else ; end\n" +
+				"repeat ; until true\n" +
+				"local t = { 1; 2; require(\"c\"); }\n",
+			want: []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2), testStatic("c", 5)},
+		},
 	}
 
 	for _, tt := range tests {

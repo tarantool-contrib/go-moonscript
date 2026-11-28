@@ -65,7 +65,7 @@ func (n *normalizer) planLuaJIT(i int) {
 }
 
 // planContinue records the edits of a continue statement at i: it becomes
-// ";", which does nothing else either. continue is a statement where a
+// "do end", which does nothing else either. continue is a statement where a
 // statement can start and another statement or the end of the block follows;
 // anywhere else it is a name, as in every other dialect: `local continue`,
 // `goto continue`, `::continue::`, `continue = 1`.
@@ -82,7 +82,7 @@ func (n *normalizer) planContinue(i int) {
 		return
 	}
 
-	n.edits[i].text = []byte(";")
+	n.edits[i].text = []byte(doNothing)
 }
 
 // statementKeywords are the keywords that start a statement or end a block,
