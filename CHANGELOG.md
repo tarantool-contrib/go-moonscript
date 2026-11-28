@@ -34,6 +34,16 @@ of the Go Lua tooling of tarantool-contrib.
 - The module requires Go 1.26.5 (luamerge's dependency jsonschema
   v0.9.8 does) and has dependencies, luamerge's: go-config, pflag and
   testify.
+- CI runs, for a pull request, what its change affects:
+  `internal/tools/affected` selects the packages whose tests the change
+  reaches (through imports, tests and the data tests read, a table checked
+  under strace by `scripts/ci/check-data-deps.sh`) and the jobs of the
+  trees it touches. Everything runs on master, nightly (with short fuzz
+  runs), on demand, with the label `full-ci`, and before a release; the
+  single required check is `ci-ok`. A change of `lua/` without an entry
+  in `lua/CHANGES.md` fails unless labelled `no-changelog`. luamerge's
+  tests run on lua5.1 and LuaJIT only. `scripts/ci/run.sh` runs the
+  jobs' commands locally.
 
 ### Added
 

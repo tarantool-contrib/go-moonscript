@@ -26,7 +26,8 @@ both `moonc` from this repository and the reference (see below).
 
 ## Checks
 
-What CI runs ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
+What CI runs ([`.github/workflows/ci.yml`](.github/workflows/ci.yml); the
+jobs' commands are in [`scripts/ci/run.sh`](scripts/ci/run.sh)):
 
 ```sh
 go test ./...                       # everything, no Docker needed
@@ -40,18 +41,72 @@ codespell ./luascope ./luamerge     # .codespellrc
 go generate ./... && git diff --exit-code   # generated files up to date
 scripts/check-gopher-lua-suite.sh   # pristine gopher-lua's suites on the fork
 go mod tidy -diff
+govulncheck ./...                   # v1.8.0
 ```
+
+`scripts/ci/run.sh all` runs all of them once, as the full checks do
+(the coverage run, and luascope and luamerge with `-race -count=100`),
+and prints the time each took; `scripts/ci/run.sh JOB` runs one (`-h`
+lists them).
 
 luamerge's tests run its bundles on every interpreter of Lua 5.1, LuaJIT
 and Tarantool on `PATH` (CI installs lua5.1 and luajit and sets
-`LUATEST_INTERPRETERS`) and skip those tests when there is none. The corpus tests of luamerge read the
-Lua 5.1 and gopher-lua test suites of the gopher-lua v1.1.2 module, which
-`go mod download` fetches into the module cache.
+`LUATEST_INTERPRETERS=lua5.1,luajit`) and skip those tests when there is
+none. The corpus tests of luamerge read the Lua 5.1 and gopher-lua test
+suites of the gopher-lua v1.1.2 module, which `go mod download` fetches
+into the module cache.
 
 The root config of golangci-lint lints the fork's own packages
 (`lua/scope`, `lua/format`, `lua/flow`, `lua/sandbox`) but not upstream's
 code (the package `lua`, `lua/ast`, `lua/parse`, `lua/pm`), kept close to
 upstream.
+
+### What CI runs for a change
+
+A pull request runs what its change affects. The first job, `changes`,
+runs [`internal/tools/affected`](internal/tools/affected/main.go) over
+the diff from the merge base, and the job summary shows what it selected:
+
+- the packages whose tests run: a changed Go or embedded file selects its
+  package and every package whose code or tests import it (through
+  `go list -deps -test ./...`), so a change of `lua/parse` runs the tests
+  of the moonscript, luascope and luamerge packages built on it; a
+  `_test.go` file or a file of `testdata/` selects its package's tests;
+  documentation (Markdown, `LICENSE`, `NOTICE`) selects none;
+- the tests that read data outside their package through relative paths,
+  which `go list` does not see (`lua/parse` reads `lua/testdata` and
+  `internal/luasuites/testdata/archives`, luamerge's packages
+  `luamerge/testdata`, ...): `DataDeps` in
+  [`internal/tools/affected/rules.go`](internal/tools/affected/rules.go).
+  A test that reads a new file outside its package adds it there;
+  `scripts/ci/check-data-deps.sh` runs every test binary under `strace`
+  (in Docker, with lua5.1 and luajit) and fails on a file the table
+  misses;
+- the jobs: golangci-lint for the trees touched (root, `luascope/`,
+  `luamerge/`, each with its config), the Lua interpreters and the race
+  job for luamerge, the gopher-lua suites and the corpus for `lua/`, the
+  corpus for the parser and the compiler too, `go generate` when the
+  generators or their inputs change, `goreleaser check` for luamerge,
+  codespell for `luascope/` and `luamerge/`, govulncheck and `go vet` for
+  any Go change.
+
+A change of `go.mod`, `go.sum`, `.github/`, the linters' configs, the
+scripts CI runs or the change detection itself runs everything, as do the
+full checks: on a push to master, nightly (with 90-second runs of the fuzz
+targets), on demand (workflow_dispatch), before a release
+(`release.yml` calls `ci.yml`), and on a pull request with the label
+`full-ci`.
+
+A pull request that changes a non-test file of `lua/` (not a `_test.go`
+file nor `testdata/`) without changing `lua/CHANGES.md` fails the
+`changelog` job, unless it has the label `no-changelog`.
+
+The job `ci-ok` sums up the others: it passes when every job passed or
+was skipped by the change detection, and fails when one failed or was
+cancelled. It is the only check branch protection should require (in the
+repository's settings: a rule for `master` that requires the status
+check `ci-ok`): the set of jobs changes with each pull request, `ci-ok`
+is always there.
 
 Every change comes with a test; a fix comes with a test that fails without
 it. Most tests compare against reference outputs stored in
@@ -152,9 +207,11 @@ behaviour, which shouldn't happen: look at the diff before committing it.
 
 ### The corpus in CI
 
-CI runs the corpus check on every push and pull request (the `corpus`
-job), without a local corpus and without the corpus sources in the
-repository: they are third-party code under assorted licenses. Committed
+CI runs the corpus check (the `corpus` job) in the full checks and on
+the pull requests that change `lua/` or affect the parser, the compiler,
+the linter or the corpus checker, without a local corpus and without the
+corpus sources in the repository: they are third-party code under
+assorted licenses. Committed
 instead, in `moonscript/testdata/corpus/`:
 
 - `manifest.tsv` (2.9 MB): for each of the 19,960 distinct files, where to
