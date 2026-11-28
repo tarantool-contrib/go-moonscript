@@ -4,47 +4,34 @@
 // lines, so a tool can rebuild source from the original bytes: keep the
 // tokens it wants byte for byte and decide what goes between them.
 //
-// luamerge reads files written for Lua 5.1 to 5.5, LuaJIT and Tarantool,
-// and where the dialects differ the tokens are those of the union of them,
-// so that a source one of them accepts is never refused:
+// luamerge reads files written for Lua 5.1, LuaJIT and Tarantool, and where
+// the dialects differ the tokens are those of the union of them, so that a
+// source one of them accepts is never refused:
 //
 //   - The lexer of LuaJIT reads most of the union: long brackets of any
 //     level, which end at the first closing bracket of their level (no
-//     dialect counts nesting, and Lua 5.1 refuses a "[[" inside a level-0
-//     one, so valid source never has one), every string escape of Lua 5.2
-//     and later ("\x", "\z", "\u{...}" and a "\" before a line break),
-//     hexadecimal floats, LuaJIT's 1LL, 0x10ULL, 2i and 0b101, names with
-//     bytes 0x80 to 0xFF, "::", and the line breaks "\n", "\r", "\r\n" and
-//     "\n\r", each one line.
-//   - Where it stops at a lexical error that another dialect does not
-//     make, the token is read whole as that dialect reads it and LuaJIT's
-//     lexer reads on after it (NotLuaJIT): a short string with an escape
-//     that only Lua 5.1 reads (an unknown one, "\q", read as the character
-//     after the backslash) or only Lua 5.4 ("\u{D800}", "\u{7FFFFFFF}"),
-//     and a numeral that Lua 5.1 ends before ".." (1e5..x is 1e5 .. x
-//     there) or Lua 5.2 and 5.3 before a letter (3then is 3 then): it is
+//     supported dialect counts nesting, and Lua 5.1 refuses a "[[" inside a
+//     level-0 one, so valid source never has one), the string escapes "\x",
+//     "\z" and "\u{...}" and a "\" before a line break, hexadecimal floats,
+//     LuaJIT's 1LL, 0x10ULL, 2i and 0b101, names with bytes 0x80 to 0xFF,
+//     "::", and the line breaks "\n", "\r", "\r\n" and "\n\r", each one line.
+//   - Where it stops at a lexical error that Lua 5.1 does not make, the
+//     token is read whole as Lua 5.1 reads it and LuaJIT's lexer reads on
+//     after it: a short string with an escape that only Lua 5.1 reads (an
+//     unknown one, "\q", read as the character after the backslash), and a
+//     numeral that Lua 5.1 ends before ".." (1e5..x is 1e5 .. x there): it is
 //     scanned the way LuaJIT scans a numeral, every identifier character,
 //     every "." and a sign after an exponent letter, and is one token.
 //     Escapes are not decoded and numerals not validated here.
-//   - The operators of Lua 5.3, "//", "<<" and ">>", are one token, and so
-//     are "&", "|" and "~" (Symbol). LuaJIT 2.1 builds of 2026 add
-//     operators of their own: "!=", "!", "&&", "||", "?" and ":" of a
-//     conditional expression, "??", "~>>", and compound assignments such
-//     as "+=". They are read as the tokens they are made of, "!" and "?"
-//     as tokens of kind Invalid.
 //
 // The union is also the most cautious answer to where tokens meet: two
-// tokens read as separate are separate in every dialect, but for the
-// operators of those LuaJIT builds, which no other dialect reads with
-// nothing between their tokens.
+// tokens read as separate are separate in every dialect.
 //
 // Like Lua's own lexer this one leaves grammar to a parser: a byte that
 // starts no token is a token of kind Invalid, and which names are reserved
-// words is not its business. goto is a name in some LuaJIT builds, and Lua
-// 5.5.1 reads global as a keyword only where it starts a declaration. What
-// it does refuse is what no dialect can read: a string, long string or long
-// comment without its end, and "[" followed by "=" signs but no second
-// "[".
+// words is not its business. goto is a name in some LuaJIT builds. What it
+// does refuse is what no dialect can read: a string, long string or long
+// comment without its end, and "[" followed by "=" signs but no second "[".
 package lex
 
 import (
@@ -72,12 +59,11 @@ const (
 	Comment
 	// LongComment is a long comment: --[[...]], --[==[...]==].
 	LongComment
-	// Symbol is an operator or punctuation: + - * / // % ^ # & ~ | << >>
-	// == ~= <= >= < > = ( ) { } [ ] :: ; : , . .. ...
+	// Symbol is an operator or punctuation: + - * / % ^ # == ~= <= >= < > =
+	// ( ) { } [ ] :: ; : , . .. ...
 	Symbol
-	// Invalid is a byte that starts no token in any dialect, such as "$",
-	// or "!" or "?", which only LuaJIT 2.1 builds of 2026 read. Lua reads it
-	// as a token of its own and its parser rejects it.
+	// Invalid is a byte that starts no token in any dialect, such as "$" or
+	// "!". Lua reads it as a token of its own and its parser rejects it.
 	Invalid
 )
 
@@ -118,10 +104,6 @@ type Token struct {
 	// string or comment, or a short string with an escaped line break or a
 	// "\z". Lines count from 1 as Lua counts them.
 	Line, EndLine int
-	// NotLuaJIT is set for a String or Number token that LuaJIT's lexer
-	// refuses and another dialect reads (see the package documentation):
-	// a parser of LuaJIT must get it in another form.
-	NotLuaJIT bool
 }
 
 // Sentinel errors for the constructs no dialect can read; errors.Is tells
@@ -231,5 +213,5 @@ func (l *Lexer) load() {
 	r := &reader{src: l.src, tokens: nil, pos: l.start, line: 1}
 	l.err = r.read(l.start)
 	l.tokens = r.tokens
-	l.end = Token{Kind: EOF, Start: r.pos, End: r.pos, Line: r.line, EndLine: r.line, NotLuaJIT: false}
+	l.end = Token{Kind: EOF, Start: r.pos, End: r.pos, Line: r.line, EndLine: r.line}
 }

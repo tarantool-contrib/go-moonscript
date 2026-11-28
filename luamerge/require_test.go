@@ -240,8 +240,7 @@ func TestBundle_UnprotectedRequireStaysStrict(t *testing.T) {
 	assert.Equal(t, 2, ue.Line, "the unprotected require")
 }
 
-// TestBundle_GlobalTableAndXpcallRequire: `_G.require("x")`,
-// `_ENV.require("x")` and `xpcall(require, handler, "x")` name their module
+// TestBundle_GlobalTableAndXpcallRequire: `_G.require("x")` and `xpcall(require, handler, "x")` name their module
 // literally, so it is embedded.
 func TestBundle_GlobalTableAndXpcallRequire(t *testing.T) {
 	t.Parallel()
@@ -253,10 +252,6 @@ func TestBundle_GlobalTableAndXpcallRequire(t *testing.T) {
 		{
 			name: "_G.require",
 			main: "local m = _G.require(\"module\")\nprint(m.greet())\n",
-		},
-		{
-			name: "_ENV.require",
-			main: "local m = _ENV.require(\"module\")\nprint(m.greet())\n",
 		},
 		{
 			name: "xpcall",

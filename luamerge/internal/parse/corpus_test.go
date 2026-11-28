@@ -65,14 +65,13 @@ func testCorpus(t *testing.T) []string {
 	return files
 }
 
-// TestRewrite_Lua51SourceReadsTheSame: the fork's parser reads Lua 5.1 (in
-// its LuaJIT dialect, with goto and labels), and on a source it reads the
-// copy it reads in the place of a source it refuses (see rewrite), with the
-// syntax of LuaJIT's LJ_52 builds, is the same program: the same uses of
-// require on the same lines, the literals of the module names where the
-// parser of the source finds them. The corpus is Lua 5.1; a file the parser
-// cannot read at all is left out and counted.
-func TestRewrite_Lua51SourceReadsTheSame(t *testing.T) {
+// TestParse_Lua51CorpusIsRead: the corpus is Lua 5.1, and a file that the fork's
+// parser reads in its Lua 5.1 dialect, as lua5.1 reads a file, Parse reads
+// too, whichever dialect it reads it in: it has no fallback, and the literal
+// of a static call is where Parse says, a string literal whose value is the
+// module name. A file that the Lua 5.1 dialect cannot read is left out and
+// counted.
+func TestParse_Lua51CorpusIsRead(t *testing.T) {
 	t.Parallel()
 
 	files := testCorpus(t)
@@ -82,7 +81,7 @@ func TestRewrite_Lua51SourceReadsTheSame(t *testing.T) {
 		src, err := os.ReadFile(file) // #nosec G304 -- a corpus file.
 		require.NoError(t, err)
 
-		options := gopherparse.Options{Dialect: gopherparse.LuaJIT, Comments: false, Shebang: false, Tokens: false,
+		options := gopherparse.Options{Dialect: gopherparse.Lua51, Comments: false, Shebang: true, Tokens: false,
 			Lua52Compat: false}
 
 		_, err = gopherparse.ParseChunk(src, file, options)
@@ -96,11 +95,6 @@ func TestRewrite_Lua51SourceReadsTheSame(t *testing.T) {
 		require.NoError(t, err, "parse %s", file)
 		assert.Nil(t, found.Fallback, "the parser reads %s", file)
 
-		copied, err := parse.ParseCopyForTest(src, file)
-		require.NoError(t, err, "parse the copy of %s", file)
-		assert.Nil(t, copied.Fallback, "the parser reads the copy of %s", file)
-		assert.Equal(t, found.Requires, copied.Requires, "requires of %s and of its copy", file)
-
 		// The literal of a static call is where Parse says: a string literal
 		// whose value is the module name.
 		for _, call := range found.Requires {
@@ -113,7 +107,7 @@ func TestRewrite_Lua51SourceReadsTheSame(t *testing.T) {
 		compared++
 	}
 
-	t.Logf("compared %d files, %d that the parser cannot read left out", compared, unread)
+	t.Logf("compared %d files, %d that Lua 5.1 cannot read left out", compared, unread)
 	assert.Greater(t, compared, 50, "the corpus is there")
 	assert.Less(t, unread, compared/10, "the parser reads nearly all of the corpus")
 }

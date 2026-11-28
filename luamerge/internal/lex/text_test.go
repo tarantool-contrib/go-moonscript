@@ -149,10 +149,7 @@ func TestNeedsSeparator(t *testing.T) {
 		{left: "=", right: "=", want: true},
 		{left: "~", right: "=", want: true},
 		{left: "<", right: "=", want: true},
-		{left: "<", right: "<", want: true},
 		{left: ">", right: "=", want: true},
-		{left: ">", right: ">", want: true},
-		{left: "/", right: "/", want: true},
 		{left: ":", right: ":", want: true},
 		{left: "..", right: "2", want: false},
 		{left: "1", right: "-", want: false},
@@ -168,6 +165,9 @@ func TestNeedsSeparator(t *testing.T) {
 		{left: "[[s]]", right: "]", want: false},
 		{left: "[", right: "a", want: false},
 		{left: "~", right: "~", want: false},
+		{left: "<", right: "<", want: false},
+		{left: ">", right: ">", want: false},
+		{left: "/", right: "/", want: false},
 		{left: "=", right: "{", want: false},
 		{left: "", right: "a", want: false},
 		{left: "a", right: "", want: false},
@@ -187,7 +187,7 @@ func TestNeedsSeparator_MatchesTheLexer(t *testing.T) {
 	t.Parallel()
 
 	lefts := []string{
-		"+", "-", "*", "/", "//", "%", "^", "#", "&", "~", "|", "<<", ">>", "==", "~=", "<=", ">=", "<", ">",
+		"+", "-", "*", "/", "%", "^", "#", "&", "~", "|", "==", "~=", "<=", ">=", "<", ">",
 		"=", "(", ")", "{", "}", "[", "]", "::", ";", ":", ",", ".", "..", "...", "!", "?", "$", "\x00",
 		"a", "local", "_x1", "\xd0\xbf", "1", "12", "1e", "1E", "1e5", "1e+5", "0x", "0x1", "0X1p", "0x1e",
 		"0x1P-4", ".5", "5.", ".5e", "1LL", "2i", "0b1", "3then", "1e5..x", `"s"`, `'s'`, "[[s]]", "[==[s]==]",

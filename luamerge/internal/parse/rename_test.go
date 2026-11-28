@@ -100,7 +100,6 @@ func TestPrefixNames_EveryCallForm(t *testing.T) {
 		{"more arguments", `require("x", "x")`, `require("p.x", "x")`},
 		{"escapes", `require("\x61x")`, `require("p.\x61x")`},
 		{"_G.require", `_G.require("x")`, `_G.require("p.x")`},
-		{"_ENV.require", `_ENV.require "x"`, `_ENV.require "p.x"`},
 		{"_G[\"require\"]", `_G["require"]("x")`, `_G["require"]("p.x")`},
 		{"pcall", `local ok, m = pcall(require, "x")`, `local ok, m = pcall(require, "p.x")`},
 		{

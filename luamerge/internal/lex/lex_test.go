@@ -103,7 +103,7 @@ func TestLexer_Tokens_Numbers(t *testing.T) {
 	t.Parallel()
 
 	numbers := []string{
-		// The examples of the Lua 5.4 manual, section 3.1.
+		// The examples of the Lua manual, section 2.1 of the 5.1 manual and 3.1 of later ones.
 		"3", "345", "0xff", "0xBEBADA", "3.0", "3.1416", "314.16e-2", "0.31416E1", "34e1",
 		"0x0.1E", "0xA23p-4", "0X1.921FB54442D18P+1",
 		// A fraction or an exponent alone.
@@ -142,14 +142,14 @@ func TestLexer_Tokens_Numbers(t *testing.T) {
 			tokens: []tok{number("1..2")},
 		},
 		lexCase{
-			// Lua 5.1 reads 1e5 .. x; every other dialect a malformed numeral.
+			// Lua 5.1 reads 1e5 .. x; LuaJIT a malformed numeral.
 			name:   "numeral with an exponent before dots",
 			src:    "1e5..x",
 			tokens: []tok{number("1e5..x")},
 		},
 		lexCase{
-			// Lua 5.2 and 5.3 read 3 then; every other dialect a malformed
-			// numeral.
+			// Every supported dialect reads a malformed numeral here; it is a
+			// token all the same, for a parser to refuse.
 			name:   "numeral touching a letter",
 			src:    "3then",
 			tokens: []tok{number("3then")},
@@ -186,7 +186,7 @@ func TestLexer_Tokens_ShortStrings(t *testing.T) {
 			tokens: []tok{on(lex.String, `"\\\""`, 1), name("x")},
 		},
 		{
-			// Lua 5.2+ and LuaJIT; Lua 5.1 reads x41, u{48} and "A".
+			// LuaJIT; Lua 5.1 reads x41, u{48} and "A".
 			name:   "hexadecimal, Unicode and decimal escapes",
 			src:    `"\x41\u{48}\065"`,
 			tokens: []tok{on(lex.String, `"\x41\u{48}\065"`, 1)},
@@ -217,7 +217,7 @@ func TestLexer_Tokens_ShortStrings(t *testing.T) {
 			tokens: []tok{{Kind: lex.String, Text: "'a\\\rb'", Line: 1, EndLine: 2}, on(lex.Name, "x", 2)},
 		},
 		{
-			// Lua 5.2+ and LuaJIT: \z skips white space, line breaks included.
+			// LuaJIT: \z skips white space, line breaks included.
 			name: "z escape over line breaks",
 			src:  "\"a\\z\n  \r\n\f\v b\" x",
 			tokens: []tok{
@@ -258,8 +258,8 @@ func TestLexer_Tokens_LongBrackets(t *testing.T) {
 			tokens: []tok{on(lex.LongString, "[==[http://example.com/a--b\"]==]", 1), name("x")},
 		},
 		{
-			// Lua 5.2+, LuaJIT and gopher-lua close at the first "]]"; Lua 5.1
-			// refuses the nested opener.
+			// LuaJIT closes at the first "]]"; Lua 5.1 refuses the nested
+			// opener.
 			name:   "nested opener is no nesting",
 			src:    "[[ [[ ]] x = \"]]\"",
 			tokens: []tok{on(lex.LongString, "[[ [[ ]]", 1), name("x"), symbol("="), on(lex.String, "\"]]\"", 1)},
@@ -353,7 +353,7 @@ func TestLexer_Tokens_Symbols(t *testing.T) {
 	t.Parallel()
 
 	symbols := []string{
-		"+", "-", "*", "/", "//", "%", "^", "#", "&", "~", "|", "<<", ">>",
+		"+", "-", "*", "/", "%", "^", "#",
 		"==", "~=", "<=", ">=", "<", ">", "=", "(", ")", "{", "}", "[", "]",
 		"::", ";", ":", ",", ".", "..", "...",
 	}
@@ -368,10 +368,10 @@ func TestLexer_Tokens_Symbols(t *testing.T) {
 	tests = append(tests,
 		lexCase{
 			name: "unspaced operators",
-			src:  "a<=b<<=c~~d//e...f",
+			src:  "a<=b<c~=d>=e...f",
 			tokens: []tok{
-				name("a"), symbol("<="), name("b"), symbol("<<"), symbol("="), name("c"),
-				symbol("~"), symbol("~"), name("d"), symbol("//"), name("e"), symbol("..."), name("f"),
+				name("a"), symbol("<="), name("b"), symbol("<"), name("c"), symbol("~="), name("d"),
+				symbol(">="), name("e"), symbol("..."), name("f"),
 			},
 		},
 		lexCase{
@@ -381,10 +381,11 @@ func TestLexer_Tokens_Symbols(t *testing.T) {
 		},
 		lexCase{
 			name: "bytes that start no token",
-			src:  "$!?@`\\\x00\x7f",
+			src:  "$!?@`\\\x00\x7f&|~",
 			tokens: []tok{
 				invalid("$"), invalid("!"), invalid("?"), invalid("@"),
 				invalid("`"), invalid("\\"), invalid("\x00"), invalid("\x7f"),
+				invalid("&"), invalid("|"), invalid("~"),
 			},
 		},
 	)
@@ -392,107 +393,68 @@ func TestLexer_Tokens_Symbols(t *testing.T) {
 	testLexCases(t, tests)
 }
 
-// TestLexer_Tokens_ShiftsAndEquals: the fork's lexer reads "<<=" as "<" and
-// "<=", which are "<<" and "=", and that "=" starts "==" when "=" follows.
-func TestLexer_Tokens_ShiftsAndEquals(t *testing.T) {
+// TestLexer_Tokens_NoOperatorsOfLua53: the operators of Lua 5.3 are no tokens
+// of a supported dialect: "//", "<<" and ">>" are the symbols they are made
+// of, and "&", "|" and "~" are bytes that start no token.
+func TestLexer_Tokens_NoOperatorsOfLua53(t *testing.T) {
 	t.Parallel()
 
+	invalid := func(text string) tok { return on(lex.Invalid, text, 1) }
+
 	testLexCases(t, []lexCase{
+		{name: "floor division", src: "a//b", tokens: []tok{name("a"), symbol("/"), symbol("/"), name("b")}},
+		{name: "shifts", src: "a<<b>>c", tokens: []tok{
+			name("a"), symbol("<"), symbol("<"), name("b"), symbol(">"), symbol(">"), name("c"),
+		}},
 		{name: "shift assignments", src: "a<<=b>>=c", tokens: []tok{
-			name("a"), symbol("<<"), symbol("="), name("b"), symbol(">>"), symbol("="), name("c"),
+			name("a"), symbol("<"), symbol("<="), name("b"), symbol(">"), symbol(">="), name("c"),
 		}},
-		{name: "shift before an equality", src: "a<<==b>>===c", tokens: []tok{
-			name("a"), symbol("<<"), symbol("=="), name("b"), symbol(">>"), symbol("=="), symbol("="), name("c"),
-		}},
-		{name: "three of them", src: "a<<<b>>>=c///d", tokens: []tok{
-			name("a"), symbol("<<"), symbol("<"), name("b"), symbol(">>"), symbol(">="), name("c"),
-			symbol("//"), symbol("/"), name("d"),
-		}},
-		{name: "spaced", src: "a < < b / / c", tokens: []tok{
-			name("a"), symbol("<"), symbol("<"), name("b"), symbol("/"), symbol("/"), name("c"),
+		{name: "bitwise operators", src: "a&b|c~d", tokens: []tok{
+			name("a"), invalid("&"), name("b"), invalid("|"), name("c"), invalid("~"), name("d"),
 		}},
 	})
 }
 
-// TestLexer_Tokens_NotLuaJIT: a token that LuaJIT's lexer refuses and
-// another dialect reads is read whole, marked, and the lexer reads on after
-// it, as from the start of a file but for its header: a "#" or a byte order
-// mark there is a token.
-func TestLexer_Tokens_NotLuaJIT(t *testing.T) {
+// TestLexer_Tokens_Lua51Only: a token that LuaJIT's lexer refuses and Lua 5.1
+// reads is read whole, and the lexer reads on after it, as from the start of
+// a file but for its header: a "#" or a byte order mark there is a token.
+func TestLexer_Tokens_Lua51Only(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		src  string
-		// marked are the texts of the tokens NotLuaJIT marks.
-		marked []string
-		tokens []tok
-	}{
+	testLexCases(t, []lexCase{
 		{
-			name: "escapes only Lua 5.1 reads", src: `f("\.", '\%', "\x4") x`,
-			marked: []string{`"\."`, `'\%'`, `"\x4"`},
+			name: "escapes only Lua 5.1 reads", src: `f("\.", '\%', "\x4", "\u{D800}") x`,
 			tokens: []tok{
 				name("f"), symbol("("), on(lex.String, `"\."`, 1), symbol(","), on(lex.String, `'\%'`, 1),
-				symbol(","), on(lex.String, `"\x4"`, 1), symbol(")"), name("x"),
+				symbol(","), on(lex.String, `"\x4"`, 1), symbol(","), on(lex.String, `"\u{D800}"`, 1),
+				symbol(")"), name("x"),
 			},
 		},
 		{
-			name: "escapes only Lua 5.4 reads", src: `"\u{D800}" "\u{7FFFFFFF}"`,
-			marked: []string{`"\u{D800}"`, `"\u{7FFFFFFF}"`},
-			tokens: []tok{on(lex.String, `"\u{D800}"`, 1), on(lex.String, `"\u{7FFFFFFF}"`, 1)},
-		},
-		{
 			name: "a refused string over lines", src: "'\\q\\\n\\z\n  x' y",
-			marked: []string{"'\\q\\\n\\z\n  x'"},
 			tokens: []tok{{Kind: lex.String, Text: "'\\q\\\n\\z\n  x'", Line: 1, EndLine: 3}, on(lex.Name, "y", 3)},
 		},
 		{
-			name: "numerals other dialects end", src: "1e5..x 3then y 0x10else",
-			marked: []string{"1e5..x", "3then", "0x10else"},
+			name: "numerals Lua 5.1 ends", src: "1e5..x 3then y 0x10else",
 			tokens: []tok{number("1e5..x"), number("3then"), name("y"), number("0x10else")},
 		},
 		{
 			name: "a hash after a refused token", src: `'\q'#t`,
-			marked: []string{`'\q'`},
 			tokens: []tok{on(lex.String, `'\q'`, 1), symbol("#"), name("t")},
 		},
 		{
 			name: "a byte order mark after a refused numeral", src: "1e5..\xEF\xBB\xBFx#",
-			marked: []string{"1e5..\xEF\xBB\xBFx"},
 			tokens: []tok{number("1e5..\xEF\xBB\xBFx"), symbol("#")},
 		},
 		{
 			name: "a byte order mark after a refused string", src: "'\\q'\xEF\xBB\xBFx #",
-			marked: []string{`'\q'`},
 			tokens: []tok{on(lex.String, `'\q'`, 1), name("\xEF\xBB\xBFx"), symbol("#")},
 		},
 		{
 			name: "LuaJIT's own", src: "\"\\x41\\z  \" 0x1p4 1ULL \xD0\xBF",
-			marked: nil,
 			tokens: []tok{on(lex.String, "\"\\x41\\z  \"", 1), number("0x1p4"), number("1ULL"), name("\xD0\xBF")},
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tt.tokens, testTokens(t, lex.New([]byte(tt.src)), tt.src))
-
-			tokens, err := lex.New([]byte(tt.src)).Tokens()
-			require.NoError(t, err)
-
-			var marked []string
-
-			for _, token := range tokens {
-				if token.NotLuaJIT {
-					marked = append(marked, tt.src[token.Start:token.End])
-				}
-			}
-
-			assert.Equal(t, tt.marked, marked)
-		})
-	}
+	})
 }
 
 func TestLexer_Tokens_LineBreaks(t *testing.T) {
@@ -532,12 +494,12 @@ func TestLexer_Next_EOF(t *testing.T) {
 
 	first, err := lexer.Next()
 	require.NoError(t, err)
-	assert.Equal(t, lex.Token{Kind: lex.Name, Start: 0, End: 1, Line: 1, EndLine: 1, NotLuaJIT: false}, first)
+	assert.Equal(t, lex.Token{Kind: lex.Name, Start: 0, End: 1, Line: 1, EndLine: 1}, first)
 
 	for range 2 {
 		eof, err := lexer.Next()
 		require.NoError(t, err)
-		assert.Equal(t, lex.Token{Kind: lex.EOF, Start: 3, End: 3, Line: 3, EndLine: 3, NotLuaJIT: false}, eof,
+		assert.Equal(t, lex.Token{Kind: lex.EOF, Start: 3, End: 3, Line: 3, EndLine: 3}, eof,
 			"EOF is at the end of the source, on its last line, every time")
 	}
 }

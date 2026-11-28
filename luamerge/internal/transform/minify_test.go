@@ -125,12 +125,13 @@ func TestMinifyTransformer(t *testing.T) {
 			output: "x=1e-5-0x1p4+.5-1",
 		},
 		{
-			name:   "operators of Lua 5.3 and labels",
-			input:  "x = a // b & c | ~ d << 1 >> 2\ngoto skip ::skip::",
-			output: "x=a//b&c|~d<<1>>2\ngoto skip::skip::",
+			name:   "labels",
+			input:  "x = a < b\ngoto skip ::skip::",
+			output: "x=a<b\ngoto skip::skip::",
 		},
 		{
-			// Lua 5.1 and LuaJIT refuse the call as ambiguous; Lua 5.2+ reads it.
+			// Lua 5.1 and LuaJIT refuse the call as ambiguous; LuaJIT built with
+			// LUAJIT_ENABLE_LUA52COMPAT reads it.
 			name:   "line break before a parenthesis",
 			input:  "local f = g\n(h)()",
 			output: "local f=g\n(h)()",

@@ -12,6 +12,13 @@ const (
 	indexRefLen = 4
 )
 
+// Keywords the scanner looks for in more than one place.
+const (
+	keywordEnd      = "end"
+	keywordFunction = "function"
+	keywordLocal    = "local"
+)
+
 // scanner finds the uses of require in the tokens of a file without a syntax
 // tree; see scanRequires.
 type scanner struct {
@@ -27,11 +34,11 @@ type scanner struct {
 // scanRequires finds the uses of require in tokens, the tokens of src without
 // its comments: the way to find them in a file the parser cannot read. It
 // recognizes the calls the walker does, `require(...)`, `_G.require(...)`,
-// `_ENV.require(...)`, `pcall(require, ...)` and `xpcall(require, handler,
-// ...)`, static when require gets a string literal first. Every other use of
-// the name require is indirect, but for a name being declared, defined or
-// assigned to, and `require = require`. It knows no scopes: a local named
-// require is the global require to it.
+// `pcall(require, ...)` and `xpcall(require, handler, ...)`, static when
+// require gets a string literal first. Every other use of the name require is
+// indirect, but for a name being declared, defined or assigned to, and
+// `require = require`. It knows no scopes: a local named require is the
+// global require to it.
 func scanRequires(src []byte, tokens []lex.Token) []RequireInfo {
 	found := &scanner{src: src, tokens: tokens, requires: []RequireInfo{}, used: make([]bool, len(tokens))}
 
@@ -69,8 +76,8 @@ func (s *scanner) scan(i int) {
 }
 
 // requireRef returns how the tokens from i name the global require,
-// "require", "_G.require" or "_ENV.require", and the index after them; or ""
-// and i when they do not name it. A name after "." or ":" is a field.
+// "require" or "_G.require", and the index after them; or "" and i when they
+// do not name it. A name after "." or ":" is a field.
 func (s *scanner) requireRef(i int) (string, int) {
 	if s.isSymbol(i-1, ".") || s.isSymbol(i-1, ":") {
 		return "", i
@@ -79,7 +86,7 @@ func (s *scanner) requireRef(i int) (string, int) {
 	switch table := s.name(i); table {
 	case requireName:
 		return requireName, i + 1
-	case "_G", "_ENV":
+	case "_G":
 		ref := table + "." + requireName
 
 		// Written _G.require.
@@ -246,39 +253,28 @@ func (s *scanner) isTarget(i, end int) bool {
 	}
 }
 
-// inNameList reports whether the name at i is among the names of a local,
-// global or for declaration, `local a <const>, require`, or among the
-// parameters of a function.
+// inNameList reports whether the name at i is among the names of a local or
+// for declaration, `local a, require`, or among the parameters of a function.
 func (s *scanner) inNameList(i int) bool {
-	j := s.attribStart(i - 1)
+	j := i - 1
 
 	for s.isSymbol(j, ",") {
-		j = s.attribStart(j - 1)
+		j--
 		if !s.isKind(j, lex.Name) {
 			return false
 		}
 
-		j = s.attribStart(j - 1)
+		j--
 	}
 
 	switch {
-	case s.name(j) == keywordLocal, s.name(j) == "global", s.name(j) == "for":
+	case s.name(j) == keywordLocal, s.name(j) == "for":
 		return true
 	case s.isSymbol(j, "("):
 		return s.isFunctionHeader(j - 1)
 	default:
 		return false
 	}
-}
-
-// attribStart returns the index before the attribute "<name>" that ends at
-// i, or i when none does.
-func (s *scanner) attribStart(i int) int {
-	if s.isSymbol(i, ">") && s.isKind(i-1, lex.Name) && s.isSymbol(i-attribLen+1, "<") {
-		return i - attribLen
-	}
-
-	return i
 }
 
 // isFunctionHeader reports whether the token at i ends the head of a function
@@ -350,4 +346,21 @@ func (s *scanner) name(i int) string {
 // isSymbol reports whether the token at i is the symbol symbol.
 func (s *scanner) isSymbol(i int, symbol string) bool {
 	return s.isKind(i, lex.Symbol) && string(s.src[s.tokens[i].Start:s.tokens[i].End]) == symbol
+}
+
+// nesting returns 1 when a token of kind with text opens a bracket or a block
+// that a later token closes, -1 when it closes one, and 0 otherwise.
+func nesting(kind lex.Kind, text string) int {
+	switch {
+	case kind == lex.Symbol && (text == "(" || text == "[" || text == "{"):
+		return 1
+	case kind == lex.Symbol && (text == ")" || text == "]" || text == "}"):
+		return -1
+	case kind == lex.Name && (text == keywordFunction || text == "if" || text == "do" || text == "repeat"):
+		return 1
+	case kind == lex.Name && (text == keywordEnd || text == "until"):
+		return -1
+	default:
+		return 0
+	}
 }

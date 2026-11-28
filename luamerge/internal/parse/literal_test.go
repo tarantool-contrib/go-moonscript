@@ -9,10 +9,9 @@ import (
 )
 
 // TestParse_ModuleNameEscapes: a module name is the value of its string
-// literal as Lua 5.2 and later decode it, LuaJIT and Tarantool included:
-// "\x61x" is the module ax, not x61x as Lua 5.1 reads it. A name decoded by
-// the older rules is a module the program never loads, so the one it does
-// load was not embedded.
+// literal as LuaJIT and Tarantool decode it: "\x61x" is the module ax, not
+// x61x as Lua 5.1 reads it. A name decoded by the older rules is a module the
+// program never loads, so the one it does load was not embedded.
 func TestParse_ModuleNameEscapes(t *testing.T) {
 	t.Parallel()
 
@@ -42,18 +41,21 @@ func TestParse_ModuleNameEscapes(t *testing.T) {
 			want:   []parse.RequireInfo{testStatic("я", 1)},
 		},
 		{
-			// Lua encodes a surrogate like any other code point, where Go
-			// would put the replacement character.
+			// LuaJIT takes no surrogate, nor a code point beyond Unicode, so
+			// only Lua 5.1 reads the file, and reads u{D800}.
 			name:   "unicode escape of a surrogate",
 			source: `require("\u{D800}")`,
-			want:   []parse.RequireInfo{testStatic("\xED\xA0\x80", 1)},
+			want:   []parse.RequireInfo{testStatic("u{D800}", 1)},
 		},
 		{
-			// Lua 5.4 and later take code points up to 2^31 - 1, encoded
-			// in up to six bytes.
 			name:   "unicode escape beyond Unicode",
-			source: `require("\u{7FFFFFFF}")`,
-			want:   []parse.RequireInfo{testStatic("\xFD\xBF\xBF\xBF\xBF\xBF", 1)},
+			source: `require("\u{110000}")`,
+			want:   []parse.RequireInfo{testStatic("u{110000}", 1)},
+		},
+		{
+			name:   "the last code point of Unicode",
+			source: `require("\u{10FFFF}")`,
+			want:   []parse.RequireInfo{testStatic("\xF4\x8F\xBF\xBF", 1)},
 		},
 		{
 			name:   "z escape skipping spaces",

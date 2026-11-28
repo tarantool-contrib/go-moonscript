@@ -102,7 +102,6 @@ func TestParse_ModuleNameLiterals(t *testing.T) {
 		{name: "more arguments", source: `require("x", "x")`, want: []testLiteral{{"x", `"x"`, 0}}},
 		{name: "escapes", source: `require("\x61x")`, want: []testLiteral{{"ax", `"\x61x"`, 0}}},
 		{name: "_G.require", source: `_G.require("x")`, want: []testLiteral{{"x", `"x"`, 0}}},
-		{name: "_ENV.require", source: `_ENV.require "x"`, want: []testLiteral{{"x", `"x"`, 0}}},
 		{name: "_G[\"require\"]", source: `_G["require"]("x")`, want: []testLiteral{{"x", `"x"`, 0}}},
 		{name: "pcall", source: `local ok, m = pcall(require, "x")`, want: []testLiteral{{"x", `"x"`, 0}}},
 		{

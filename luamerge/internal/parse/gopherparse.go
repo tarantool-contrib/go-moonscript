@@ -1,9 +1,7 @@
 // Package parse extracts require(...) call information from Lua source code
-// using the parser of the gopher-lua fork of this repository (lua/parse) in
-// its LuaJIT dialect. A source that it refuses, such as one written for Lua
-// 5.3 or 5.4, is read again in the syntax of LuaJIT's LJ_52 builds, from a
-// copy with the syntax that even those builds do not have written in syntax
-// they have (see rewrite).
+// using the parser of the gopher-lua fork of this repository (lua/parse): in
+// its LuaJIT dialect, which reads what LuaJIT and Tarantool read, then in the
+// syntax of LuaJIT's LJ_52 builds, then in its Lua 5.1 dialect.
 package parse
 
 import (
@@ -35,35 +33,74 @@ var errUnsupportedNode = errors.New("the require walker does not handle")
 
 type gopherParser struct{}
 
-// Parse reads source with the fork's parser in its LuaJIT dialect and walks
-// the syntax tree for the uses of require; the positions of the module names
-// are the spans of their string literals. When the parser refuses the
-// source, the source is read with the lexer (lex.NewFile), and the parser
-// reads the copy of it that rewrite writes, with the syntax of LuaJIT's
-// LJ_52 builds (parse.Options.Lua52Compat): empty statements, statements
-// after break and calls across a line break, as Lua 5.2 reads them. When it
-// refuses the copy too, the token scanner finds the uses of require instead
-// (see scanRequires): a module must not fail the build because of its
-// syntax. Only a lexical error does, as no dialect reads such a file.
+// Parse reads source with the fork's parser and walks the syntax tree for the
+// uses of require; the positions of the module names are the spans of their
+// string literals. The parser reads the source in the dialects of the
+// runtimes luamerge supports, the first that accepts it deciding:
+//
+//   - LuaJIT's, which Tarantool shares;
+//   - LuaJIT's with the syntax of its LJ_52 builds (parse.Options.Lua52Compat):
+//     empty statements, statements after break, calls across a line break and
+//     goto as a keyword everywhere, where the first reads goto as a name too;
+//   - Lua 5.1's, for what only it reads: an escape in a string that LuaJIT
+//     does not know ("\."), and numerals that LuaJIT does not end where Lua
+//     5.1 does ("1e5..x") or reads as out of range (1e1048576).
+//
+// When none accepts it, the token scanner finds the uses of require instead
+// (see scanRequires): a module must not fail the build because of its syntax.
+// Only a lexical error does, as no dialect reads such a file. The error in
+// the warning is the one of LuaJIT's LJ_52 syntax, so that a file written for
+// LuaJIT gets the message LuaJIT gives, but where its lexer refused a string
+// or a numeral that Lua 5.1 reads: then it is the one of Lua 5.1's dialect,
+// if that got further into the file.
 func (p *gopherParser) Parse(source []byte, filename string) (Result, error) {
-	chunk, err := parse.ParseChunk(readable(source), filename, luaJIT(false))
+	text := readable(source)
+
+	chunk, err := parse.ParseChunk(text, filename, luaJIT(false))
 	if err == nil {
 		return walk(chunk, nil)
 	}
 
-	tokens, err := significantTokens(source)
-	if err != nil {
-		return Result{}, fmt.Errorf("parsing lua source %q: %w", filename, err)
+	chunk, err = parse.ParseChunk(text, filename, luaJIT(true))
+	if err == nil {
+		tokens, tokensErr := significantTokens(source)
+		if tokensErr != nil {
+			return Result{}, fmt.Errorf("parsing lua source %q: %w", filename, tokensErr)
+		}
+
+		return walk(chunk, &callSites{source: source, tokens: tokens})
 	}
 
-	copied := rewrite(source, tokens)
-
-	chunk, err = parse.ParseChunk(copied.text, filename, luaJIT(true))
-	if err != nil {
-		return Result{Requires: scanRequires(source, tokens), Fallback: newFallback(err, tokens)}, nil
+	chunk, err51 := parse.ParseChunk(source, filename, lua51())
+	if err51 == nil {
+		return walk(chunk, nil)
 	}
 
-	return walk(chunk, copied)
+	tokens, tokensErr := significantTokens(source)
+	if tokensErr != nil {
+		return Result{}, fmt.Errorf("parsing lua source %q: %w", filename, tokensErr)
+	}
+
+	return Result{Requires: scanRequires(source, tokens), Fallback: newFallback(reported(err, err51), tokens)}, nil
+}
+
+// reported returns the error that the warning for a file no parser reads
+// names: luajit, the error of LuaJIT's parser, unless it is the refusal of a
+// string with an escape or of a numeral that Lua 5.1 reads, and lua51, the
+// error of Lua 5.1's parser, lies further into the file.
+func reported(luajit, lua51 error) error {
+	first, ok1 := errors.AsType[*parse.Error](luajit)
+	second, ok2 := errors.AsType[*parse.Error](lua51)
+
+	if !ok1 || !ok2 || first.Message != "invalid escape sequence" && first.Message != "malformed number" {
+		return luajit
+	}
+
+	if second.Pos.Line > first.Pos.Line || second.Pos.Line == first.Pos.Line && second.Pos.Column > first.Pos.Column {
+		return lua51
+	}
+
+	return luajit
 }
 
 // significantTokens returns the tokens of src without its comments, read the
@@ -92,6 +129,12 @@ func luaJIT(lua52 bool) parse.Options {
 	return parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false, Lua52Compat: lua52}
 }
 
+// lua51 returns the options of the fork's parser in its Lua 5.1 dialect, as
+// lua5.1 reads a file: it skips a first line that starts with "#".
+func lua51() parse.Options {
+	return parse.Options{Dialect: parse.Lua51, Comments: false, Shebang: true, Tokens: false, Lua52Compat: false}
+}
+
 // readable returns source as the fork's parser reads it the way the
 // interpreter reads a file it loads (lex.Header): the fork's lexer skips a
 // byte order mark and a first line that starts with "#" itself, but ends that
@@ -111,10 +154,11 @@ func readable(source []byte) []byte {
 	return readable
 }
 
-// walk returns the uses of require in chunk, read from the source or, when
-// copied is not nil, from that copy of it.
-func walk(chunk *ast.Chunk, copied *sourceCopy) (Result, error) {
-	requires, err := findRequires(chunk.Stmts, chunk.Lines.Source(), copied)
+// walk returns the uses of require in chunk, read from a source. sites, when
+// not nil, are the tokens of the source, which the syntax of LuaJIT's LJ_52
+// builds needs to find the line of a call.
+func walk(chunk *ast.Chunk, sites *callSites) (Result, error) {
+	requires, err := findRequires(chunk.Stmts, chunk.Lines.Source(), sites)
 	if err != nil {
 		return Result{}, err
 	}
@@ -122,12 +166,11 @@ func walk(chunk *ast.Chunk, copied *sourceCopy) (Result, error) {
 	return Result{Requires: requires, Fallback: nil}, nil
 }
 
-// newFallback describes err, the error the fork's parser reports for the copy
-// of a source (see rewrite), whose tokens without comments are tokens, as
-// the Fallback of the source. The copy has the lines of the source, so the
-// line is the line of the error, and at the end of the copy, where the parser
-// names the token "<eof>", the line of the last token; an error of a limit
-// names no token.
+// newFallback describes err, the error the fork's parser reports for a
+// source whose tokens without comments are tokens, as the Fallback of the
+// source: the line of the error, and at the end of the source, where the
+// parser names the token "<eof>", the line of the last token; an error of a
+// limit names no token.
 func newFallback(err error, tokens []lex.Token) *Fallback {
 	var syntaxErr *parse.Error
 	if !errors.As(err, &syntaxErr) {
@@ -180,16 +223,15 @@ func errorToken(token string) string {
 }
 
 // findRequires walks a parsed chunk, read from text, and returns every use of
-// require in it. It fails on a node type the walker does not know. When text
-// is copied, a copy of a source (see rewrite), the literal of each static
-// call has its position in the source.
-func findRequires(chunk []ast.Stmt, text []byte, copied *sourceCopy) ([]RequireInfo, error) {
+// require in it. It fails on a node type the walker does not know. sites are
+// those of the source the chunk was read from, or nil (see walk).
+func findRequires(chunk []ast.Stmt, text []byte, sites *callSites) ([]RequireInfo, error) {
 	walker := &requireWalker{
 		requires: []RequireInfo{},
 		err:      nil,
 		scopes:   nil,
 		text:     text,
-		copied:   copied,
+		sites:    sites,
 	}
 	walkBlock(walker, chunk)
 
@@ -206,10 +248,23 @@ type requireWalker struct {
 	err error
 	// scopes are the blocks the walk is in, the innermost last.
 	scopes []scope
-	// text is the text the chunk was read from: the source, or copied.
+	// text is the text the chunk was read from.
 	text []byte
-	// copied is the copy of the source the chunk was read from, or nil.
-	copied *sourceCopy
+	// sites are the tokens of the source, or nil when a call is on the line
+	// the parser numbers it by.
+	sites *callSites
+}
+
+// callSites are the tokens of a source that LuaJIT's LJ_52 builds read.
+type callSites struct {
+	source []byte
+	// tokens are the tokens of source without its comments.
+	tokens []lex.Token
+}
+
+// isOpenParen reports whether tok, a token of the source, is "(".
+func (c *callSites) isOpenParen(tok lex.Token) bool {
+	return tok.Kind == lex.Symbol && string(c.source[tok.Start:tok.End]) == "("
 }
 
 // literal returns the value of the string str and where the string literal
@@ -222,29 +277,25 @@ func (w *requireWalker) literal(str *ast.StringExpr) (string, Span) {
 		return str.Value, Span{Start: 0, End: 0}
 	}
 
-	if w.copied == nil {
-		return str.Value, Span{Start: span.Start, End: span.End}
-	}
-
-	return str.Value, Span{Start: w.copied.offset(span.Start, false), End: w.copied.offset(span.End, true)}
+	return str.Value, Span{Start: span.Start, End: span.End}
 }
 
 // callLine returns the line of call that a warning about it names: the line
-// of its arguments, as the parser numbers it. In a copy of a source (see
-// rewrite), a "(" of the arguments that starts a line is a call across a
-// line break, which only Lua 5.2 and later read, and the call is on the
-// line of the token before it, the end of the called expression.
+// of its arguments, as the parser numbers it. In the syntax of LuaJIT's LJ_52
+// builds, a "(" of the arguments that starts a line is a call across a line
+// break, which only those builds and Lua 5.2 and later read, and the call is
+// on the line of the token before it, the end of the called expression.
 func (w *requireWalker) callLine(call *ast.FuncCallExpr) int {
 	line := call.Line()
-	if w.copied == nil || call.Func == nil {
+	if w.sites == nil || call.Func == nil {
 		return line
 	}
 
-	tokens := w.copied.tokens
-	after := w.copied.offset(call.Func.OuterSpan().End, true)
+	tokens := w.sites.tokens
+	after := call.Func.OuterSpan().End
 	i := sort.Search(len(tokens), func(i int) bool { return tokens[i].Start >= after })
 
-	if i > 0 && i < len(tokens) && w.copied.isOpenParen(tokens[i]) && tokens[i].Line > tokens[i-1].Line {
+	if i > 0 && i < len(tokens) && w.sites.isOpenParen(tokens[i]) && tokens[i].Line > tokens[i-1].Line {
 		return tokens[i-1].Line
 	}
 
@@ -594,11 +645,10 @@ func requireCallArgs(w *requireWalker, call *ast.FuncCallExpr) (ast.Expr, []ast.
 	}
 }
 
-// requireRef returns how expr names the global require function: "require",
-// "_G.require" or "_ENV.require" (`_G["require"]` parses the same as
-// `_G.require`), and "" when it names something else. The name require is
-// the global require unless a local of that name hides it; _G and _ENV go by
-// spelling.
+// requireRef returns how expr names the global require function: "require" or
+// "_G.require" (`_G["require"]` parses the same as `_G.require`), and ""
+// when it names something else. The name require is the global require
+// unless a local of that name hides it; _G goes by spelling.
 func requireRef(w *requireWalker, expr ast.Expr) string {
 	switch expr := expr.(type) {
 	case *ast.IdentExpr:
@@ -609,7 +659,7 @@ func requireRef(w *requireWalker, expr ast.Expr) string {
 		table, isIdent := expr.Object.(*ast.IdentExpr)
 		key, isString := expr.Key.(*ast.StringExpr)
 
-		if !isIdent || !isString || table.Value != "_G" && table.Value != "_ENV" {
+		if !isIdent || !isString || table.Value != "_G" {
 			return ""
 		}
 

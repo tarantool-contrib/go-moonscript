@@ -14,10 +14,10 @@ type minifyTransformer struct{}
 // a space where they would run together ("local x", "a - -b", "1 ..2"), and a
 // line break where the source had one or more, in white space or inside a
 // comment. No line break goes away and none is added: Lua 5.1 and LuaJIT
-// refuse a call whose "(" starts a new line as ambiguous, where Lua 5.2+
-// reads the call. The header that the interpreter skips when it loads a file
-// (see lex.Header), a byte order mark and a first line starting with "#", is
-// dropped. Line numbers are not kept.
+// refuse a call whose "(" starts a new line as ambiguous, where LuaJIT built
+// with LUAJIT_ENABLE_LUA52COMPAT reads the call. The header that the
+// interpreter skips when it loads a file (see lex.Header), a byte order mark
+// and a first line starting with "#", is dropped. Line numbers are not kept.
 func (t *minifyTransformer) Transform(source []byte) ([]byte, error) {
 	tokens, err := lex.NewFile(source).Tokens()
 	if err != nil {

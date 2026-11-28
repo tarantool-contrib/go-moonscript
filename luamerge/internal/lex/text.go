@@ -70,7 +70,7 @@ func IsSpace(c byte) bool {
 // nothing after it can. Which bytes extend a token is the lexer's rule: an
 // identifier character a name, an identifier character, a "." and a sign
 // after an exponent letter a numeral, the second character of a symbol of
-// two ("==", "~=", "<=", ">=", "<<", ">>", "//", "::", "..", "--") or three
+// two ("==", "~=", "<=", ">=", "::", "..", "--") or three
 // ("...") the first one, and a digit a ".". A string, a long bracket and any
 // other symbol end where they end.
 func NeedsSeparator(left, right []byte) bool {
@@ -99,11 +99,9 @@ func NeedsSeparator(left, right []byte) bool {
 // a long bracket or an unfinished one ("[[", "[="), or a numeral (".5").
 func extendsSymbol(first, next byte) bool {
 	switch first {
-	case '=', '~':
+	case '=', '~', '<', '>':
 		return next == '='
-	case '<', '>':
-		return next == '=' || next == first
-	case '/', ':', '-':
+	case ':', '-':
 		return next == first
 	case '[':
 		return next == '[' || next == '='

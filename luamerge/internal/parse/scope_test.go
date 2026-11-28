@@ -110,8 +110,8 @@ func TestParse_LocalNamedRequire(t *testing.T) {
 		},
 		{
 			name:   "global require through _G",
-			source: "local function require() end\n_G.require(\"x\")\nlocal g = _ENV.require\n",
-			want:   []parse.RequireInfo{testStatic("x", 2), testIndirect(`_ENV.require aliased as local "g"`, 3)},
+			source: "local function require() end\n_G.require(\"x\")\nlocal g = _G.require\n",
+			want:   []parse.RequireInfo{testStatic("x", 2), testIndirect(`_G.require aliased as local "g"`, 3)},
 		},
 		{
 			name:   "local that holds the global",
@@ -122,11 +122,6 @@ func TestParse_LocalNamedRequire(t *testing.T) {
 			name:   "global stored in a local that hides it",
 			source: "local require = function() end\nrequire = _G.require\nrequire(\"x\")\n",
 			want:   []parse.RequireInfo{testIndirect(`_G.require assigned to "require"`, 2)},
-		},
-		{
-			name:   "Lua 5.5 global declaration",
-			source: "local function require() end\ndo\n  global require\n  require(\"x\")\nend\nrequire(\"y\")\n",
-			want:   []parse.RequireInfo{testStatic("x", 4)},
 		},
 	}
 

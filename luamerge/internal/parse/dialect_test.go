@@ -4,20 +4,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
 )
 
 // TestParse_DialectSyntax: the requires of a file in the syntax of any
-// dialect are found on their lines, next to constructs of other dialects
-// than LuaJIT, whose parser reads the file: the operators of Lua 5.3, the
-// attributes of Lua 5.4, the declarations of Lua 5.5, a statement after
-// break, an empty statement and a call across a line break (Lua 5.2), and
-// LuaJIT's own numerals and names beyond ASCII next to them. The constructs that read
-// differently in different dialects are read the way the dialect that accepts
-// the file reads them: goto and global are names where they cannot start a
-// statement, and a numeral ends where Lua 5.1 (before "..") or Lua 5.2 and
-// 5.3 (before a letter) end it.
+// supported dialect are found on their lines: LuaJIT's own numerals, escapes
+// and names beyond ASCII, goto as a statement and as a name, what LuaJIT
+// built with LUAJIT_ENABLE_LUA52COMPAT reads (a statement after break, an
+// empty statement and a call across a line break), and what only Lua 5.1
+// reads: a string with an escape LuaJIT does not know, and numerals that
+// LuaJIT does not end where Lua 5.1 does.
 func TestParse_DialectSyntax(t *testing.T) {
 	t.Parallel()
 
@@ -26,97 +24,6 @@ func TestParse_DialectSyntax(t *testing.T) {
 		source string
 		want   []parse.RequireInfo
 	}{
-		// Lua 5.3 operators.
-		{
-			name:   "floor division",
-			source: "local a = require(\"a\") // 2\nlocal b = 7 // require(\"b\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2)},
-		},
-		{
-			name:   "bitwise and, or and exclusive or",
-			source: "local v = require(\"a\") & 3 | require(\"b\") ~ 1\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 1)},
-		},
-		{
-			name:   "bitwise not",
-			source: "local v = ~require(\"a\")\nlocal w = ~~1 ~ ~2\n",
-			want:   []parse.RequireInfo{testStatic("a", 1)},
-		},
-		{
-			name:   "shifts",
-			source: "local v = 1 << require(\"a\") >> 2\n",
-			want:   []parse.RequireInfo{testStatic("a", 1)},
-		},
-
-		// Lua 5.4 and 5.5 attributes.
-		{
-			name:   "const and close",
-			source: "local x <const> = require(\"a\")\nlocal f <close> = nil\nrequire(\"b\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 3)},
-		},
-		{
-			name:   "attribute over two lines",
-			source: "local x <\nconst> = require(\"a\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 2)},
-		},
-		{
-			name:   "attribute before the names",
-			source: "local <const> a, b <close> = require(\"a\"), nil\n",
-			want:   []parse.RequireInfo{testStatic("a", 1)},
-		},
-		{
-			name:   "comparison is no attribute",
-			source: "local ok = a < b and c > require(\"a\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 1)},
-		},
-
-		// Lua 5.5 global declarations.
-		{
-			name:   "global declaration",
-			source: "global print, require\nlocal a = require(\"a\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 2)},
-		},
-		{
-			name:   "global declaration with values",
-			source: "global x, y = require(\"a\"), 2\n",
-			want:   []parse.RequireInfo{testStatic("a", 1)},
-		},
-		{
-			name:   "global declaration with attributes",
-			source: "global <const> x, y <const> = 1, require(\"a\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 1)},
-		},
-		{
-			name:   "global declaration of every name",
-			source: "global *\nglobal <const> *\nrequire(\"a\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 3)},
-		},
-		{
-			name:   "global function",
-			source: "global function f()\n  return require(\"a\")\nend\n",
-			want:   []parse.RequireInfo{testStatic("a", 2)},
-		},
-		{
-			name:   "global declaration after a statement",
-			source: "local x = 1 global y\nrequire(\"a\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 2)},
-		},
-		{
-			name:   "global declaration after an attribute",
-			source: "local x <close>\nglobal y <const>\nglobal z\nrequire(\"a\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 4)},
-		},
-		{
-			name: "global as a name",
-			source: "local global = require(\"a\")\n" +
-				"global = global * 2 + (global < 3 and 1 or 0)\n" +
-				"local t = { global = 1 }\n" +
-				"t.global = require(\"b\")\n" +
-				"function t.global() end\n" +
-				"global \"x\"\n",
-			want: []parse.RequireInfo{testStatic("a", 1), testStatic("b", 4)},
-		},
-
 		// Numerals.
 		{
 			name:   "hexadecimal floats",
@@ -134,9 +41,9 @@ func TestParse_DialectSyntax(t *testing.T) {
 			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2)},
 		},
 		{
-			name:   "Lua 5.2 numeral before a keyword",
-			source: "if x == 3then require(\"a\") end\nif x == 0x10then require(\"b\") end\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2)},
+			name:   "Lua 5.1 numeral out of range",
+			source: "local v = 1e1048576 + require(\"a\")\n",
+			want:   []parse.RequireInfo{testStatic("a", 1)},
 		},
 
 		// Names.
@@ -155,8 +62,15 @@ func TestParse_DialectSyntax(t *testing.T) {
 			source: "goto skip\nrequire(\"a\")\n::skip::\nrequire(\"b\")\n",
 			want:   []parse.RequireInfo{testStatic("a", 2), testStatic("b", 4)},
 		},
+		{
+			// LuaJIT reads goto as a name next to the goto statements.
+			name: "goto as a name and goto statements",
+			//nolint:dupword // "goto goto" is Lua, and the point of the case.
+			source: "local goto = require(\"a\")\ngoto skip\n::skip::\nx = goto goto skip\nrequire(\"b\")\n",
+			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 5)},
+		},
 
-		// Lua 5.2 statements.
+		// What LuaJIT builds with LUAJIT_ENABLE_LUA52COMPAT read.
 		{
 			name:   "statement after break",
 			source: "for i = 1, 2 do\n  break\n  require(\"a\")\nend\n",
@@ -168,7 +82,6 @@ func TestParse_DialectSyntax(t *testing.T) {
 			want:   []parse.RequireInfo{testStatic("a", 3)},
 		},
 		{
-			// The copy writes the long string on one line.
 			name:   "call across a line break after a long string",
 			source: "local f = function() return print end\nf [[\n]](require(\"a\"))\nf \"b\"\n(require(\"b\"))\n",
 			want:   []parse.RequireInfo{testStatic("a", 3), testStatic("b", 5)},
@@ -193,62 +106,37 @@ func TestParse_DialectSyntax(t *testing.T) {
 	}
 }
 
-// TestParse_LuaJITExtensions: LuaJIT 2.1 builds of 2026 read syntax of their
-// own, which LuaJIT's own jit.* modules use: "!=" and "!", "&&" and "||", the
-// conditional expression `c ? a : b`, "??", compound assignments such as
-// `x += 1` (and `x ~= 1` for exclusive or), and a continue statement. The
-// requires next to them are found on their lines.
-func TestParse_LuaJITExtensions(t *testing.T) {
+// TestParse_Lua51Strings: a file with an escape in a string that only Lua 5.1
+// reads, which reads it as the character after the backslash, is read in
+// Lua 5.1's dialect: every module name is where it is in the file, on its
+// line, and a name with such an escape is the name Lua 5.1 reads.
+func TestParse_Lua51Strings(t *testing.T) {
 	t.Parallel()
+
+	type call struct {
+		name, literal string
+		line          int
+	}
 
 	tests := []struct {
 		name   string
 		source string
-		want   []parse.RequireInfo
+		want   []call
 	}{
 		{
-			name:   "not-equal and not",
-			source: "if require(\"a\") != nil and !require(\"b\") then end\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 1)},
+			name:   "a string before the literal",
+			source: "local p = '\\.'\nrequire(\"a\\.b\\\n\")\nrequire \"c\"\n",
+			want:   []call{{"a.b\n", "\"a\\.b\\\n\"", 2}, {"c", `"c"`, 4}},
 		},
 		{
-			name:   "logical operators and nil coalescing",
-			source: "local v = require(\"a\") && x || require(\"b\") ?? require(\"c\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 1), testStatic("c", 1)},
+			name:   "unknown escapes where LuaJIT knows others",
+			source: `local p = "\xZZ" .. "\u{110000}" .. "\u{D800}"; require [[a]] require"\q\x41"`,
+			want:   []call{{"a", "[[a]]", 1}, {"qx41", `"\q\x41"`, 1}},
 		},
 		{
-			name: "conditional expressions",
-			source: "local v = c ? require(\"a\") : require(\"b\")\n" +
-				"local w = c ? (t:m()) : t:f(require(\"d\"))\n" +
-				"local u = c ? x ? 1 : 2 : require(\"e\")\n" +
-				"local f = c ? function() return t:m(require(\"g\")) end : nil\n",
-			want: []parse.RequireInfo{
-				testStatic("a", 1), testStatic("b", 1), testStatic("d", 2), testStatic("e", 3), testStatic("g", 4),
-			},
-		},
-		{
-			name: "compound assignments",
-			source: "x += require(\"a\")\ns ..= require(\"b\")\n" +
-				"x -= 1 x *= 2 x /= 3 x %= 4 x &= 5 x |= 6 x <<= 1 x >>= 1 t.x += 1 t[1] += 1\n" +
-				"x ~= require(\"c\")\n" +
-				"if x ~= require(\"d\") then end\n",
-			want: []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2), testStatic("c", 4), testStatic("d", 5)},
-		},
-		{
-			name:   "exclusive or assigned at the start of the file",
-			source: "x ~= require(\"a\")\nt.x ~= require(\"b\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2)},
-		},
-		{
-			name:   "arithmetic shift",
-			source: "local x = (op << 16) ~>> 16 + require(\"a\")\nx ~>>= require(\"b\")\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2)},
-		},
-		{
-			name: "continue",
-			source: "for i = 1, 2 do\n  if i == 1 then continue end\n  require(\"a\")\nend\n" +
-				"::continue::\ngoto continue\nlocal continue = require(\"b\")\nt.continue = continue\n",
-			want: []parse.RequireInfo{testStatic("a", 3), testStatic("b", 7)},
+			name:   "numerals LuaJIT does not end",
+			source: "local s = 1e5..require(\"a\")\nlocal t = 0x10..require(\"b\")\nrequire(\"\\.c\")",
+			want:   []call{{"a", `"a"`, 1}, {"b", `"b"`, 2}, {".c", `"\.c"`, 3}},
 		},
 	}
 
@@ -256,7 +144,49 @@ func TestParse_LuaJITExtensions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tt.want, testParse(t, tt.source))
+			want := make([]parse.RequireInfo, 0, len(tt.want))
+
+			for _, c := range tt.want {
+				span := testSpans(t, tt.source, []testLiteral{{name: c.name, text: c.literal, n: 0}})[0]
+				want = append(want, parse.RequireInfo{
+					Name: c.name, Line: c.line, Static: true, Literal: span, Protected: false, Indirect: "",
+				})
+			}
+
+			found, err := parse.New().Parse([]byte(tt.source), "test.lua")
+			require.NoError(t, err)
+			require.Nil(t, found.Fallback, "Lua 5.1's dialect reads the file")
+			assert.Equal(t, want, found.Requires)
 		})
 	}
+}
+
+// TestParse_CallAcrossLineBreak: in the syntax of LuaJIT's LJ_52 builds a
+// call whose "(" starts a line is on the line of its function, where the
+// parser numbers it by its "(", and the literal of its module name is where
+// it is.
+func TestParse_CallAcrossLineBreak(t *testing.T) {
+	t.Parallel()
+
+	type call struct {
+		name, literal string
+		line          int
+		protected     bool
+	}
+
+	source := "local a = 1;;\nrequire\n(\"a\")\npcall\n\n(require, \"b\")\n_G.require\n'c'\n"
+	want := []call{{"a", `"a"`, 2, false}, {"b", `"b"`, 4, true}, {"c", `'c'`, 7, false}}
+	wantInfo := make([]parse.RequireInfo, 0, len(want))
+
+	for _, c := range want {
+		span := testSpans(t, source, []testLiteral{{name: c.name, text: c.literal, n: 0}})[0]
+		wantInfo = append(wantInfo, parse.RequireInfo{
+			Name: c.name, Line: c.line, Static: true, Literal: span, Protected: c.protected, Indirect: "",
+		})
+	}
+
+	found, err := parse.New().Parse([]byte(source), "test.lua")
+	require.NoError(t, err)
+	require.Nil(t, found.Fallback, "the parser reads the file")
+	assert.Equal(t, wantInfo, found.Requires)
 }

@@ -26,8 +26,8 @@ type reader struct {
 
 // read reads the tokens of r.src from start on, which is on line 1: those of
 // LuaJIT's lexer (parse.Tokenize), from start, and after a token it stops at
-// that another dialect reads (see repair), from after that token. A lexical
-// error that no dialect makes is an *Error.
+// that Lua 5.1 reads (see repair), from after that token. A lexical error that
+// no dialect makes is an *Error.
 func (r *reader) read(start int) error {
 	r.pos = start
 	options := parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false, Lua52Compat: false}
@@ -56,14 +56,14 @@ func (r *reader) guard() {
 	for r.pos < len(r.src) {
 		switch {
 		case r.src[r.pos] == '#':
-			r.emit(Symbol, r.pos+1, false)
+			r.emit(Symbol, r.pos+1)
 		case bytes.HasPrefix(r.src[r.pos:], []byte(BOM)):
 			end := r.pos
 			for end < len(r.src) && isIdent(r.src[end]) {
 				end++
 			}
 
-			r.emit(Name, end, false)
+			r.emit(Name, end)
 		default:
 			return
 		}
@@ -71,26 +71,22 @@ func (r *reader) guard() {
 }
 
 // emit adds the token of kind from r.pos to end.
-func (r *reader) emit(kind Kind, end int, notLuaJIT bool) {
+func (r *reader) emit(kind Kind, end int) {
 	line := r.line
 	r.line += lineBreaks(r.src[r.pos:end])
-	r.tokens = append(r.tokens, Token{
-		Kind: kind, Start: r.pos, End: end, Line: line, EndLine: r.line, NotLuaJIT: notLuaJIT,
-	})
+	r.tokens = append(r.tokens, Token{Kind: kind, Start: r.pos, End: end, Line: line, EndLine: r.line})
 	r.pos = end
 }
 
 // add adds the tokens the fork's lexer read from r.pos on, in the kinds of
-// this package: without the white space and the line breaks, "&", "|" and
-// "~" as symbols, any other character of no token of the grammar as Invalid,
-// and "//", "<<" and ">>", two tokens to it, as one (see addShift).
+// this package: without the white space and the line breaks, and a character
+// of no token of the grammar as Invalid.
 func (r *reader) add(tokens ast.Tokens) {
 	base := r.pos
 	// About every other token of the fork's is trivia.
 	r.tokens = slices.Grow(r.tokens, len(tokens)/2+1)
 
-	for i := 0; i < len(tokens); i++ {
-		tok := tokens[i]
+	for _, tok := range tokens {
 		span := tok.Span()
 		r.pos = base + span.Start
 		end := base + span.End
@@ -105,71 +101,20 @@ func (r *reader) add(tokens ast.Tokens) {
 			// The fork reads no header after guard.
 			r.pos = end
 		case kind == ast.TokenComment:
-			r.emit(commentKind(r.src[r.pos:end]), end, false)
+			r.emit(commentKind(r.src[r.pos:end]), end)
 		case kind == ast.TokenString && r.src[r.pos] == '[':
-			r.emit(LongString, end, false)
+			r.emit(LongString, end)
 		case kind == ast.TokenString:
-			r.emit(String, end, false)
+			r.emit(String, end)
 		case kind == ast.TokenNumber:
-			r.emit(Number, end, false)
+			r.emit(Number, end)
 		case kind == ast.TokenName, kind.IsKeyword():
-			r.emit(Name, end, false)
+			r.emit(Name, end)
 		case kind == ast.TokenOther:
-			r.emit(otherKind(r.src[r.pos:end]), end, false)
-		case i+1 < len(tokens) && joinsNext(kind, tokens[i+1].Kind):
-			i = r.addShift(tokens, i+1, base)
+			r.emit(Invalid, end)
 		default:
-			r.emit(Symbol, end, false)
+			r.emit(Symbol, end)
 		}
-	}
-}
-
-// addShift adds "//", "<<" or ">>" at r.pos, whose second character is the
-// token at i, and returns the index of the last token it read. The fork
-// reads "<<=" as "<" and "<=", which is "<<" and "=", and that "=" is the
-// start of "==" when "=" follows.
-func (r *reader) addShift(tokens ast.Tokens, i, base int) int {
-	r.emit(Symbol, r.pos+len("//"), false)
-
-	if tokens[i].Kind != ast.TokenLe && tokens[i].Kind != ast.TokenGe {
-		return i
-	}
-
-	for i+1 < len(tokens) && (tokens[i+1].Kind == ast.TokenAssign || tokens[i+1].Kind == ast.TokenEq) {
-		i++
-
-		r.emit(Symbol, r.pos+len("=="), false)
-
-		if tokens[i].Kind == ast.TokenAssign {
-			return i
-		}
-	}
-
-	if end := base + tokens[i].Span().End; r.pos < end {
-		r.emit(Symbol, end, false)
-	}
-
-	return i
-}
-
-// joinsNext reports whether a token of kind and one of next right after it
-// start a symbol of Lua 5.3 that the fork reads as two tokens: "//", "<<" or
-// ">>", and "<<=" and ">>=" as "<" and "<=", ">" and ">=".
-func joinsNext(kind, next ast.TokenKind) bool {
-	return kind == ast.TokenSlash && next == ast.TokenSlash ||
-		kind == ast.TokenLt && (next == ast.TokenLt || next == ast.TokenLe) ||
-		kind == ast.TokenGt && (next == ast.TokenGt || next == ast.TokenGe)
-}
-
-// otherKind returns the kind of text, a character the fork reads as no token
-// of the grammar: Symbol for the operators of Lua 5.3 "&", "|" and "~",
-// Invalid for any other.
-func otherKind(text []byte) Kind {
-	switch string(text) {
-	case "&", "|", "~":
-		return Symbol
-	default:
-		return Invalid
 	}
 }
 
@@ -197,10 +142,10 @@ func level(text []byte, i int) (int, bool) {
 }
 
 // repair reads the token the fork's lexer stopped at with err, at r.pos, when
-// another dialect reads it (see the package documentation): a short string
-// up to its closing quote, taking the character after a backslash for its
-// escape, but for "\z" and the white space after it and a backslash before a
-// line break, and a numeral as LuaJIT scans it. It returns the error, an
+// Lua 5.1 reads it (see the package documentation): a short string up to its
+// closing quote, taking the character after a backslash for its escape, but
+// for "\z" and the white space after it and a backslash before a line break,
+// and a numeral as LuaJIT scans it. It returns the error, an
 // *Error, for any other token, which no dialect reads: a short string
 // without its end, an unfinished long string or long comment, and "[" and
 // "=" signs without a second "[".
@@ -215,9 +160,9 @@ func (r *reader) repair(err error) error {
 			return &Error{Err: ErrUnfinishedString, Offset: start, Line: r.line}
 		}
 
-		r.emit(String, end, true)
+		r.emit(String, end)
 	case isDigit(char) || char == '.' && start+1 < len(r.src) && isDigit(r.src[start+1]):
-		r.emit(Number, numberEnd(r.src, start), true)
+		r.emit(Number, numberEnd(r.src, start))
 	default:
 		sentinel := ErrLongBracket
 

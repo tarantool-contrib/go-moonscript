@@ -2,7 +2,6 @@ package integration_test
 
 import (
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -13,63 +12,27 @@ import (
 )
 
 // The tests in this file bundle code that only some Lua dialects read: Lua
-// 5.2 to 5.5, LuaJIT and Tarantool each accept syntax the others reject. A
-// module is bundled whatever it is written in, and wherever the interpreter
-// runs the original, the bundle must run the same way.
+// 5.1, LuaJIT and Tarantool each accept syntax the others reject. A module is
+// bundled whatever it is written in, and wherever the interpreter runs the
+// original, the bundle must run the same way.
 
 // dialects says which interpreters read a construct.
 type dialects func(interp luatest.Interpreter) bool
 
-// pucLuaMinor is the minor version of PUC Lua, e.g. 4 for "Lua 5.4", and false
-// for any other interpreter.
-func pucLuaMinor(interp luatest.Interpreter) (int, bool) {
-	minor, found := strings.CutPrefix(interp.Version, "Lua 5.")
-	if !found {
-		return 0, false
-	}
-
-	n, err := strconv.Atoi(minor)
-
-	return n, err == nil
-}
-
-// pucLuaFrom is PUC Lua 5.minor and later.
-func pucLuaFrom(minor int) dialects {
-	return func(interp luatest.Interpreter) bool {
-		n, ok := pucLuaMinor(interp)
-
-		return ok && n >= minor
-	}
-}
-
-// pucLuaOnly is PUC Lua 5.minor for each of minors.
-func pucLuaOnly(minors ...int) dialects {
-	return func(interp luatest.Interpreter) bool {
-		n, ok := pucLuaMinor(interp)
-
-		return ok && slices.Contains(minors, n)
-	}
-}
-
-// luaJITFrom is LuaJIT 2.1 from the build stamped stamp on: its version is
-// "LuaJIT 2.1.<stamp>". Tarantool is not.
-func luaJITFrom(stamp int) dialects {
-	return func(interp luatest.Interpreter) bool {
-		build, found := strings.CutPrefix(interp.Version, "LuaJIT 2.1.")
-		if !found {
-			return false
-		}
-
-		n, err := strconv.Atoi(build)
-
-		return err == nil && n >= stamp
-	}
+// lua51 is PUC Lua 5.1.
+func lua51(interp luatest.Interpreter) bool {
+	return strings.HasPrefix(interp.Version, "Lua 5.1")
 }
 
 // luaJIT is LuaJIT and Tarantool, which is built on it.
 func luaJIT(interp luatest.Interpreter) bool {
 	return strings.HasPrefix(interp.Version, "LuaJIT ") || strings.HasPrefix(interp.Version, "Tarantool ")
 }
+
+// luaJIT52 is LuaJIT built with LUAJIT_ENABLE_LUA52COMPAT, which no
+// interpreter the tests find says it is: a construct only it reads is
+// compared where the original runs anyway.
+func luaJIT52(luatest.Interpreter) bool { return false }
 
 // everyDialect is every interpreter.
 func everyDialect(luatest.Interpreter) bool { return true }
@@ -110,11 +73,11 @@ func checkWhereItRuns(readers dialects, stdout string) func(t *testing.T, orig, 
 	}
 }
 
-// TestCLI_ModuleNameEscapes: a module name is decoded the way the interpreters
-// that know its escapes decode it, so "\x61x" requires the module ax. The
-// bundler used to decode names like Lua 5.1, which takes an unknown escape
-// for the character after the backslash, and looked for modules named x61x,
-// u{62}ar and cz   z instead.
+// TestCLI_ModuleNameEscapes: a module name is decoded the way LuaJIT and
+// Tarantool decode it, so "\x61x" requires the module ax. The bundler used to
+// decode names like Lua 5.1, which takes an unknown escape for the character
+// after the backslash, and looked for modules named x61x, u{62}ar and cz   z
+// instead.
 func TestCLI_ModuleNameEscapes(t *testing.T) {
 	t.Parallel()
 
@@ -124,13 +87,10 @@ func TestCLI_ModuleNameEscapes(t *testing.T) {
 		module  string
 		readers dialects
 	}{
-		{name: "hexadecimal escape", literal: `"\x61x"`, module: "ax", readers: anyDialect(pucLuaFrom(2), luaJIT)},
-		{name: "unicode escape", literal: `"\u{62}ar"`, module: "bar", readers: anyDialect(pucLuaFrom(3), luaJIT)},
-		{name: "z escape", literal: `"c\z   z"`, module: "cz", readers: anyDialect(pucLuaFrom(2), luaJIT)},
-		{
-			name: "z escape over a line break", literal: "\"c\\z\n    z\"", module: "cz",
-			readers: anyDialect(pucLuaFrom(2), luaJIT),
-		},
+		{name: "hexadecimal escape", literal: `"\x61x"`, module: "ax", readers: luaJIT},
+		{name: "unicode escape", literal: `"\u{62}ar"`, module: "bar", readers: luaJIT},
+		{name: "z escape", literal: `"c\z   z"`, module: "cz", readers: luaJIT},
+		{name: "z escape over a line break", literal: "\"c\\z\n    z\"", module: "cz", readers: luaJIT},
 	}
 
 	for _, tt := range tests {
@@ -164,15 +124,10 @@ type dialectCase struct {
 // then next to requires, which must be found.
 func dialectCases() []dialectCase {
 	return slices.Concat([]dialectCase{
-		{name: "floor division", module: "return 7 // 2\n", stdout: "3\n", readers: pucLuaFrom(3)},
-		{name: "bitwise operators", module: "return 5 & 3 | 8\n", stdout: "9\n", readers: pucLuaFrom(3)},
-		{name: "shift", module: "return 1 << 4\n", stdout: "16\n", readers: pucLuaFrom(3)},
-		{name: "const", module: "local x <const> = 42 return x\n", stdout: "42\n", readers: pucLuaFrom(4)},
 		{
 			name: "hexadecimal float", module: "return 0x1p4 == 16\n", stdout: "true\n",
-			readers: anyDialect(pucLuaFrom(2), luaJIT),
+			readers: anyDialect(lua51, luaJIT),
 		},
-		{name: "global declaration", module: "global print; return \"g\"\n", stdout: "g\n", readers: pucLuaFrom(5)},
 		{name: "unsigned 64-bit integer", module: "return tostring(1ULL)\n", stdout: "1ULL\n", readers: luaJIT},
 		{name: "64-bit integer", module: "return tostring(0x10LL)\n", stdout: "16LL\n", readers: luaJIT},
 		{name: "imaginary number", module: "return tostring(2i)\n", stdout: "0+2i\n", readers: luaJIT},
@@ -193,35 +148,7 @@ func dialectRequireCases() []dialectCase {
 			name:    "z escape over a line break",
 			module:  "local s = \"c\\z\n           d\"\nlocal n = require(\"n\")\nreturn s .. n\n",
 			stdout:  "cdn\n",
-			readers: anyDialect(pucLuaFrom(2), luaJIT),
-		},
-		{
-			name: "Lua 5.3 operators",
-			module: "local n = require(\"n\")\n" +
-				"local v = 7 // 2 + (5 & 3 | 8) + (1 << 4) + (~0 ~ 1) + (256 >> 4)\n" +
-				"local m = require(\"n\")\n" +
-				"return v .. n .. m\n",
-			stdout:  "42nn\n",
-			readers: pucLuaFrom(3),
-		},
-		{
-			name: "Lua 5.4 attributes",
-			module: "local n <const> = require(\"n\")\n" +
-				"local c <close> = nil\n" +
-				"local m <const> = require(\"n\")\n" +
-				"return n .. m\n",
-			stdout:  "nn\n",
-			readers: pucLuaFrom(4),
-		},
-		{
-			name: "Lua 5.5 declarations",
-			module: "local <const> a, b = require(\"n\"), 1\n" +
-				"global <const> print, require, tostring\n" +
-				"local m = require(\"n\")\n" +
-				"global function twice(s) return s .. s end\n" +
-				"return twice(a) .. m .. tostring(b)\n",
-			stdout:  "nnn1\n",
-			readers: pucLuaFrom(5),
+			readers: luaJIT,
 		},
 		{
 			name: "LuaJIT numerals",
@@ -239,59 +166,55 @@ func dialectRequireCases() []dialectCase {
 			readers: luaJIT,
 		},
 		{
+			name: "goto statements",
+			module: "local n = require(\"n\")\ngoto skip\nn = nil\n::skip::\n" +
+				"for i = 1, 2 do\n  if i == 1 then goto continue end\n" +
+				"  n = n .. require(\"n\")\n  ::continue::\nend\n" +
+				"return n\n",
+			stdout:  "nn\n",
+			readers: luaJIT,
+		},
+		{
 			// Some LuaJIT builds read goto as a name too, Tarantool's
 			// among them; where the original runs, it is compared.
 			name:    "goto as a name",
 			module:  "local goto = require(\"n\")\nreturn goto\n",
 			stdout:  "n\n",
-			readers: pucLuaOnly(1),
+			readers: lua51,
 		},
 		{
-			name:    "Lua 5.2 statement after break",
+			name:    "statement after break",
 			module:  "local n\nfor i = 1, 2 do\n  n = require(\"n\")\n  break\n  n = nil\nend\nreturn n\n",
 			stdout:  "n\n",
-			readers: pucLuaFrom(2),
+			readers: luaJIT52,
 		},
 		{
-			name: "Lua 5.2 call across a line break",
+			name: "call across a line break",
 			module: "local function id(...) return ... end\n" +
 				"local f = function() return id end\n" +
 				"local n = f()\n" +
 				"(require(\"n\"))\n" +
 				"return n\n",
 			stdout:  "n\n",
-			readers: pucLuaFrom(2),
+			readers: luaJIT52,
+		},
+		{
+			name:    "empty statements",
+			module:  ";local n = require(\"n\");;\nreturn n\n",
+			stdout:  "n\n",
+			readers: luaJIT52,
 		},
 		{
 			name:    "Lua 5.1 numerals before a concatenation",
 			module:  "local n = 1e1..require(\"n\")\nreturn 0x10..n\n",
 			stdout:  "1610n\n",
-			readers: pucLuaOnly(1),
+			readers: lua51,
 		},
 		{
-			name:    "Lua 5.2 numeral before a keyword",
-			module:  "local x, n = 3, nil\nif x == 3then n = require(\"n\") end\nreturn n\n",
-			stdout:  "n\n",
-			readers: pucLuaOnly(2, 3),
-		},
-		{
-			// Read since the LuaJIT 2.1 builds of 2026, whose jit.* modules
-			// use it; older builds and Tarantool reject it.
-			name: "LuaJIT extensions",
-			module: "local n = require(\"n\")\n" +
-				"local a = 1 != 2 and !false\n" +
-				"local b = (a && true || false) ? \"yes\" : \"no\"\n" +
-				"local c = nil ?? require(\"n\")\n" +
-				"local s = n\n" +
-				"s ..= c\n" +
-				"local x = 5\n" +
-				"x += 1 x -= 2 x *= 3 x %= 7 x &= 7 x |= 8 x <<= 1 x >>= 1 x ~= 1\n" +
-				"for i = 1, 3 do\n  if i == 2 then continue end\n  x += i\nend\n" +
-				"local y = -16 ~>> 2\n" +
-				"y ~>>= 1\n" +
-				"return b .. s .. x .. y\n",
-			stdout:  "yesnn16-2\n",
-			readers: luaJITFrom(1788856981),
+			name:    "Lua 5.1 escape LuaJIT does not know",
+			module:  "local s = \"a\\.b\"\nlocal n = require(\"n\")\nreturn s .. n\n",
+			stdout:  "a.bn\n",
+			readers: lua51,
 		},
 	}
 }

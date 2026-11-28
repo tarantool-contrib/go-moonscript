@@ -10,10 +10,10 @@ import (
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
 )
 
-// TestParse_TokenScanFallback: a file the parser cannot read even written the
-// Lua 5.1 way, typically one with a syntax error, does not fail the build: the
-// token scanner finds its requires, and the result says where and why the
-// parser failed, so the bundler can say so.
+// TestParse_TokenScanFallback: a file the parser cannot read in any dialect,
+// typically one with a syntax error, does not fail the build: the token
+// scanner finds its requires, and the result says where and why the parser
+// failed, so the bundler can say so.
 func TestParse_TokenScanFallback(t *testing.T) {
 	t.Parallel()
 
@@ -119,9 +119,9 @@ func TestScanRequires_Calls(t *testing.T) {
 			},
 		},
 		{
-			name:   "through _G and _ENV",
-			source: "_G.require(\"a\")\n_ENV.require(\"b\")\n_G[\"require\"](\"c\")\n_G['require'] \"d\"\n",
-			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2), testStatic("c", 3), testStatic("d", 4)},
+			name:   "through _G",
+			source: "_G.require(\"a\")\n_G[\"require\"](\"b\")\n_G['require'] \"c\"\n",
+			want:   []parse.RequireInfo{testStatic("a", 1), testStatic("b", 2), testStatic("c", 3)},
 		},
 		{
 			name: "pcall and xpcall",
@@ -187,8 +187,8 @@ func TestScanRequires_OtherUses(t *testing.T) {
 			name: "declared or assigned to",
 			source: "local require = require\n_G.require = require\n" +
 				"local function require(name) end\nrequire = require\nfunction require(name) end\n" +
-				"local a, require <const> = 1, f\nfor k, require in pairs(t) do end\n" +
-				"local f = function(a, require, ...) end\nglobal require\n",
+				"local a, require = 1, f\nfor k, require in pairs(t) do end\n" +
+				"local f = function(a, require, ...) end\n",
 			want: []parse.RequireInfo{},
 		},
 	}

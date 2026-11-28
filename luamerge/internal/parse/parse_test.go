@@ -259,11 +259,6 @@ func TestParse_IndirectRequire(t *testing.T) {
 			want:   []parse.RequireInfo{testStatic("x", 1)},
 		},
 		{
-			name:   "_ENV.require",
-			source: `_ENV.require("x")`,
-			want:   []parse.RequireInfo{testStatic("x", 1)},
-		},
-		{
 			name:   "xpcall",
 			source: `print(select(2, xpcall(require, debug.traceback, "m3")))`,
 			want:   []parse.RequireInfo{testProtected(testStatic("m3", 1))},
@@ -435,8 +430,8 @@ func TestParse_IndirectRequire(t *testing.T) {
 			want:   []parse.RequireInfo{},
 		},
 		{
-			name:   "other fields of _G and _ENV",
-			source: "_G.print(\"x\")\nlocal p = _ENV.print\nsetup(_G.dofile, _G[\"loadfile\"])\n",
+			name:   "other fields of _G",
+			source: "_G.print(\"x\")\nlocal p = _G.print\nsetup(_G.dofile, _G[\"loadfile\"])\n",
 			want:   []parse.RequireInfo{},
 		},
 		{

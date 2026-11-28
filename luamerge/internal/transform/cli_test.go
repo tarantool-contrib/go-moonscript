@@ -85,14 +85,15 @@ func TestCLI_TransformsKeepProgramData(t *testing.T) {
 			main: "local a, b = 1, 2\nprint(a - -b, 1 .. 2, a .. 1, not not a, #{ [ [[k]] ] = 1 })\n",
 		},
 		{
-			// Lua 5.1 and LuaJIT refuse the call as ambiguous, Lua 5.2+ reads
-			// it: a line break taken out would change both.
+			// Lua 5.1 and LuaJIT refuse the call as ambiguous, LuaJIT built with
+			// LUAJIT_ENABLE_LUA52COMPAT reads it: a line break taken out would
+			// change both.
 			name: "line break before a parenthesis",
 			//nolint:dupword // "end end" is Lua.
 			main: "local function f(x) return function() return x end end\nlocal g = 7\nlocal h = f\n(g)\nprint(h())\n",
 		},
 		{
-			// Lua 5.2+ and LuaJIT; Lua 5.1 has no goto.
+			// LuaJIT; Lua 5.1 has no goto.
 			name: "goto and labels",
 			main: "for i = 1, 3 do\n  if i == 2 then goto continue end\n  print(i)\n  ::continue::\nend\n",
 		},
