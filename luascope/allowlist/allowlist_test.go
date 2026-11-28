@@ -1,13 +1,15 @@
 package allowlist_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tarantool-contrib/go-moonscript/lua/parse"
+	"github.com/tarantool-contrib/go-moonscript/luascope"
 	"github.com/tarantool-contrib/go-moonscript/luascope/allowlist"
-	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
 // rules are typical allow-lists for Tarantool migrations.
@@ -29,14 +31,14 @@ var rules = allowlist.Rules{
 func checkWith(t *testing.T, r allowlist.Rules, src string) []string {
 	t.Helper()
 
-	chunk, err := parser.ParseBytes([]byte(src), "test")
-	require.NoError(t, err)
-
 	checker, err := allowlist.NewChecker(r)
 	require.NoError(t, err)
 
+	violations, err := checker.Check([]byte(src), "test", luascope.Options{})
+	require.NoError(t, err)
+
 	var out []string
-	for _, v := range checker.Check(chunk) {
+	for _, v := range violations {
 		out = append(out, v.String())
 	}
 
@@ -354,4 +356,35 @@ func TestNewCheckerInvalid(t *testing.T) {
 	valid := []string{"*", "box.*.space", "box.*"}
 	_, err = allowlist.NewChecker(allowlist.Rules{Globals: valid})
 	require.NoError(t, err)
+}
+
+// TestCheckChunk checks that a chunk parsed and resolved once has the
+// violations of its source, with their spans, and that Check reports the
+// syntax errors.
+func TestCheckChunk(t *testing.T) {
+	src := []byte("local fiber = require('fiber')\nbox.cfg{}\nx = 1")
+
+	checker, err := allowlist.NewChecker(rules)
+	require.NoError(t, err)
+
+	chunk, info, err := luascope.Parse(src, "test", luascope.Options{})
+	require.NoError(t, err)
+
+	violations := checker.CheckChunk(chunk, info)
+	fromSource, err := checker.Check(src, "test", luascope.Options{})
+	require.NoError(t, err)
+	assert.Equal(t, fromSource, violations)
+
+	var got []string
+	for _, v := range violations {
+		got = append(got, fmt.Sprintf("%s %q %s", v.Pos, src[v.Span.Start:v.Span.End], v.Name))
+	}
+
+	assert.Equal(t, []string{`1:15 "require" fiber`, `2:1 "box" box.cfg`, `3:1 "x" x`}, got)
+
+	_, err = checker.Check([]byte("x = 1 +"), "@m.lua", luascope.Options{})
+
+	var pe *parse.Error
+	require.ErrorAs(t, err, &pe)
+	assert.Equal(t, "m.lua:1: unexpected symbol near '<eof>'", err.Error())
 }

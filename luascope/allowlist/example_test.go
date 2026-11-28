@@ -3,21 +3,11 @@ package allowlist_test
 import (
 	"fmt"
 
+	"github.com/tarantool-contrib/go-moonscript/luascope"
 	"github.com/tarantool-contrib/go-moonscript/luascope/allowlist"
-	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
 func ExampleChecker() {
-	chunk, err := parser.ParseBytes([]byte(`
-local fiber = require('fiber')
-box.cfg{}
-box.space.users:replace({1})
-counter = 1
-`), "migration.lua")
-	if err != nil {
-		panic(err)
-	}
-
 	checker, err := allowlist.NewChecker(allowlist.Rules{
 		Modules: []string{"log", "json"},
 		Globals: []string{"require", "pairs", "box.space.*"},
@@ -26,7 +16,17 @@ counter = 1
 		panic(err)
 	}
 
-	for _, v := range checker.Check(chunk) {
+	violations, err := checker.Check([]byte(`
+local fiber = require('fiber')
+box.cfg{}
+box.space.users:replace({1})
+counter = 1
+`), "@migration.lua", luascope.Options{})
+	if err != nil {
+		panic(err)
+	}
+
+	for _, v := range violations {
 		fmt.Println(v)
 	}
 

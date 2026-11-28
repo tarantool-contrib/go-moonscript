@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/scope"
+	"github.com/tarantool-contrib/go-moonscript/luascope"
 	"github.com/tarantool-contrib/go-moonscript/luascope/globals"
 )
 
@@ -48,6 +50,9 @@ const (
 // Violation is a use of a module or a global variable the rules forbid.
 type Violation struct {
 	Kind Kind
+	// Span is the span of the global name the use starts with, Pos the
+	// position of its start (see globals.Access and globals.Require).
+	Span ast.Span
 	Pos  ast.Pos
 	// Name is the module name or the global path.
 	Name string
@@ -130,9 +135,22 @@ func NewChecker(rules Rules) (*Checker, error) {
 	return &Checker{modules: modules, globals: globals}, nil
 }
 
-// Check returns the violations of a chunk ordered by position.
-func (c *Checker) Check(chunk *ast.Chunk) []Violation {
-	usage := globals.Analyze(chunk)
+// Check parses and resolves a chunk with luascope.Parse and returns its
+// violations ordered by position. A syntax error is a *parse.Error.
+func (c *Checker) Check(src []byte, name string, opts luascope.Options) ([]Violation, error) {
+	chunk, info, err := luascope.Parse(src, name, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.CheckChunk(chunk, info), nil
+}
+
+// CheckChunk returns the violations of a chunk that is already parsed and
+// resolved, ordered by position: info must be the resolution of chunk, see
+// globals.AnalyzeChunk.
+func (c *Checker) CheckChunk(chunk *ast.Chunk, info *scope.Info) []Violation {
+	usage := globals.AnalyzeChunk(chunk, info)
 
 	var vs []Violation
 
@@ -142,9 +160,9 @@ func (c *Checker) Check(chunk *ast.Chunk) []Violation {
 		}
 	}
 
-	for _, pos := range usage.RequireValues {
+	for _, a := range usage.RequireValues {
 		vs = append(vs, Violation{
-			Kind: KindModule, Pos: pos, Name: globals.RequireName,
+			Kind: KindModule, Span: a.Span, Pos: a.Pos, Name: globals.RequireName,
 			Msg: "require used as a value; only calls with a constant module name are allowed",
 		})
 	}
@@ -160,7 +178,7 @@ func (c *Checker) Check(chunk *ast.Chunk) []Violation {
 			return a.Pos.Line - b.Pos.Line
 		}
 
-		return a.Pos.Col - b.Pos.Col
+		return a.Pos.Column - b.Pos.Column
 	})
 
 	return vs
@@ -169,7 +187,7 @@ func (c *Checker) Check(chunk *ast.Chunk) []Violation {
 func (c *Checker) checkRequire(r globals.Require) (Violation, bool) {
 	if r.Dynamic {
 		return Violation{
-			Kind: KindModule, Pos: r.Pos, Name: globals.RequireName,
+			Kind: KindModule, Span: r.Span, Pos: r.Pos, Name: globals.RequireName,
 			Msg: "require with a non-constant module name",
 		}, true
 	}
@@ -184,7 +202,7 @@ func (c *Checker) checkRequire(r globals.Require) (Violation, bool) {
 	}
 
 	return Violation{
-		Kind: KindModule, Pos: r.Pos, Name: r.Module,
+		Kind: KindModule, Span: r.Span, Pos: r.Pos, Name: r.Module,
 		Msg: fmt.Sprintf("module '%s' is not allowed", r.Module),
 	}, true
 }
@@ -195,14 +213,14 @@ func (c *Checker) checkAccess(a globals.Access) (Violation, bool) {
 	switch {
 	case a.Write:
 		return Violation{
-			Kind: KindGlobal, Pos: a.Pos, Name: name,
+			Kind: KindGlobal, Span: a.Span, Pos: a.Pos, Name: name,
 			Msg: fmt.Sprintf("assignment to global variable '%s'", name),
 		}, true
 	case allowed(c.globals, a.Path):
 		return Violation{}, false
 	default:
 		return Violation{
-			Kind: KindGlobal, Pos: a.Pos, Name: name,
+			Kind: KindGlobal, Span: a.Span, Pos: a.Pos, Name: name,
 			Msg: fmt.Sprintf("global variable '%s' is not allowed", name),
 		}, true
 	}

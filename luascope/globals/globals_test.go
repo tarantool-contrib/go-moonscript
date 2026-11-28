@@ -13,25 +13,42 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/scope"
+	"github.com/tarantool-contrib/go-moonscript/luascope"
 	"github.com/tarantool-contrib/go-moonscript/luascope/globals"
-	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
-// The corpus and the LuaJIT results are shared with the parser package.
-var luajitTestdata = filepath.Join("..", "parser", "testdata")
+// The corpus is the Lua files of the archives of internal/luasuites, the
+// LuaJIT results are those of the oracle tests of package parser.
+var (
+	archivesDir = filepath.Join("..", "..", "internal", "luasuites", "testdata", "archives")
+	goldenDir   = filepath.Join("..", "parser", "testdata", "golden")
+)
 
-func readArchive(t *testing.T, suite string) map[string][]byte {
+// analyze returns the usage of a chunk parsed in the default dialect.
+func analyze(t *testing.T, src string) *globals.Usage {
 	t.Helper()
 
-	f, err := os.Open(filepath.Join(luajitTestdata, "corpus", suite+".tar.gz"))
-	require.NoError(t, err)
+	usage, err := globals.Analyze([]byte(src), "test", luascope.Options{})
+	require.NoError(t, err, src)
+
+	return usage
+}
+
+func readArchive(tb testing.TB, suite string) map[string][]byte {
+	tb.Helper()
+
+	f, err := os.Open(filepath.Join(archivesDir, suite+".tar.gz"))
+	require.NoError(tb, err)
 
 	defer f.Close()
 
 	zr, err := gzip.NewReader(f)
-	require.NoError(t, err)
+	require.NoError(tb, err)
 
 	files := map[string][]byte{}
 	tr := tar.NewReader(zr)
@@ -42,11 +59,11 @@ func readArchive(t *testing.T, suite string) map[string][]byte {
 			return files
 		}
 
-		require.NoError(t, err)
+		require.NoError(tb, err)
 
 		if hdr.Typeflag == tar.TypeReg {
 			files[suite+"/"+hdr.Name], err = io.ReadAll(tr)
-			require.NoError(t, err)
+			require.NoError(tb, err)
 		}
 	}
 }
@@ -56,7 +73,7 @@ func readArchive(t *testing.T, suite string) map[string][]byte {
 func readCounts(t *testing.T, suite string) map[string]map[string]int {
 	t.Helper()
 
-	f, err := os.Open(filepath.Join(luajitTestdata, "golden", suite+".golden.gz"))
+	f, err := os.Open(filepath.Join(goldenDir, suite+".golden.gz"))
 	require.NoError(t, err)
 
 	defer f.Close()
@@ -128,12 +145,12 @@ func TestAnalyzeCorpus(t *testing.T) {
 			slices.Sort(names)
 
 			for _, name := range names {
-				chunk, err := parser.ParseBytes(files[name], "m")
+				usage, err := globals.Analyze(files[name], "m", luascope.Options{})
 				require.NoError(t, err, name)
 
 				got := map[string]int{}
 
-				for _, a := range globals.Analyze(chunk).Accesses {
+				for _, a := range usage.Accesses {
 					op := "GGET "
 					if a.Write && len(a.Path) == 1 {
 						op = "GSET "
@@ -192,10 +209,7 @@ func TestAnalyzeRequires(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		chunk, err := parser.ParseBytes([]byte(tt.src), "test")
-		require.NoError(t, err)
-
-		usage := globals.Analyze(chunk)
+		usage := analyze(t, tt.src)
 
 		var got []string
 
@@ -266,9 +280,7 @@ func TestAnalyzePaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		chunk, err := parser.ParseBytes([]byte(tt.src), "test")
-		require.NoError(t, err, tt.src)
-		require.Equal(t, tt.want, accessStrings(globals.Analyze(chunk)), tt.src)
+		require.Equal(t, tt.want, accessStrings(analyze(t, tt.src)), tt.src)
 	}
 }
 
@@ -284,10 +296,91 @@ func TestAnalyzeLongChain(t *testing.T) {
 	for _, root := range []string{"local t = {} return t", "return f()", "return t"} {
 		src := root + strings.Repeat(".x", fields)
 
-		chunk, err := parser.ParseBytes([]byte(src), "test")
+		chunk, info, err := luascope.Parse([]byte(src), "test", luascope.Options{})
 		require.NoError(t, err, root)
 
-		allocs := testing.AllocsPerRun(1, func() { globals.Analyze(chunk) })
+		allocs := testing.AllocsPerRun(1, func() { globals.AnalyzeChunk(chunk, info) })
 		require.Less(t, allocs, 100.0, root)
 	}
+}
+
+// TestAnalyzeSpans checks the spans and the positions of the accesses,
+// requires and uses of require as a value: those of the name each starts
+// with, the lines counted as the lexer counts them.
+func TestAnalyzeSpans(t *testing.T) {
+	src := "x = 1\r\n\tbox.cfg{}\n\rlocal r = _G.require\r" +
+		"local m = (require)'m' --[[\n]] y.z = 1"
+	usage := analyze(t, src)
+
+	var got []string
+
+	for _, a := range usage.Accesses {
+		got = append(got, fmt.Sprintf("%s %v %q", a.Pos, a.Span, src[a.Span.Start:a.Span.End]))
+	}
+
+	require.Equal(t, []string{
+		`1:1 0-1 "x"`, `2:2 8-11 "box"`, `3:11 29-31 "_G"`, `4:12 51-58 "require"`,
+		`5:4 71-72 "y"`,
+	}, got)
+
+	require.Len(t, usage.Requires, 1)
+	assert.Equal(t, ast.Span{Start: 51, End: 58}, usage.Requires[0].Span)
+	assert.Equal(t, ast.Pos{Offset: 51, Line: 4, Column: 12}, usage.Requires[0].Pos)
+
+	require.Len(t, usage.RequireValues, 1)
+	assert.Equal(t, usage.Accesses[2], usage.RequireValues[0])
+}
+
+// TestAnalyzeChunkWithoutPositions checks a tree built by other code: it
+// has no spans and no lines, so the accesses have no positions.
+func TestAnalyzeChunkWithoutPositions(t *testing.T) {
+	stmts := []ast.Stmt{&ast.FuncCallStmt{Expr: &ast.FuncCallExpr{
+		Func: &ast.AttrGetExpr{
+			Object: &ast.IdentExpr{Value: "box"},
+			Key:    &ast.StringExpr{Value: "cfg"},
+		},
+	}}}
+
+	info, err := scope.ResolveStmts(stmts, scope.LuaJIT)
+	require.NoError(t, err)
+
+	usage := globals.AnalyzeChunk(&ast.Chunk{Stmts: stmts}, info)
+	require.Len(t, usage.Accesses, 1)
+	assert.Equal(t, "box.cfg", usage.Accesses[0].Path.String())
+	assert.Equal(t, ast.Span{}, usage.Accesses[0].Span)
+	assert.False(t, usage.Accesses[0].Pos.IsValid())
+}
+
+// TestAnalyzeChunkNilNodes checks a tree built by other code with nil
+// nodes, which are skipped as package scope skips them.
+func TestAnalyzeChunkNilNodes(t *testing.T) {
+	call := func(f ast.Expr, args ...ast.Expr) ast.Stmt {
+		return &ast.FuncCallStmt{Expr: &ast.FuncCallExpr{Func: f, Args: args}}
+	}
+	req := &ast.IdentExpr{Value: "require"}
+	nilObject := &ast.AttrGetExpr{
+		Object: (*ast.AttrGetExpr)(nil),
+		Key:    &ast.StringExpr{Value: "require"},
+	}
+	stmts := []ast.Stmt{
+		nil, (*ast.AssignStmt)(nil), (*ast.IfStmt)(nil), (*ast.FuncDefStmt)(nil),
+		call(req, (*ast.StringExpr)(nil)),
+		call(req, (*ast.StringConcatOpExpr)(nil)),
+		call(nilObject),
+		call(&ast.AttrGetExpr{Object: &ast.IdentExpr{Value: "_G"}, Key: (*ast.StringExpr)(nil)}),
+		&ast.ReturnStmt{Exprs: []ast.Expr{nil, (*ast.IdentExpr)(nil), (*ast.TableExpr)(nil)}},
+	}
+
+	info, err := scope.ResolveStmts(stmts, scope.LuaJIT)
+	require.NoError(t, err)
+
+	usage := globals.AnalyzeChunk(&ast.Chunk{Stmts: stmts}, info)
+	assert.Equal(t, []string{"- read require", "- read require", "- read _G[?]"},
+		accessStrings(usage))
+	assert.Len(t, usage.Requires, 2)
+}
+
+func TestAnalyzeSyntaxError(t *testing.T) {
+	_, err := globals.Analyze([]byte("x ="), "@m.lua", luascope.Options{})
+	require.EqualError(t, err, "m.lua:1: unexpected symbol near '<eof>'")
 }
