@@ -704,6 +704,45 @@ that change.
       FuzzResolve), scope/example_test.go (unused locals, global writes,
       shadowing), scope/bench_test.go (BenchmarkResolveArchives): go-moonscript
 
+  - Printing and formatting (go-moonscript):
+    - format/doc.go, format/comments.go: package format; NewCommentMap
+      attaches every comment of a chunk parsed with its tokens to an
+      element (CommentMap, as go/ast's): Trailing to the outermost element
+      ending before it on its line (before the "," or ";" after it),
+      Leading to the outermost element starting after it, else Inner to the
+      innermost element holding it, with the number of its children before
+      it and the kind of the next token (empty blocks, tables and lists, the
+      end of a block, before a keyword); a Comment keeps its text as
+      written, SameLine, BlankBefore and NewlineAfter.
+    - format/format.go, format/printer.go, format/layout.go,
+      format/literal.go: Source(src, Options) formats a source, Chunk(w,
+      chunk, CommentMap, Options) prints a chunk keeping, for the elements
+      with a span in its source, the author's literals, key and call forms,
+      parentheses, "else if", empty lines, one-line blocks and broken
+      tables; Node(w, node, Options) prints a built or transformed tree in
+      the canonical style. What is printed parses back to a tree that
+      compiles to the same code: parentheses for precedence, prefix
+      expressions and AdjustRet at the end of a list, a.b only for names of
+      the dialect, strings and numerals that read back exactly (1e999, a
+      unary minus, 0 / 0), no line break before call arguments, a ";"
+      before a statement starting with "(", spaces between tokens that
+      would merge. Layout: a Wadler/Oppen document laid out within a width,
+      Prettier's variant, with calls hugging a last (or first) function or
+      table argument. Options: Dialect, Width, IndentWidth, UseTabs, Quotes,
+      TrailingComma, KeepSemicolons.
+    - Tests: format/check_test.go (over testdata, go-moonscript's testdata
+      and the luasuites archives in both dialects: the formatted source and
+      the printed tree compile to the same code as the source, but for
+      lines; formatting is idempotent; comments and string and numeral
+      tokens are kept), format/printer_test.go (precedence, prefix
+      expressions, AdjustRet, keys, strings, numerals, the call/statement
+      ambiguity, errors of built trees), format/format_test.go (layout,
+      literal forms, quotes, blank lines, semicolons, tables, comments,
+      every attachment rule, comments of built and transformed trees),
+      format/golden_test.go (testdata/golden), format/fuzz_test.go
+      (FuzzFormat, FuzzPrint), format/example_test.go,
+      format/bench_test.go: go-moonscript
+
   Performance, numbers (go-moonscript):
     - LNumber2I builds the interface value in a local, without a scratch
       LValue (a write barrier per boxed number) or reflect.SliceHeader;
@@ -11269,6 +11308,5083 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		L.Close()
 +	}
++}
+--- a/format/bench_test.go
++++ b/format/bench_test.go
+@@ -0,0 +1,97 @@
++package format_test
++
++import (
++	"io"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/format"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// benchSources are the archives' sources that parse under LuaJIT.
++func benchSources(b *testing.B) (srcs [][]byte, size int64) {
++	files := archiveFiles(b)
++	for _, name := range sortedKeys(files) {
++		src := files[name]
++		if _, err := parse.ParseChunk(src, "bench", parse.Options{Dialect: parse.LuaJIT, Shebang: true}); err == nil {
++			srcs = append(srcs, src)
++			size += int64(len(src))
++		}
++	}
++	return srcs, size
++}
++
++// BenchmarkSourceArchives formats the luasuites archives: parsing with
++// the tokens, attaching the comments, printing.
++func BenchmarkSourceArchives(b *testing.B) {
++	srcs, size := benchSources(b)
++	opts := format.Options{Dialect: parse.LuaJIT}
++	b.SetBytes(size)
++	b.ReportAllocs()
++	b.ResetTimer()
++	for b.Loop() {
++		for _, src := range srcs {
++			if _, err := format.Source(src, opts); err != nil {
++				b.Fatal(err)
++			}
++		}
++	}
++}
++
++// BenchmarkParseTokensArchives is the parse that Source starts with, for
++// comparison.
++func BenchmarkParseTokensArchives(b *testing.B) {
++	srcs, size := benchSources(b)
++	b.SetBytes(size)
++	b.ReportAllocs()
++	b.ResetTimer()
++	for b.Loop() {
++		for _, src := range srcs {
++			if _, err := parse.ParseChunk(src, "bench", parse.Options{Dialect: parse.LuaJIT, Shebang: true, Tokens: true}); err != nil {
++				b.Fatal(err)
++			}
++		}
++	}
++}
++
++// BenchmarkCommentMapArchives attaches the comments of the parsed
++// archives.
++func BenchmarkCommentMapArchives(b *testing.B) {
++	srcs, size := benchSources(b)
++	var chunks []*ast.Chunk
++	for _, src := range srcs {
++		c, _ := parse.ParseChunk(src, "bench", parse.Options{Dialect: parse.LuaJIT, Shebang: true, Tokens: true})
++		chunks = append(chunks, c)
++	}
++	b.SetBytes(size)
++	b.ReportAllocs()
++	b.ResetTimer()
++	for b.Loop() {
++		for _, c := range chunks {
++			format.NewCommentMap(c)
++		}
++	}
++}
++
++// BenchmarkNodeArchives prints the parsed trees of the archives in the
++// canonical style (bytes: of the sources).
++func BenchmarkNodeArchives(b *testing.B) {
++	srcs, size := benchSources(b)
++	var chunks []*ast.Chunk
++	for _, src := range srcs {
++		c, _ := parse.ParseChunk(src, "bench", parse.Options{Dialect: parse.LuaJIT, Shebang: true})
++		chunks = append(chunks, c)
++	}
++	opts := format.Options{Dialect: parse.LuaJIT}
++	b.SetBytes(size)
++	b.ReportAllocs()
++	b.ResetTimer()
++	for b.Loop() {
++		for _, c := range chunks {
++			if err := format.Node(io.Discard, c, opts); err != nil {
++				b.Fatal(err)
++			}
++		}
++	}
++}
+--- a/format/check_test.go
++++ b/format/check_test.go
+@@ -0,0 +1,479 @@
++package format_test
++
++// The checks of the formatter and the printer over a corpus of sources:
++// for a source S that parses and compiles, in a dialect,
++//
++//   - Source(S) parses and compiles to the code S compiles to, but for the
++//     lines (protoDiff);
++//   - Source(Source(S)) is Source(S);
++//   - the comments of Source(S) are those of S, as written, in order;
++//   - the string and numeral tokens of Source(S) are those of S (a
++//     multiset: the order of the operands is kept, but a check of order
++//     would fail on nothing else);
++//   - Node(the tree of S) parses and compiles to the code of S, and
++//     printing its tree again gives the same text.
++
++import (
++	"archive/tar"
++	"bytes"
++	"compress/gzip"
++	"errors"
++	"fmt"
++	"io"
++	"math"
++	"os"
++	"path/filepath"
++	"sort"
++	"strings"
++	"testing"
++
++	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/format"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++var dialects = []parse.Dialect{parse.Lua51, parse.LuaJIT}
++
++func dialectName(d parse.Dialect) string {
++	if d == parse.LuaJIT {
++		return "LuaJIT"
++	}
++	return "Lua51"
++}
++
++func luaDialect(d parse.Dialect) lua.Dialect {
++	if d == parse.LuaJIT {
++		return lua.DialectLuaJIT
++	}
++	return lua.DialectLua51
++}
++
++// compile parses (as Source does) and compiles src.
++func compile(src []byte, d parse.Dialect) (*lua.FunctionProto, error) {
++	chunk, err := parse.ParseChunk(src, "check", parse.Options{Dialect: d, Shebang: true})
++	if err != nil {
++		return nil, err
++	}
++	return lua.CompileAST(chunk.Stmts, "=check", luaDialect(d))
++}
++
++// luaCompile compiles a tree.
++func luaCompile(stmts []ast.Stmt, d parse.Dialect) (*lua.FunctionProto, error) {
++	return lua.CompileAST(stmts, "=check", luaDialect(d))
++}
++
++// protoDiff compares two function prototypes but for their lines: the
++// code, the constants, the nested prototypes, the counts of upvalues,
++// parameters and registers, the vararg flag and the debug names of the
++// locals (with their pc ranges), the calls and the upvalues. It returns
++// the first difference, "" if none.
++func protoDiff(a, b *lua.FunctionProto, where string) string {
++	switch {
++	case a.NumUpvalues != b.NumUpvalues:
++		return fmt.Sprintf("%s: upvalues %d, %d", where, a.NumUpvalues, b.NumUpvalues)
++	case a.NumParameters != b.NumParameters:
++		return fmt.Sprintf("%s: parameters %d, %d", where, a.NumParameters, b.NumParameters)
++	case a.IsVarArg != b.IsVarArg:
++		return fmt.Sprintf("%s: vararg %d, %d", where, a.IsVarArg, b.IsVarArg)
++	case a.NumUsedRegisters != b.NumUsedRegisters:
++		return fmt.Sprintf("%s: registers %d, %d", where, a.NumUsedRegisters, b.NumUsedRegisters)
++	case len(a.Code) != len(b.Code):
++		return fmt.Sprintf("%s: %d instructions, %d", where, len(a.Code), len(b.Code))
++	case len(a.Constants) != len(b.Constants):
++		return fmt.Sprintf("%s: %d constants, %d", where, len(a.Constants), len(b.Constants))
++	case len(a.FunctionPrototypes) != len(b.FunctionPrototypes):
++		return fmt.Sprintf("%s: %d functions, %d", where, len(a.FunctionPrototypes), len(b.FunctionPrototypes))
++	case len(a.DbgLocals) != len(b.DbgLocals):
++		return fmt.Sprintf("%s: %d locals, %d", where, len(a.DbgLocals), len(b.DbgLocals))
++	case len(a.DbgCalls) != len(b.DbgCalls):
++		return fmt.Sprintf("%s: %d calls, %d", where, len(a.DbgCalls), len(b.DbgCalls))
++	case strings.Join(a.DbgUpvalues, ",") != strings.Join(b.DbgUpvalues, ","):
++		return fmt.Sprintf("%s: upvalues %v, %v", where, a.DbgUpvalues, b.DbgUpvalues)
++	}
++	for i := range a.Code {
++		if a.Code[i] != b.Code[i] {
++			return fmt.Sprintf("%s: instruction %d: %08x, %08x", where, i, a.Code[i], b.Code[i])
++		}
++	}
++	for i := range a.Constants {
++		if !sameConstant(a.Constants[i], b.Constants[i]) {
++			return fmt.Sprintf("%s: constant %d: %v, %v", where, i, a.Constants[i], b.Constants[i])
++		}
++	}
++	for i, l := range a.DbgLocals {
++		m := b.DbgLocals[i]
++		if l.Name != m.Name || l.StartPc != m.StartPc || l.EndPc != m.EndPc {
++			return fmt.Sprintf("%s: local %d: %s %d-%d, %s %d-%d", where, i, l.Name, l.StartPc, l.EndPc, m.Name, m.StartPc, m.EndPc)
++		}
++	}
++	for i, c := range a.DbgCalls {
++		if c.Name != b.DbgCalls[i].Name || c.Pc != b.DbgCalls[i].Pc {
++			return fmt.Sprintf("%s: call %d: %s@%d, %s@%d", where, i, c.Name, c.Pc, b.DbgCalls[i].Name, b.DbgCalls[i].Pc)
++		}
++	}
++	for i := range a.FunctionPrototypes {
++		if d := protoDiff(a.FunctionPrototypes[i], b.FunctionPrototypes[i], fmt.Sprintf("%s/%d", where, i)); d != "" {
++			return d
++		}
++	}
++	return ""
++}
++
++func sameConstant(a, b lua.LValue) bool {
++	if x, ok := a.(lua.LNumber); ok {
++		y, ok := b.(lua.LNumber)
++		if !ok {
++			return false
++		}
++		if math.IsNaN(float64(x)) {
++			return math.IsNaN(float64(y))
++		}
++		return math.Float64bits(float64(x)) == math.Float64bits(float64(y))
++	}
++	if x, ok := a.(lua.LString); ok {
++		y, ok := b.(lua.LString)
++		return ok && x == y
++	}
++	return a.Type() == b.Type() && a.String() == b.String()
++}
++
++// lexemes returns the texts of the tokens of src of the kinds.
++func lexemes(src []byte, d parse.Dialect, kinds ...ast.TokenKind) []string {
++	toks, err := parse.Tokenize(src, "check", parse.Options{Dialect: d, Shebang: true})
++	if err != nil {
++		return []string{"<error: " + err.Error() + ">"}
++	}
++	var out []string
++	for _, t := range toks {
++		for _, k := range kinds {
++			if t.Kind == k {
++				out = append(out, string(t.Text(src)))
++			}
++		}
++	}
++	return out
++}
++
++func sorted(list []string) []string {
++	l := append([]string(nil), list...)
++	sort.Strings(l)
++	return l
++}
++
++func equalStrings(a, b []string) bool {
++	if len(a) != len(b) {
++		return false
++	}
++	for i := range a {
++		if a[i] != b[i] {
++			return false
++		}
++	}
++	return true
++}
++
++// checkStats counts what the checks compared.
++type checkStats struct {
++	sources, skipped, failed     int
++	bytes, outBytes              int
++	comments, literals, printers int
++}
++
++func (s *checkStats) add(o checkStats) {
++	s.sources += o.sources
++	s.skipped += o.skipped
++	s.failed += o.failed
++	s.bytes += o.bytes
++	s.outBytes += o.outBytes
++	s.comments += o.comments
++	s.literals += o.literals
++	s.printers += o.printers
++}
++
++// checkSource runs the checks on src; it returns the first failure, "" if
++// none, and whether src was checked (it parses and compiles).
++func checkSource(src []byte, opts format.Options, stats *checkStats) (failure string, checked bool) {
++	d := opts.Dialect
++	want, err := compile(src, d)
++	if err != nil {
++		return "", false
++	}
++	stats.bytes += len(src)
++	out, err := format.Source(src, opts)
++	if err != nil {
++		return "format: " + err.Error(), true
++	}
++	stats.outBytes += len(out)
++	got, err := compile(out, d)
++	if err != nil {
++		return fmt.Sprintf("the formatted source does not compile: %v\n%s", err, excerpt(out, err)), true
++	}
++	if diff := protoDiff(want, got, "main"); diff != "" {
++		return "the formatted source compiles to other code: " + diff, true
++	}
++	again, err := format.Source(out, opts)
++	if err != nil {
++		return "format of the formatted source: " + err.Error(), true
++	}
++	if !bytes.Equal(again, out) {
++		return "not idempotent:\n" + firstDiff(out, again), true
++	}
++	c1 := lexemes(src, d, ast.TokenComment)
++	c2 := lexemes(out, d, ast.TokenComment)
++	if !equalStrings(c1, c2) {
++		return fmt.Sprintf("comments differ: %d, %d: %s", len(c1), len(c2), firstStringDiff(c1, c2)), true
++	}
++	stats.comments += len(c1)
++	if opts.Quotes == format.QuotesKeep {
++		l1 := sorted(lexemes(src, d, ast.TokenString, ast.TokenNumber))
++		l2 := sorted(lexemes(out, d, ast.TokenString, ast.TokenNumber))
++		if !equalStrings(l1, l2) {
++			return fmt.Sprintf("literals differ: %d, %d: %s", len(l1), len(l2), firstStringDiff(l1, l2)), true
++		}
++		stats.literals += len(l1)
++	}
++	if f := checkPrinter(src, want, opts); f != "" {
++		return f, true
++	}
++	stats.printers++
++	return "", true
++}
++
++// checkPrinter checks Node on the tree of src, parsed without tokens.
++func checkPrinter(src []byte, want *lua.FunctionProto, opts format.Options) string {
++	d := opts.Dialect
++	chunk, err := parse.ParseChunk(src, "check", parse.Options{Dialect: d, Shebang: true})
++	if err != nil {
++		return "parse: " + err.Error()
++	}
++	var buf bytes.Buffer
++	if err := format.Node(&buf, chunk, opts); err != nil {
++		return "print: " + err.Error()
++	}
++	out := buf.Bytes()
++	got, err := compile(out, d)
++	if err != nil {
++		return fmt.Sprintf("the printed tree does not compile: %v\n%s", err, excerpt(out, err))
++	}
++	if diff := protoDiff(want, got, "main"); diff != "" {
++		return "the printed tree compiles to other code: " + diff
++	}
++	chunk2, err := parse.ParseChunk(out, "check", parse.Options{Dialect: d})
++	if err != nil {
++		return "parse of the printed tree: " + err.Error()
++	}
++	var buf2 bytes.Buffer
++	if err := format.Node(&buf2, chunk2, opts); err != nil {
++		return "print of the printed tree: " + err.Error()
++	}
++	if !bytes.Equal(buf2.Bytes(), out) {
++		return "printing the printed tree differs:\n" + firstDiff(out, buf2.Bytes())
++	}
++	return ""
++}
++
++// excerpt returns the lines around the line of a parse error.
++func excerpt(src []byte, err error) string {
++	var pe *parse.Error
++	if !errors.As(err, &pe) {
++		return ""
++	}
++	lines := strings.Split(string(src), "\n")
++	from, to := max(0, pe.Pos.Line-4), min(len(lines), pe.Pos.Line+2)
++	var b strings.Builder
++	for i := from; i < to; i++ {
++		fmt.Fprintf(&b, "%5d  %s\n", i+1, lines[i])
++	}
++	return b.String()
++}
++
++func firstDiff(a, b []byte) string {
++	la := strings.Split(string(a), "\n")
++	lb := strings.Split(string(b), "\n")
++	for i := 0; i < len(la) || i < len(lb); i++ {
++		var x, y string
++		if i < len(la) {
++			x = la[i]
++		}
++		if i < len(lb) {
++			y = lb[i]
++		}
++		if x != y {
++			from := max(0, i-3)
++			var s strings.Builder
++			for j := from; j < i; j++ {
++				fmt.Fprintf(&s, "   %5d  %s\n", j+1, la[j])
++			}
++			fmt.Fprintf(&s, " - %5d  %s\n + %5d  %s\n", i+1, x, i+1, y)
++			return s.String()
++		}
++	}
++	return ""
++}
++
++func firstStringDiff(a, b []string) string {
++	for i := 0; i < len(a) || i < len(b); i++ {
++		var x, y string
++		if i < len(a) {
++			x = a[i]
++		}
++		if i < len(b) {
++			y = b[i]
++		}
++		if x != y {
++			return fmt.Sprintf("#%d %q, %q", i, x, y)
++		}
++	}
++	return ""
++}
++
++// runChecks runs the checks over files in both dialects.
++func runChecks(t *testing.T, label string, files map[string][]byte, opts format.Options) {
++	t.Helper()
++	for _, d := range dialects {
++		var total checkStats
++		o := opts
++		o.Dialect = d
++		for _, name := range sortedKeys(files) {
++			var st checkStats
++			st.sources = 1
++			f, checked := checkSource(files[name], o, &st)
++			if !checked {
++				st.skipped = 1
++			}
++			if f != "" {
++				st.failed = 1
++				if total.failed < 10 {
++					t.Errorf("%s (%s): %s", name, dialectName(d), f)
++				}
++			}
++			total.add(st)
++		}
++		t.Logf("%s, %s: %d sources (%d do not compile), %d formatted (%d bytes to %d): %d fail; %d comments, %d literals, %d printed trees compared",
++			label, dialectName(d), total.sources, total.skipped, total.sources-total.skipped, total.bytes, total.outBytes,
++			total.failed, total.comments, total.literals, total.printers)
++	}
++}
++
++/* the corpus */
++
++// luaFiles returns the Lua files under dir (and its subdirectories), by
++// path.
++func luaFiles(tb testing.TB, dir string) map[string][]byte {
++	tb.Helper()
++	files := map[string][]byte{}
++	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
++		if err != nil {
++			return err
++		}
++		if !d.IsDir() && strings.HasSuffix(path, ".lua") {
++			b, err := os.ReadFile(path)
++			if err != nil {
++				return err
++			}
++			files[path] = b
++		}
++		return nil
++	})
++	if err != nil {
++		tb.Fatal(err)
++	}
++	return files
++}
++
++// archivesDir holds go-moonscript's archives of Lua test suites and
++// projects (internal/luasuites).
++var archivesDir = filepath.Join("..", "..", "..", "internal", "luasuites", "testdata", "archives")
++
++// archiveFiles returns the Lua files of the luasuites archives.
++func archiveFiles(tb testing.TB) map[string][]byte {
++	tb.Helper()
++	paths, _ := filepath.Glob(filepath.Join(archivesDir, "*.tar.gz"))
++	if len(paths) == 0 {
++		tb.Skip("no archives in", archivesDir)
++	}
++	files := map[string][]byte{}
++	for _, p := range paths {
++		if err := readTarGz(p, files); err != nil {
++			tb.Fatal(err)
++		}
++	}
++	return files
++}
++
++func readTarGz(path string, files map[string][]byte) error {
++	f, err := os.Open(path)
++	if err != nil {
++		return err
++	}
++	defer func() { _ = f.Close() }()
++	zr, err := gzip.NewReader(f)
++	if err != nil {
++		return err
++	}
++	tr := tar.NewReader(zr)
++	for {
++		hdr, err := tr.Next()
++		if errors.Is(err, io.EOF) {
++			return nil
++		}
++		if err != nil {
++			return err
++		}
++		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(hdr.Name, ".lua") && !strings.HasSuffix(hdr.Name, ".t") {
++			continue
++		}
++		b, err := io.ReadAll(tr)
++		if err != nil {
++			return err
++		}
++		files[filepath.Base(path)+"/"+hdr.Name] = b
++	}
++}
++
++func sortedKeys[V any](m map[string]V) []string {
++	keys := make([]string, 0, len(m))
++	for k := range m {
++		keys = append(keys, k)
++	}
++	sort.Strings(keys)
++	return keys
++}
++
++// TestCheckTestdata runs the checks over the compatibility scripts and the
++// other Lua files of the fork's testdata, and the Lua files of
++// go-moonscript's testdata.
++func TestCheckTestdata(t *testing.T) {
++	files := luaFiles(t, filepath.Join("..", "testdata"))
++	if len(files) == 0 {
++		t.Fatal("no scripts")
++	}
++	runChecks(t, "gopher-lua testdata", files, format.Options{})
++	// go-moonscript's, if the fork is in it
++	if dir := filepath.Join("..", "..", "..", "testdata"); isDir(dir) {
++		runChecks(t, "go-moonscript testdata", luaFiles(t, dir), format.Options{})
++	}
++}
++
++// TestCheckArchives runs the checks over the Lua files of the luasuites
++// archives.
++func TestCheckArchives(t *testing.T) {
++	if testing.Short() {
++		t.Skip("short")
++	}
++	runChecks(t, "archives", archiveFiles(t), format.Options{})
++}
++
++// TestCheckOptions runs the checks over the compatibility scripts with the
++// other options: narrow lines, tabs, quotes, trailing commas, semicolons.
++func TestCheckOptions(t *testing.T) {
++	files := luaFiles(t, filepath.Join("..", "testdata", "compat"))
++	runChecks(t, "compat, narrow", files, format.Options{Width: 40, UseTabs: true, TrailingComma: true, KeepSemicolons: true})
++	runChecks(t, "compat, quotes", files, format.Options{Quotes: format.QuotesSingle, IndentWidth: 2})
++}
++
++func isDir(path string) bool {
++	fi, err := os.Stat(path)
++	return err == nil && fi.IsDir()
++}
+--- a/format/comments.go
++++ b/format/comments.go
+@@ -0,0 +1,577 @@
++package format
++
++import (
++	"bytes"
++	"sort"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++)
++
++// Place is where a comment goes relative to the element it is attached
++// to.
++type Place uint8
++
++const (
++	// Leading: before the element, on the lines above it or on its line
++	// before it.
++	Leading Place = iota
++	// Trailing: after the element, on the line it ends on.
++	Trailing
++	// Inner: inside the element, between its own tokens (keywords,
++	// punctuation, the names held as strings) where no child element
++	// starts or ends: in an empty block, table, parameter or argument list,
++	// at the end of a block, before a keyword.
++	Inner
++)
++
++func (p Place) String() string {
++	switch p {
++	case Leading:
++		return "leading"
++	case Trailing:
++		return "trailing"
++	case Inner:
++		return "inner"
++	}
++	return "?"
++}
++
++// A Comment is a comment of the source and where it goes.
++type Comment struct {
++	ast.Comment
++	// Raw is the comment as written, from its "--" to its last byte.
++	Raw string
++	// Place is where the comment goes relative to its element.
++	Place Place
++	// SameLine is set if the comment starts on the line of the token
++	// before it (no line break between them).
++	SameLine bool
++	// BlankBefore is set if an empty line separates the comment from the
++	// token or comment before it.
++	BlankBefore bool
++	// NewlineAfter is set if a line break follows the comment before the
++	// next token or comment (always for a short comment).
++	NewlineAfter bool
++	// Index and Next say where an Inner comment goes in its element: after
++	// Index of its children (those starting before it, in source order:
++	// the order of ast.Walk), before the token of kind Next (TokenEOF at
++	// the end of the chunk).
++	Index int
++	Next  ast.TokenKind
++}
++
++// A CommentMap maps the elements of a tree to the comments attached to
++// them, in source order, as go/ast.CommentMap does. Every comment of the
++// source is attached to exactly one element, so that a printer that
++// prints each element's comments with it prints each comment once.
++type CommentMap map[ast.Element][]*Comment
++
++// Comments returns the comments of the map in source order (by their
++// spans; comments without one last, in no particular order).
++func (cm CommentMap) Comments() []*Comment {
++	var list []*Comment
++	for _, cs := range cm {
++		list = append(list, cs...)
++	}
++	sort.SliceStable(list, func(i, j int) bool {
++		a, b := list[i].Span, list[j].Span
++		if (a == ast.Span{}) != (b == ast.Span{}) {
++			return b == ast.Span{}
++		}
++		return a.Start < b.Start
++	})
++	return list
++}
++
++// gap is a run of trivia holding comments, between the grammar tokens p
++// (-1: the start of the source) and n (TokenEOF at the end).
++type gap struct {
++	p, n     int
++	comments []*Comment
++}
++
++// NewCommentMap attaches the comments of a chunk parsed with its tokens
++// (parse.Options.Tokens) to its elements; it returns nil if the chunk has
++// no tokens or no comments. For a comment, let P be the token of the
++// grammar before it and N the one after it, PE the outermost element
++// ending with P (with its parentheses; P being a "," or ";", the token
++// before it) and NE the outermost element starting with N (with its
++// parentheses; else, a comment inside parentheses, without them). The
++// comments between P and N before the first line break between them are
++// on P's line, the others on lines of their own. A comment is attached:
++//
++//   - on P's line and followed by a line break: Trailing to PE, if any,
++//     else Leading to NE (with SameLine: "{ -- c", "then -- c"), else
++//     Inner;
++//   - on P's line and followed by N on the same line: Leading to NE, if
++//     any ("x = --[[c]] 1"), else Trailing to PE, else Inner;
++//   - on a line of its own: Leading to NE, if any, else Inner;
++//   - Inner: to the innermost element holding it (the chunk at its end
++//     or in an empty chunk), with the index of the children before it and
++//     the kind of N: the end of a block (before "end", "else", "until",
++//     the end of the chunk), an empty table, parameter or argument list,
++//     before a keyword, a "," or a name held as a string.
++//
++// So a comment at the end of a line goes with what the line ends with,
++// one on lines above a statement, a field or an argument goes with it,
++// and one at the end of a block, or in an empty block or list, with the
++// element holding the block or list.
++func NewCommentMap(chunk *ast.Chunk) CommentMap {
++	if chunk == nil || len(chunk.Tokens) == 0 || chunk.Lines == nil {
++		return nil
++	}
++	src := chunk.Lines.Source()
++	toks := chunk.Tokens
++	var gaps []gap
++	prev := -1
++	var cur []*Comment
++	nl, broke := 0, false // line breaks since the last token or comment; since prev
++	var last *Comment
++	for i, t := range toks {
++		switch t.Kind {
++		case ast.TokenNewline:
++			nl++
++			broke = true
++			if last != nil {
++				last.NewlineAfter = true
++			}
++			continue
++		case ast.TokenWhitespace, ast.TokenHeader:
++			if t.Kind == ast.TokenHeader {
++				broke = true
++			}
++			continue
++		case ast.TokenComment:
++			s := t.Span()
++			raw := string(src[s.Start:s.End])
++			c := &Comment{Raw: raw}
++			c.Span = s
++			c.Text, c.Long = commentText(raw)
++			c.NewlineAfter = !c.Long
++			c.SameLine = prev >= 0 && !broke
++			c.BlankBefore = nl >= 2
++			cur = append(cur, c)
++			last = c
++			nl = 0
++			if c.Long && bytes.ContainsAny(src[s.Start:s.End], "\r\n") {
++				broke = true
++			}
++			continue
++		}
++		if len(cur) > 0 {
++			gaps = append(gaps, gap{p: prev, n: i, comments: cur})
++			cur = nil
++		}
++		prev, nl, broke, last = i, 0, false, nil
++	}
++	if len(cur) > 0 { // tokens without EOF
++		gaps = append(gaps, gap{p: prev, n: len(toks), comments: cur})
++	}
++	if len(gaps) == 0 {
++		return nil
++	}
++
++	// the elements ending and starting at the offsets of the gaps
++	type ends struct{ outer, inner ast.Element }
++	endAt := map[int]*ends{}
++	startAt := map[int]*ends{}
++	prevGrammar := func(i int) int {
++		for i--; i >= 0 && toks[i].Kind.IsTrivia(); i-- {
++		}
++		return i
++	}
++	pEnd := make([]int, len(gaps))
++	nStart := make([]int, len(gaps))
++	for gi, g := range gaps {
++		pEnd[gi], nStart[gi] = -1, -1
++		if q := g.p; q >= 0 {
++			if toks[q].Kind == ast.TokenComma {
++				q = prevGrammar(q)
++			} else {
++				for q >= 0 && toks[q].Kind == ast.TokenSemicolon {
++					q = prevGrammar(q)
++				}
++			}
++			if q >= 0 {
++				pEnd[gi] = toks[q].Span().End
++				endAt[pEnd[gi]] = &ends{}
++			}
++		}
++		if g.n < len(toks) && toks[g.n].Kind != ast.TokenEOF {
++			nStart[gi] = toks[g.n].Span().Start
++			startAt[nStart[gi]] = &ends{}
++		}
++	}
++	// the offsets, sorted: an element without one in its span, nor its
++	// children, ends or starts at none
++	offs := make([]int, 0, len(endAt)+len(startAt))
++	for o := range endAt {
++		offs = append(offs, o)
++	}
++	for o := range startAt {
++		offs = append(offs, o)
++	}
++	sort.Ints(offs)
++	var visit func(el ast.Element)
++	visit = func(el ast.Element) {
++		s := el.Span()
++		if s == (ast.Span{}) {
++			forEachChild(el, visit)
++			return
++		}
++		o := outerSpan(el)
++		lo, hi := min(o.Start, s.Start), max(o.End, s.End)
++		if i := sort.SearchInts(offs, lo); i == len(offs) || offs[i] > hi {
++			return
++		}
++		// a parent before its children: the outermost first
++		if el != ast.Element(chunk) {
++			if e := endAt[o.End]; e != nil && e.outer == nil {
++				e.outer = el
++			}
++			if e := endAt[s.End]; e != nil && e.inner == nil {
++				e.inner = el
++			}
++			if e := startAt[o.Start]; e != nil && e.outer == nil {
++				e.outer = el
++			}
++			if e := startAt[s.Start]; e != nil && e.inner == nil {
++				e.inner = el
++			}
++		}
++		forEachChild(el, visit)
++	}
++	visit(chunk)
++	pick := func(m map[int]*ends, off int) ast.Element {
++		if off < 0 {
++			return nil
++		}
++		e := m[off]
++		if e.outer != nil {
++			return e.outer
++		}
++		return e.inner
++	}
++
++	cm := CommentMap{}
++	attach := func(el ast.Element, c *Comment, place Place) {
++		c.Place = place
++		if place == Inner {
++			c.Index, c.Next = 0, ast.TokenEOF
++		}
++		cm[el] = append(cm[el], c)
++	}
++	inner := func(g gap, c *Comment) {
++		el, index := container(chunk, c.Span.Start)
++		c.Place = Inner
++		c.Index = index
++		c.Next = ast.TokenEOF
++		if g.n < len(toks) {
++			c.Next = toks[g.n].Kind
++		}
++		cm[el] = append(cm[el], c)
++	}
++	for gi, g := range gaps {
++		pe, ne := pick(endAt, pEnd[gi]), pick(startAt, nStart[gi])
++		// the comments on P's line
++		k := 0
++		for k < len(g.comments) && g.comments[k].SameLine {
++			k++
++		}
++		if k > 0 {
++			lastSame := g.comments[k-1]
++			brokeAfter := k < len(g.comments) || lastSame.NewlineAfter
++			for _, c := range g.comments[:k] {
++				switch {
++				case brokeAfter && pe != nil:
++					attach(pe, c, Trailing)
++				case ne != nil:
++					attach(ne, c, Leading)
++				case pe != nil:
++					attach(pe, c, Trailing)
++				default:
++					inner(g, c)
++				}
++			}
++		}
++		for _, c := range g.comments[k:] {
++			if ne != nil {
++				attach(ne, c, Leading)
++			} else {
++				inner(g, c)
++			}
++		}
++	}
++	return cm
++}
++
++// commentText returns the text of a comment as written, as ast.Comment
++// has it, and whether it is long.
++func commentText(raw string) (string, bool) {
++	body := raw[2:]
++	level := ast.LongBracketLevel([]byte(body))
++	if level < 0 {
++		return body, false
++	}
++	open := level + 2
++	close := level + 2
++	if len(body) < open+close {
++		return "", true
++	}
++	t := body[open : len(body)-close]
++	// a line break right after the opening bracket is skipped
++	if len(t) > 0 && (t[0] == '\n' || t[0] == '\r') {
++		if len(t) > 1 && (t[1] == '\n' || t[1] == '\r') && t[1] != t[0] {
++			t = t[2:]
++		} else {
++			t = t[1:]
++		}
++	}
++	return normalizeNewlines(t), true
++}
++
++// normalizeNewlines turns each line break ("\n", "\r", "\r\n", "\n\r")
++// into "\n".
++func normalizeNewlines(s string) string {
++	if !bytes.ContainsAny([]byte(s), "\r") {
++		return s
++	}
++	var b []byte
++	for i := 0; i < len(s); i++ {
++		c := s[i]
++		if c == '\n' || c == '\r' {
++			if i+1 < len(s) && (s[i+1] == '\n' || s[i+1] == '\r') && s[i+1] != c {
++				i++
++			}
++			b = append(b, '\n')
++			continue
++		}
++		b = append(b, c)
++	}
++	return string(b)
++}
++
++// container returns the innermost element of the chunk whose span holds
++// the offset (strictly inside it), and the number of its children that
++// start before the offset.
++func container(chunk *ast.Chunk, off int) (ast.Element, int) {
++	var el ast.Element = chunk
++	for {
++		var next ast.Element
++		index := 0
++		forEachChild(el, func(c ast.Element) {
++			s := c.Span()
++			if s == (ast.Span{}) {
++				return
++			}
++			if s.Start < off {
++				index++
++			}
++			if next == nil && s.Start < off && off < s.End {
++				next = c
++			}
++		})
++		if next == nil {
++			return el, index
++		}
++		el = next
++	}
++}
++
++// outerSpan is the span of an element with the parentheses around it.
++func outerSpan(el ast.Element) ast.Span {
++	if e, ok := el.(ast.Expr); ok {
++		return e.OuterSpan()
++	}
++	return el.Span()
++}
++
++// forEachChild calls f for the children of el, as ast.Walk has them,
++// skipping nils.
++func forEachChild(el ast.Element, f func(ast.Element)) {
++	stmts := func(list []ast.Stmt) {
++		for _, s := range list {
++			if !isNil(s) {
++				f(s)
++			}
++		}
++	}
++	exprs := func(list []ast.Expr) {
++		for _, e := range list {
++			if !isNil(e) {
++				f(e)
++			}
++		}
++	}
++	expr := func(e ast.Expr) {
++		if !isNil(e) {
++			f(e)
++		}
++	}
++	switch n := el.(type) {
++	case *ast.Chunk:
++		stmts(n.Stmts)
++	case *ast.AssignStmt:
++		exprs(n.Lhs)
++		exprs(n.Rhs)
++	case *ast.LocalAssignStmt:
++		exprs(n.Exprs)
++	case *ast.FuncCallStmt:
++		expr(n.Expr)
++	case *ast.DoBlockStmt:
++		stmts(n.Stmts)
++	case *ast.WhileStmt:
++		expr(n.Condition)
++		stmts(n.Stmts)
++	case *ast.RepeatStmt:
++		stmts(n.Stmts)
++		expr(n.Condition)
++	case *ast.IfStmt:
++		expr(n.Condition)
++		stmts(n.Then)
++		stmts(n.Else)
++	case *ast.NumberForStmt:
++		expr(n.Init)
++		expr(n.Limit)
++		expr(n.Step)
++		stmts(n.Stmts)
++	case *ast.GenericForStmt:
++		exprs(n.Exprs)
++		stmts(n.Stmts)
++	case *ast.FuncDefStmt:
++		if n.Name != nil {
++			f(n.Name)
++		}
++		if n.Func != nil {
++			f(n.Func)
++		}
++	case *ast.ReturnStmt:
++		exprs(n.Exprs)
++	case *ast.AttrGetExpr:
++		expr(n.Object)
++		expr(n.Key)
++	case *ast.TableExpr:
++		for _, fl := range n.Fields {
++			if fl != nil {
++				f(fl)
++			}
++		}
++	case *ast.Field:
++		expr(n.Key)
++		expr(n.Value)
++	case *ast.FuncCallExpr:
++		expr(n.Func)
++		expr(n.Receiver)
++		exprs(n.Args)
++	case *ast.LogicalOpExpr:
++		expr(n.Lhs)
++		expr(n.Rhs)
++	case *ast.RelationalOpExpr:
++		expr(n.Lhs)
++		expr(n.Rhs)
++	case *ast.StringConcatOpExpr:
++		expr(n.Lhs)
++		expr(n.Rhs)
++	case *ast.ArithmeticOpExpr:
++		expr(n.Lhs)
++		expr(n.Rhs)
++	case *ast.UnaryMinusOpExpr:
++		expr(n.Expr)
++	case *ast.UnaryNotOpExpr:
++		expr(n.Expr)
++	case *ast.UnaryLenOpExpr:
++		expr(n.Expr)
++	case *ast.FunctionExpr:
++		if n.ParList != nil {
++			f(n.ParList)
++		}
++		stmts(n.Stmts)
++	case *ast.FuncName:
++		expr(n.Func)
++		expr(n.Receiver)
++	}
++}
++
++// isNil reports whether an element is nil or a nil pointer of the types
++// of package ast.
++func isNil(el any) bool {
++	switch n := el.(type) {
++	case nil:
++		return true
++	case *ast.AssignStmt:
++		return n == nil
++	case *ast.LocalAssignStmt:
++		return n == nil
++	case *ast.FuncCallStmt:
++		return n == nil
++	case *ast.DoBlockStmt:
++		return n == nil
++	case *ast.WhileStmt:
++		return n == nil
++	case *ast.RepeatStmt:
++		return n == nil
++	case *ast.IfStmt:
++		return n == nil
++	case *ast.NumberForStmt:
++		return n == nil
++	case *ast.GenericForStmt:
++		return n == nil
++	case *ast.FuncDefStmt:
++		return n == nil
++	case *ast.ReturnStmt:
++		return n == nil
++	case *ast.BreakStmt:
++		return n == nil
++	case *ast.LabelStmt:
++		return n == nil
++	case *ast.GotoStmt:
++		return n == nil
++	case *ast.TrueExpr:
++		return n == nil
++	case *ast.FalseExpr:
++		return n == nil
++	case *ast.NilExpr:
++		return n == nil
++	case *ast.NumberExpr:
++		return n == nil
++	case *ast.StringExpr:
++		return n == nil
++	case *ast.CdataNumberExpr:
++		return n == nil
++	case *ast.Comma3Expr:
++		return n == nil
++	case *ast.IdentExpr:
++		return n == nil
++	case *ast.AttrGetExpr:
++		return n == nil
++	case *ast.TableExpr:
++		return n == nil
++	case *ast.FuncCallExpr:
++		return n == nil
++	case *ast.LogicalOpExpr:
++		return n == nil
++	case *ast.RelationalOpExpr:
++		return n == nil
++	case *ast.StringConcatOpExpr:
++		return n == nil
++	case *ast.ArithmeticOpExpr:
++		return n == nil
++	case *ast.UnaryMinusOpExpr:
++		return n == nil
++	case *ast.UnaryNotOpExpr:
++		return n == nil
++	case *ast.UnaryLenOpExpr:
++		return n == nil
++	case *ast.FunctionExpr:
++		return n == nil
++	case *ast.Field:
++		return n == nil
++	case *ast.ParList:
++		return n == nil
++	case *ast.FuncName:
++		return n == nil
++	case *ast.Chunk:
++		return n == nil
++	}
++	return false
++}
+--- a/format/doc.go
++++ b/format/doc.go
+@@ -0,0 +1,99 @@
++// Package format prints Lua 5.1 and LuaJIT syntax trees as source and
++// formats sources: a printer for trees that other code built or
++// transformed, and a formatter, gofmt's kind, that keeps what the author
++// of a source chose. go-moonscript patch.
++//
++//	out, err := format.Source(src, format.Options{Dialect: parse.LuaJIT})
++//
++//	chunk, err := parse.ParseChunk(src, name, parse.Options{Tokens: true})
++//	cm := format.NewCommentMap(chunk) // the comments, attached to elements
++//	// ... transform chunk ...
++//	err = format.Chunk(w, chunk, cm, opts)
++//
++//	err = format.Node(w, tree, opts) // a built tree, canonical
++//
++// # Correctness
++//
++// What the printer and the formatter write parses, in the dialect of the
++// options, to a tree that compiles to the same code as the tree printed
++// (the instructions, constants, functions, upvalues, locals and registers;
++// only the lines differ): the tests check it over the compatibility
++// scripts, the fork's test scripts and the luasuites archives in both
++// dialects, and fuzz it. Formatting a formatted source changes nothing,
++// and the formatter keeps the comments of the source as written and in
++// order, and its string and numeral tokens.
++//
++// To that end the printer writes:
++//
++//   - the parentheses that precedence, associativity and the grammar need
++//     (operands, a prefix expression that is not one: ("s"):rep(2), (f or
++//     g)(), ({}).k), and those of a call or "..." truncated to one value
++//     (FuncCallExpr.AdjustRet, Comma3Expr.AdjustRet) at the end of an
++//     expression list, an argument list or a table, where the truncation
++//     matters; the formatter keeps those of the source as well;
++//   - a.b only if b is a name of the dialect ("goto" is a keyword of
++//     LuaJIT), else a["b"];
++//   - strings with escapes that read back as the same bytes in both
++//     dialects (decimal escapes; valid UTF-8 as is), numerals that read
++//     back as the same number (the infinity as 1e999, a negative value with
++//     a unary minus, NaN as 0 / 0, which the compiler folds);
++//   - no line break before the "(" of arguments ("f\n(g)" is Lua's
++//     ambiguous syntax: comments that go there are written after the "("),
++//     a ";" before a statement that starts with "(", a space between two
++//     tokens that would make one ("- -x", "a .. .5", "1 .. 2", "t[ [[s]]]").
++//
++// # Comments
++//
++// A CommentMap attaches each comment of a source to an element of its
++// tree (NewCommentMap has the rules): Leading, on the lines above it or
++// before it on its line; Trailing, after it on the line it ends on; Inner,
++// in an element where no child is (an empty block, table or list, the end
++// of a block, before a keyword). The printer writes each comment of the map
++// once, with its element: leading ones before it, trailing ones after it
++// (after the "," or ";" that follows it), inner ones before the token of
++// the element they were before, or at the end of the element. A short
++// comment ends its line. So comments follow their elements when a
++// transformation moves them; those of elements no longer in the tree are an
++// error of Chunk, not lost silently.
++//
++// # Style
++//
++// The style is the package's own. Statements are one a line, blocks
++// indented one level (4 spaces, IndentWidth, or tabs), binary operators,
++// "=" and "," spaced, calls and indexing tight: f(a, b), t[k], {a = 1, 2}.
++// What does not fit in the width (Width, 100 columns) is broken over lines,
++// as Wadler's and Oppen's pretty printers do (the variant of Prettier: a
++// group is laid out flat if it fits up to the next possible line break,
++// else broken):
++//
++//   - arguments, parameters and table fields one a line, indented, the
++//     closing bracket on a line of its own; a call whose last argument is a
++//     function or a table opens it on the line of the call and closes the
++//     call on the line of its end, if the line fits: f(a, function()
++//     ... end), setmetatable(t, { ... });
++//   - a chain of binary operators of the same precedence breaks after its
++//     operators, its operands indented one level (two in the condition of
++//     an if or a while, not to align with the block);
++//   - a list of values or targets breaks after its commas.
++//
++// The formatter keeps the author's choices (Chunk): the text of literals
++// (the quotes change only with Quotes), a.b or a["b"], f"s" and f{...},
++// parentheses, "else if", the empty lines between statements and between
++// table fields (one of several), one-line blocks and functions with at
++// most a statement in each block (if they fit), tables with a line break
++// after their "{" (laid out on lines). Options.TrailingComma ends the
++// tables laid out on lines with a ","; without it, they keep the trailing
++// separator of the source. A table's separators are written ",".
++// Options.KeepSemicolons keeps the ";" after statements; else they go.
++//
++// # Limits
++//
++// A built tree is printed so that it parses back to the same tree, but
++// for what Lua cannot write: a vararg function without "arg" under Lua 5.1
++// (ParList.NoArg) reads back with it, a NumberExpr's Value reads back as
++// the parser of the dialect writes numerals, an expression's lines are
++// those of its new text, parentheses that change nothing are dropped. The
++// LuaJIT parser emits code to check LuaJIT's limits (registers, constants):
++// a source at those limits can be one the formatter's parentheses or the
++// printer's lack of them move over the limit; the tests found none.
++package format
+--- a/format/example_test.go
++++ b/format/example_test.go
+@@ -0,0 +1,119 @@
++package format_test
++
++import (
++	"fmt"
++	"os"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/format"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++func ExampleSource() {
++	src := []byte(`local M={}  -- the module
++function M.greet(name,greeting)
++  greeting=greeting or 'Hello'
++
++
++  return greeting..", "..name..'!'
++end
++local cfg = {
++  listen=3301, ['log level']=5,
++}
++if not cfg then return end
++return M`)
++	out, err := format.Source(src, format.Options{Dialect: parse.LuaJIT})
++	if err != nil {
++		fmt.Println(err)
++		return
++	}
++	fmt.Print(string(out))
++	// Output:
++	// local M = {} -- the module
++	// function M.greet(name, greeting)
++	//     greeting = greeting or 'Hello'
++	//
++	//     return greeting .. ", " .. name .. '!'
++	// end
++	// local cfg = {
++	//     listen = 3301,
++	//     ['log level'] = 5,
++	// }
++	// if not cfg then return end
++	// return M
++}
++
++// A tree built by code is printed with the parentheses, keys and literals
++// it needs.
++func ExampleNode() {
++	// return (a + b) * -c, t["end"], (f())
++	tree := &ast.ReturnStmt{Exprs: []ast.Expr{
++		&ast.ArithmeticOpExpr{Operator: "*",
++			Lhs: &ast.ArithmeticOpExpr{Operator: "+", Lhs: &ast.IdentExpr{Value: "a"}, Rhs: &ast.IdentExpr{Value: "b"}},
++			Rhs: &ast.UnaryMinusOpExpr{Expr: &ast.IdentExpr{Value: "c"}}},
++		&ast.AttrGetExpr{Object: &ast.IdentExpr{Value: "t"}, Key: &ast.StringExpr{Value: "end"}},
++		&ast.FuncCallExpr{Func: &ast.IdentExpr{Value: "f"}, AdjustRet: true},
++	}}
++	if err := format.Node(os.Stdout, tree, format.Options{}); err != nil {
++		fmt.Println(err)
++	}
++	fmt.Println()
++	// Output:
++	// return (a + b) * -c, t["end"], (f())
++}
++
++func ExampleNewCommentMap() {
++	src := []byte(`-- the answer
++local x = 42 -- to everything
++local t = { -- empty
++}
++`)
++	chunk, err := parse.ParseChunk(src, "example", parse.Options{Tokens: true})
++	if err != nil {
++		fmt.Println(err)
++		return
++	}
++	cm := format.NewCommentMap(chunk)
++	for _, s := range chunk.Stmts {
++		for _, c := range cm[s] {
++			fmt.Printf("%q: %s of the statement on line %d\n", c.Raw, c.Place, chunk.Pos(s.Span().Start).Line)
++		}
++	}
++	tbl := chunk.Stmts[1].(*ast.LocalAssignStmt).Exprs[0]
++	for _, c := range cm[tbl] {
++		fmt.Printf("%q: %s of the table, before %v\n", c.Raw, c.Place, c.Next)
++	}
++	// Output:
++	// "-- the answer": leading of the statement on line 2
++	// "-- to everything": trailing of the statement on line 2
++	// "-- empty": inner of the table, before }
++}
++
++// Chunk prints a transformed tree with the comments of its source: here a
++// statement is added before the others and one is removed.
++func ExampleChunk() {
++	src := []byte(`local a = 1 -- one
++local b = 2 -- two
++print(a, b)
++`)
++	chunk, err := parse.ParseChunk(src, "example", parse.Options{Tokens: true})
++	if err != nil {
++		fmt.Println(err)
++		return
++	}
++	cm := format.NewCommentMap(chunk)
++	delete(cm, chunk.Stmts[1]) // its comments go with it
++	strict := &ast.FuncCallStmt{Expr: &ast.FuncCallExpr{
++		Func: &ast.IdentExpr{Value: "require"},
++		Args: []ast.Expr{&ast.StringExpr{Value: "strict"}},
++	}}
++	cm[strict] = []*format.Comment{{Comment: ast.Comment{Text: " added"}, Place: format.Trailing, SameLine: true}}
++	chunk.Stmts = []ast.Stmt{strict, chunk.Stmts[0], chunk.Stmts[2]}
++	if err := format.Chunk(os.Stdout, chunk, cm, format.Options{}); err != nil {
++		fmt.Println(err)
++	}
++	// Output:
++	// require("strict") -- added
++	// local a = 1 -- one
++	// print(a, b)
++}
+--- a/format/format.go
++++ b/format/format.go
+@@ -0,0 +1,234 @@
++package format
++
++import (
++	"errors"
++	"io"
++	"strings"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// Quotes is the quote style of short string literals.
++type Quotes uint8
++
++const (
++	// QuotesKeep keeps the quotes of the source; strings without one get
++	// double quotes.
++	QuotesKeep Quotes = iota
++	// QuotesDouble writes double quotes, unless the string holds a double
++	// quote and no single one.
++	QuotesDouble
++	// QuotesSingle writes single quotes, unless the string holds a single
++	// quote and no double one.
++	QuotesSingle
++)
++
++// Options are the options of the formatter and the printer. The zero
++// Options are Lua 5.1, lines of 100 columns, 4 spaces of indentation.
++type Options struct {
++	// Dialect is the language: the parser's (Source), the keywords and
++	// names (goto is a keyword of LuaJIT, whose names may hold bytes
++	// 128-255).
++	Dialect parse.Dialect
++	// Width is the width of a line, in columns: a group that does not fit
++	// is broken over lines. 0 means 100.
++	Width int
++	// IndentWidth is the number of spaces of a level of indentation, or
++	// the width of a tab with UseTabs. 0 means 4.
++	IndentWidth int
++	// UseTabs indents with tabs.
++	UseTabs bool
++	// Quotes is the quote style of short strings.
++	Quotes Quotes
++	// TrailingComma ends the tables laid out on more than one line with a
++	// ",": without it, they keep the trailing separator of the source.
++	// A table on one line has none.
++	TrailingComma bool
++	// KeepSemicolons keeps the ";" after a statement in the source; without
++	// it they are dropped. A ";" before a statement that starts with "("
++	// is always written.
++	KeepSemicolons bool
++}
++
++func (o *Options) normalize() {
++	if o.Width <= 0 {
++		o.Width = 100
++	}
++	if o.IndentWidth <= 0 {
++		o.IndentWidth = 4
++	}
++}
++
++func (o *Options) indent() string {
++	if o.UseTabs {
++		return "\t"
++	}
++	return strings.Repeat(" ", o.IndentWidth)
++}
++
++// Source formats a Lua source: it parses it (in opts.Dialect, skipping a
++// first "#" line under Lua 5.1 as lua5.1 does running a file) and prints
++// it with its comments, keeping the forms of its literals, keys and calls,
++// its parentheses and its blank lines (see Chunk). A syntax error is a
++// *parse.Error.
++func Source(src []byte, opts Options) ([]byte, error) {
++	chunk, err := parse.ParseChunk(src, "source", parse.Options{Dialect: opts.Dialect, Shebang: true, Tokens: true})
++	if err != nil {
++		return nil, err
++	}
++	p := newPrinter(opts)
++	p.cm = NewCommentMap(chunk)
++	p.src, p.toks, p.lines = src, chunk.Tokens, chunk.Lines
++	return p.printChunk(chunk, len(src)+len(src)/4)
++}
++
++// Chunk writes a chunk, formatted: with the comments of cm (nil for none),
++// and, if the chunk has its tokens (parse.Options.Tokens), keeping for
++// each element that has a span in the source what its author chose:
++//
++//   - the text of string literals (their quotes changed only with
++//     Options.Quotes) and numerals;
++//   - a.b or a["b"], {b = 1} or {["b"] = 1}, f"s" and f{...} or f("s");
++//   - the parentheses ((a + b), ((f())));
++//   - "elseif" or "else if";
++//   - an empty line between statements and between fields (one of
++//     several), the header line ("#!...");
++//   - a block statement or function on one line with at most a statement
++//     in each block stays on one line if it fits; a table with a line
++//     break after its "{" is laid out on lines.
++//
++// The rest is laid out anew: the indentation, the spaces, the line breaks
++// within the width. The elements without a span (the elements a
++// transformation added) are printed as Node prints them. The chunk may
++// have been transformed after parsing, if the elements that keep their
++// spans keep their meaning: a literal whose value changed is written anew,
++// but a span moved to another source is not detected.
++func Chunk(w io.Writer, chunk *ast.Chunk, cm CommentMap, opts Options) error {
++	if chunk == nil {
++		return errors.New("format: nil chunk")
++	}
++	p := newPrinter(opts)
++	p.cm = cm
++	if chunk.Tokens != nil && chunk.Lines != nil {
++		p.src = chunk.Lines.Source()
++		p.toks = chunk.Tokens
++		p.lines = chunk.Lines
++	}
++	size := 4096
++	if p.src != nil {
++		size = len(p.src) + len(p.src)/4
++	}
++	out, err := p.printChunk(chunk, size)
++	if err != nil {
++		return err
++	}
++	_, err = w.Write(out)
++	return err
++}
++
++// printChunk prints a chunk, and checks that its comments were printed.
++func (p *printer) printChunk(chunk *ast.Chunk, size int) ([]byte, error) {
++	out, err := p.print(chunk, size)
++	if err != nil {
++		return nil, err
++	}
++	total := 0
++	for _, cs := range p.cm {
++		total += len(cs)
++	}
++	if p.emitted != total {
++		return nil, errors.New("format: comments of the map are not in the tree")
++	}
++	return out, nil
++}
++
++// Node writes a tree in the canonical style, whatever its source: a
++// *ast.Chunk (a block of statements: &ast.Chunk{Stmts: stmts}), an
++// ast.Stmt or an ast.Expr. The tree may have been built or transformed by
++// other code; it is printed so that parsing the text in opts.Dialect gives
++// the same tree, which compiles to the same code (but for the lines):
++//
++//   - parentheses where precedence, associativity or the grammar need them
++//     ((a + b) * c, a - (b - c), ("s"):rep(2), (f or g)()), and around a
++//     call or "..." truncated to one value (AdjustRet) at the end of a
++//     list;
++//   - a.b if the key is a name of the dialect, else a["key"];
++//   - strings double-quoted (Options.Quotes), with the escapes of Lua 5.1
++//     for the bytes that need one; numerals as their Value if it is one,
++//     else the shortest that converts back (1e999 for the infinity, 0/0
++//     for NaN, a unary minus for a negative value);
++//   - a ";" before a statement starting with "(", spaces where two tokens
++//     would make one ("- -x", "a .. .5", "t[ [[s]] ]").
++//
++// A tree that cannot be written so is an error: a name that is no name
++// (of a variable, a method, a function statement), an assignment to
++// something else than a name or an index, a node of unknown type, a nil
++// where an element is needed.
++func Node(w io.Writer, node ast.Element, opts Options) error {
++	p := newPrinter(opts)
++	out, err := p.print(node, 4096)
++	if err != nil {
++		return err
++	}
++	_, err = w.Write(out)
++	return err
++}
++
++func newPrinter(opts Options) *printer {
++	opts.normalize()
++	return &printer{opts: opts, jit: opts.Dialect == parse.LuaJIT}
++}
++
++func (p *printer) print(node ast.Element, size int) (out []byte, err error) {
++	defer func() {
++		if e := recover(); e != nil {
++			pe, ok := e.(printError)
++			if !ok {
++				panic(e)
++			}
++			out, err = nil, pe.err
++		}
++	}()
++	if isNil(node) {
++		p.fail("nil node")
++	}
++	var d doc
++	chunk := false
++	switch n := node.(type) {
++	case *ast.Chunk:
++		d = p.chunk(n)
++		chunk = true
++	case ast.Stmt:
++		lead := p.open(n)
++		body := p.stmt(n)
++		rest, trail := p.close()
++		d = cat(lead, body, rest, trail)
++	case ast.Expr:
++		d = p.expr(n, 0, false)
++	default:
++		p.fail("cannot print a %T", node)
++	}
++	r := newRenderer(p.opts.Width, p.opts.indent(), p.opts.IndentWidth, size)
++	r.render(d)
++	out = r.out
++	if chunk && len(out) > 0 && out[len(out)-1] != '\n' {
++		out = append(out, '\n')
++	}
++	return out, nil
++}
++
++func (p *printer) chunk(c *ast.Chunk) doc {
++	var header doc
++	if p.src != nil && c.Header != (ast.Span{}) && c.Header.End <= len(p.src) {
++		header = cat(text(string(p.src[c.Header.Start:c.Header.End])), lineHard)
++	}
++	lead := p.open(c)
++	parts := p.stmtList(c.Stmts)
++	ds := p.dangling()
++	if len(c.Stmts) == 0 {
++		ds = noBlankFirst(ds)
++	}
++	rest, _ := p.close()
++	return cat(header, lead, catList(parts), catList(ds), rest)
++}
+--- a/format/format_test.go
++++ b/format/format_test.go
+@@ -0,0 +1,349 @@
++package format_test
++
++import (
++	"bytes"
++	"fmt"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/format"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// hazardSources are sources whose formatting must avoid an ambiguity or
++// keep a form: they are also seeds of the fuzz targets.
++var hazardSources = []string{
++	"local x = y;\n(f or g)(1)\n",
++	"x = - -y\nz = -(-1)\n",
++	"x = a .. .5 .. 1 .. 2\n",
++	"x = t[ [[s]] ] .. t[ [=[s]=] ]\n",
++	"x = {[ [[k]] ] = 1}\n",
++	"f --[[c]] (g)\n",
++	"local a = (f())\nreturn (...)\n",
++	"x = (a).b + ((c))\n",
++	"x = a.b + a['b'] + a[\"b\"]\n",
++	"require'x' f{1} g\"s\" o:m{} o:m'a'\n",
++	"x = 0x10 + 1e3 + .5 + 3. + 0XaP1\n",
++	"x = '\\'' .. \"\\\"\" .. '\\65\\066' .. [[\nlong]]\n",
++	"if a then else if b then end end\n",
++	"local t = {\n1, 2}\n",
++	"return\n",
++	"#!/usr/bin/lua\nprint(1)\n",
++	"for i = 1, 2 do local x = i end\n",
++	"local s = \"a\\\n b\"\n",
++}
++
++func formatSource(t *testing.T, src string, opts format.Options) string {
++	t.Helper()
++	out, err := format.Source([]byte(src), opts)
++	if err != nil {
++		t.Fatalf("format %q: %v", src, err)
++	}
++	return string(out)
++}
++
++// TestFormat checks the formatted text of sources.
++func TestFormat(t *testing.T) {
++	cases := []struct {
++		src, want string
++		opts      format.Options
++	}{
++		// spacing and indentation
++		{src: "local  x=1+2*3", want: "local x = 1 + 2 * 3\n"},
++		{src: "if a then b() end", want: "if a then b() end\n"},
++		{src: "if a then\nb() end", want: "if a then\n    b()\nend\n"},
++		{src: "if a then b() c() end", want: "if a then\n    b()\n    c()\nend\n"},
++		{src: "if a then\nb()\nend", want: "if a then\n\tb()\nend\n", opts: format.Options{UseTabs: true}},
++		{src: "if a then\nb()\nend", want: "if a then\n  b()\nend\n", opts: format.Options{IndentWidth: 2}},
++		{src: "function f(a,b,...) return a end", want: "function f(a, b, ...) return a end\n"},
++		{src: "function f(a)\nreturn a end", want: "function f(a)\n    return a\nend\n"},
++		{src: "local function f() end", want: "local function f() end\n"},
++		{src: "do end while x do end repeat until x", want: "do end\nwhile x do end\nrepeat until x\n"},
++		{src: "for k,v in pairs(t) do end", want: "for k, v in pairs(t) do end\n"},
++		// literals as written
++		{src: "x = a['b'] + a.b + a[\"b\"]", want: "x = a['b'] + a.b + a[\"b\"]\n"},
++		{src: "x = {['b'] = 1, b = 2}", want: "x = {['b'] = 1, b = 2}\n"},
++		{src: "x = 0x10 + 1e3 + .5 + 3.", want: "x = 0x10 + 1e3 + .5 + 3.\n"},
++		{src: "x = 'a' .. [==[b]==]", want: "x = 'a' .. [==[b]==]\n"},
++		{src: "require'x' f{1} g\"s\" o:m{}", want: "require 'x'\nf{1}\ng \"s\"\no:m{}\n"},
++		{src: "f('x') f({1})", want: "f('x')\nf({1})\n"},
++		{src: "x = ((a)) + (b)", want: "x = ((a)) + (b)\n"},
++		{src: "if a then elseif b then end", want: "if a then elseif b then end\n"},
++		{src: "if a then\nelse if b then end end", want: "if a then\nelse\n    if b then end\nend\n"},
++		// quotes
++		{src: `x = 'a' .. "b" .. 'c"' .. '\'' .. [[d]]`, want: `x = "a" .. "b" .. 'c"' .. "'" .. [[d]]` + "\n",
++			opts: format.Options{Quotes: format.QuotesDouble}},
++		{src: `x = 'a' .. "b" .. "c'" .. "\""`, want: `x = 'a' .. 'b' .. "c'" .. '"'` + "\n",
++			opts: format.Options{Quotes: format.QuotesSingle}},
++		// blank lines: kept, collapsed to one, none at the start or end of
++		// a block
++		{src: "a()\n\n\n\nb()\nc()", want: "a()\n\nb()\nc()\n"},
++		{src: "do\n\na()\n\nend", want: "do\n    a()\nend\n"},
++		{src: "t = {\n1,\n\n2,\n}", want: "t = {\n    1,\n\n    2,\n}\n"},
++		// semicolons
++		{src: "a = 1; b = 2;", want: "a = 1\nb = 2\n"},
++		{src: "a = 1; b = 2;", want: "a = 1;\nb = 2;\n", opts: format.Options{KeepSemicolons: true}},
++		{src: "a = b;(f)()", want: "a = b;\n(f)()\n"},
++		// tables
++		{src: "t = {1, 2,}", want: "t = {1, 2}\n"},
++		{src: "t = {\n1, 2}", want: "t = {\n    1,\n    2\n}\n"},
++		{src: "t = {\n1, 2}", want: "t = {\n    1,\n    2,\n}\n", opts: format.Options{TrailingComma: true}},
++		{src: "t = {\n1; 2;}", want: "t = {\n    1,\n    2,\n}\n"},
++		{src: "t = {a = 1, b = {c = 2, d = 3}}", want: "t = {\n    a = 1,\n    b = {c = 2, d = 3}\n}\n", opts: format.Options{Width: 24}},
++		// line breaking
++		{src: "local x = aaaa + bbbb + cccc", want: "local x = aaaa +\n    bbbb +\n    cccc\n", opts: format.Options{Width: 20}},
++		{src: "f(aaaa, bbbb, cccc)", want: "f(\n    aaaa,\n    bbbb,\n    cccc\n)\n", opts: format.Options{Width: 12}},
++		{src: "f(a, function() return 1 end)", want: "f(a, function()\n    return 1\nend)\n", opts: format.Options{Width: 20}},
++		{src: "f(a, {b = 1, c = 2})", want: "f(a, {\n    b = 1,\n    c = 2\n})\n", opts: format.Options{Width: 16}},
++		{src: "if aaaa and bbbb then x() end", want: "if aaaa and\n        bbbb then\n    x()\nend\n", opts: format.Options{Width: 16}},
++		// the header
++		{src: "#!/usr/bin/lua\nprint(1)", want: "#!/usr/bin/lua\nprint(1)\n"},
++		{src: "", want: ""},
++	}
++	for _, c := range cases {
++		if got := formatSource(t, c.src, c.opts); got != c.want {
++			t.Errorf("%q: got\n%s\nwant\n%s", c.src, got, c.want)
++		}
++	}
++}
++
++// TestFormatHazards formats the hazard sources and checks them.
++func TestFormatHazards(t *testing.T) {
++	for _, src := range hazardSources {
++		for _, d := range dialects {
++			var st checkStats
++			f, checked := checkSource([]byte(src), format.Options{Dialect: d}, &st)
++			if !checked && d == parse.LuaJIT {
++				t.Errorf("%q does not compile", src)
++			}
++			if f != "" {
++				t.Errorf("%q (%s): %s", src, dialectName(d), f)
++			}
++		}
++	}
++	got := formatSource(t, "f --[[c]] (g)", format.Options{})
++	if got != "f( --[[c]] g)\n" && got != "f(--[[c]] g)\n" {
++		t.Errorf("comment before the arguments: %q", got)
++	}
++	if got := formatSource(t, "x = t[ [[s]] ] .. t[ [[s]] .. 1]", format.Options{}); got != "x = t[ [[s]] ] .. t[ [[s]] .. 1 ]\n" {
++		t.Errorf("long string key: %q", got)
++	}
++}
++
++// commentSources are sources with comments in every kind of place: also
++// seeds of the fuzz targets.
++var commentSources = []string{
++	"-- a\nlocal x = 1 -- b\n-- c\n",
++	"local t = { -- a\n  1, -- b\n  -- c\n  2 --[[d]], [3] = --[[e]] 4,\n  -- f\n}\n",
++	"f( -- a\n  x, -- b\n  y -- c\n)\n",
++	"f(--[[a]])\nlocal t = {--[[b]]}\nlocal function g(--[[c]]) end\n",
++	"if a then -- a\n  -- b\n  x() -- c\n  -- d\nelseif b then -- e\n  -- f\nelse -- g\nend -- h\n",
++	"function f() -- a\nend\ndo -- b\nend\nwhile x do --[[c]] end\nrepeat -- d\nuntil x\n",
++	"local --[[a]] x --[[b]] = --[[c]] 1\n",
++	"x = a + --[[a]] b * -- b\n c\n",
++	"x = (--[[a]] a --[[b]])\n",
++	"--[==[\nlong\n]==] x = 1\n",
++	"x = 1\n\n-- a\n\n-- b\ny = 2\n\n-- c\n",
++	"return -- a\n",
++	"-- only a comment",
++	"local a, -- a\n b = 1, 2\n",
++	"function a. --[[a]] b: --[[b]] c() end\n",
++	"x = f --[[a]] 's' .. g --[[b]] {}\n",
++	"x = a:b --[[a]] (1)\n",
++	"for i --[[a]] = 1, 2 --[[b]] do end\nfor k --[[c]] in x do end\n",
++	"if a\n-- a\nthen end\n",
++	"a()\n-- a\n;(f)()\n",
++	"goto --[[a]] l ::l:: --[[b]]\n",
++}
++
++// TestFormatComments checks the checks on the comment sources: every
++// comment kept, the code the same, idempotence.
++func TestFormatComments(t *testing.T) {
++	for _, src := range commentSources {
++		for _, d := range dialects {
++			var st checkStats
++			f, checked := checkSource([]byte(src), format.Options{Dialect: d, Width: 40}, &st)
++			if !checked && d == parse.LuaJIT {
++				t.Errorf("%q does not compile", src)
++			}
++			if f != "" {
++				t.Errorf("%q (%s): %s", src, dialectName(d), f)
++			}
++		}
++	}
++	cases := []struct{ src, want string }{
++		{"-- a\nlocal x = 1 -- b\n-- c\n", "-- a\nlocal x = 1 -- b\n-- c\n"},
++		{"local t = { -- a\n  1, -- b\n  -- c\n  2 --[[d]],\n}\n", "local t = { -- a\n    1, -- b\n    -- c\n    2, --[[d]]\n}\n"},
++		{"f( -- a\n  x, -- b\n  y -- c\n)\n", "f( -- a\n    x, -- b\n    y -- c\n)\n"},
++		{"f(--[[a]])\nlocal t = {--[[b]]}\n", "f( --[[a]] )\nlocal t = { --[[b]] }\n"},
++		{"if a then -- a\n  -- b\n  x() -- c\n  -- d\nelse -- g\nend -- h\n",
++			"if a then -- a\n    -- b\n    x() -- c\n    -- d\nelse -- g\nend -- h\n"},
++		{"function f() -- a\nend\ndo -- b\nend\n", "function f() -- a\nend\ndo -- b\nend\n"},
++		{"local --[[a]] x --[[b]] = --[[c]] 1\n", "local --[[a]] x --[[b]] = --[[c]] 1\n"},
++		{"x = 1\n\n-- a\n\n-- b\ny = 2\n\n-- c\n", "x = 1\n\n-- a\n\n-- b\ny = 2\n\n-- c\n"},
++		{"--[==[\nlong\n]==] x = 1\n", "--[==[\nlong\n]==] x = 1\n"},
++		{"-- only a comment", "-- only a comment\n"},
++	}
++	for _, c := range cases {
++		if got := formatSource(t, c.src, format.Options{}); got != c.want {
++			t.Errorf("%q: got\n%s\nwant\n%s", c.src, got, c.want)
++		}
++	}
++}
++
++// describe lists the attachments of a comment map in source order, as
++// "text: place type".
++func describe(cm format.CommentMap) string {
++	var parts []string
++	byComment := map[*format.Comment]ast.Element{}
++	for el, cs := range cm {
++		for _, c := range cs {
++			byComment[c] = el
++		}
++	}
++	for _, c := range cm.Comments() {
++		el := byComment[c]
++		s := fmt.Sprintf("%s: %s %s", strings.TrimSpace(c.Text), c.Place, strings.TrimPrefix(fmt.Sprintf("%T", el), "*ast."))
++		if c.Place == format.Inner {
++			s += fmt.Sprintf(" #%d before %v", c.Index, c.Next)
++		}
++		if c.SameLine {
++			s += " same line"
++		}
++		if c.BlankBefore {
++			s += " after a blank"
++		}
++		parts = append(parts, s)
++	}
++	return strings.Join(parts, "\n")
++}
++
++func commentMap(t *testing.T, src string, d parse.Dialect) format.CommentMap {
++	t.Helper()
++	chunk, err := parse.ParseChunk([]byte(src), "test", parse.Options{Dialect: d, Tokens: true})
++	if err != nil {
++		t.Fatalf("%q: %v", src, err)
++	}
++	return format.NewCommentMap(chunk)
++}
++
++// TestCommentMap checks the attachment rules (NewCommentMap).
++func TestCommentMap(t *testing.T) {
++	cases := []struct {
++		src, want string
++	}{
++		// leading: on the lines above; trailing: on the line it ends
++		{"-- a\n\n-- b\nlocal x = 1 -- c\n-- d\n",
++			"a: leading LocalAssignStmt\nb: leading LocalAssignStmt after a blank\nc: trailing LocalAssignStmt same line\nd: inner Chunk #1 before <eof>"},
++		// the outermost element ending or starting at the token
++		{"x = f(a) -- a\n", "a: trailing AssignStmt same line"},
++		{"x = a -- a\n + b\n", "a: trailing IdentExpr same line"},
++		{"x = --[[a]] a + b\n", "a: leading ArithmeticOpExpr same line"},
++		// after a separator: trailing of the item before it
++		{"t = {1, -- a\n 2; -- b\n}\nf(x, -- c\n y)\n",
++			"a: trailing Field same line\nb: trailing Field same line\nc: trailing IdentExpr same line"},
++		{"a(); -- a\n", "a: trailing FuncCallStmt same line"},
++		// on the line of an opening token: leading of what follows
++		{"t = { -- a\n 1 }\nif x then -- b\n y() end\n",
++			"a: leading Field same line\nb: leading FuncCallStmt same line"},
++		// on the line of a parameter list: trailing of it
++		{"function f() -- a\n return end\n", "a: trailing ParList same line"},
++		// dangling: in an empty table, block, argument or parameter list,
++		// at the end of a block
++		{"t = {--[[a]]}\nf(--[[b]])\nfunction g(--[[c]]) end\n",
++			"a: inner TableExpr #0 before } same line\nb: inner FuncCallExpr #1 before ) same line\nc: inner ParList #0 before ) same line"},
++		{"do -- a\nend\nwhile x do\n -- b\nend\nrepeat\n y()\n -- c\nuntil x\n",
++			"a: inner DoBlockStmt #0 before end same line\nb: inner WhileStmt #1 before end\nc: inner RepeatStmt #1 before until"},
++		{"if a then\n x()\n -- a\nelse\n -- b\nend\n",
++			"a: inner IfStmt #2 before else\nb: inner IfStmt #2 before end"},
++		{"if a then\n -- a\nelseif b then\nend\n", "a: leading IfStmt"},
++		// before a keyword or a name held as a string
++		{"local --[[a]] x = 1\nfor --[[b]] i = 1, 2 do end\n",
++			"a: inner LocalAssignStmt #0 before <name> same line\nb: inner NumberForStmt #0 before <name> same line"},
++		{"if a\n-- a\nthen end\n", "a: inner IfStmt #1 before then"},
++		// inside parentheses
++		{"x = (--[[a]] a --[[b]])\n", "a: leading IdentExpr same line\nb: trailing IdentExpr same line"},
++		{"x = ( --[[a]] (a))\n", "a: inner AssignStmt #1 before ( same line"},
++		// the end of the chunk, an empty chunk
++		{"x = 1\n-- a", "a: inner Chunk #1 before <eof>"},
++		{"-- a", "a: inner Chunk #0 before <eof>"},
++	}
++	for _, c := range cases {
++		cm := commentMap(t, c.src, parse.LuaJIT)
++		if got := describe(cm); got != c.want {
++			t.Errorf("%q: got\n%s\nwant\n%s", c.src, got, c.want)
++		}
++	}
++	if cm := commentMap(t, "x = 1", parse.Lua51); cm != nil {
++		t.Errorf("no comments: %v", cm)
++	}
++}
++
++// TestCommentMapComplete checks that every comment of the comment
++// sources and the compatibility scripts is attached once, and printed once.
++func TestCommentMapComplete(t *testing.T) {
++	srcs := append([]string(nil), commentSources...)
++	for _, b := range luaFiles(t, "../testdata/compat") {
++		srcs = append(srcs, string(b))
++	}
++	for _, src := range srcs {
++		chunk, err := parse.ParseChunk([]byte(src), "test", parse.Options{Dialect: parse.LuaJIT, Tokens: true, Comments: true})
++		if err != nil {
++			continue
++		}
++		cm := format.NewCommentMap(chunk)
++		list := cm.Comments()
++		if len(list) != len(chunk.Comments) {
++			t.Errorf("%.40q: %d comments attached, %d in the source", src, len(list), len(chunk.Comments))
++			continue
++		}
++		for i, c := range list {
++			if c.Comment != chunk.Comments[i] {
++				t.Errorf("%.40q: comment %d: %+v, parser %+v", src, i, c.Comment, chunk.Comments[i])
++			}
++		}
++		// a comment map printed with a tree without its tokens: every
++		// comment once
++		chunk.Tokens = nil
++		var b bytes.Buffer
++		if err := format.Chunk(&b, chunk, cm, format.Options{Dialect: parse.LuaJIT}); err != nil {
++			t.Errorf("%.40q: %v", src, err)
++			continue
++		}
++		got := lexemes(b.Bytes(), parse.LuaJIT, ast.TokenComment)
++		want := lexemes([]byte(src), parse.LuaJIT, ast.TokenComment)
++		if !equalStrings(got, want) {
++			t.Errorf("%.40q: printed without tokens: comments %d, want %d: %s", src, len(got), len(want), firstStringDiff(want, got))
++		}
++	}
++}
++
++// TestCommentsOfBuiltTree prints a built tree with comments attached by
++// hand, a short one where a line break would be a hazard included.
++func TestCommentsOfBuiltTree(t *testing.T) {
++	f := id("f")
++	c := call(f, id("g"))
++	stmts := []ast.Stmt{assign([]ast.Expr{id("x")}, id("y")), callStmt(c)}
++	cm := format.CommentMap{
++		stmts[0]: {{Comment: ast.Comment{Text: " set x"}, Place: format.Leading}},
++		f:        {{Comment: ast.Comment{Text: " the function"}, Place: format.Trailing, SameLine: true, NewlineAfter: true}},
++		stmts[1]: {{Comment: ast.Comment{Text: "[[ not long", Long: false}, Place: format.Trailing, SameLine: true}},
++	}
++	var b bytes.Buffer
++	if err := format.Chunk(&b, &ast.Chunk{Stmts: stmts}, cm, format.Options{}); err != nil {
++		t.Fatal(err)
++	}
++	want := "-- set x\nx = y\nf( -- the function\n    g\n) -- [[ not long\n"
++	if b.String() != want {
++		t.Errorf("got\n%s\nwant\n%s", b.String(), want)
++	}
++	if _, err := parse.ParseChunk(b.Bytes(), "test", parse.Options{}); err != nil {
++		t.Error(err)
++	}
++	// a comment of an element not in the tree is an error
++	cm[id("z")] = []*format.Comment{{Comment: ast.Comment{Text: "lost"}}}
++	if err := format.Chunk(&b, &ast.Chunk{Stmts: stmts}, cm, format.Options{}); err == nil {
++		t.Error("no error for a comment not in the tree")
++	}
++}
+--- a/format/fuzz_test.go
++++ b/format/fuzz_test.go
+@@ -0,0 +1,69 @@
++package format_test
++
++import (
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/format"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// fuzzSeeds adds the small compatibility scripts and the hazards of the
++// tests to the corpus of a fuzz target.
++func fuzzSeeds(f *testing.F) {
++	paths, _ := filepath.Glob(filepath.Join("..", "testdata", "compat", "*.lua"))
++	for _, p := range paths {
++		b, err := os.ReadFile(p)
++		if err == nil && len(b) < 4096 {
++			f.Add(b, false)
++		}
++	}
++	for _, c := range hazardSources {
++		f.Add([]byte(c), true)
++	}
++	for _, c := range commentSources {
++		f.Add([]byte(c), true)
++	}
++}
++
++func fuzzDialect(jit bool) parse.Dialect {
++	if jit {
++		return parse.LuaJIT
++	}
++	return parse.Lua51
++}
++
++// FuzzFormat checks the formatter on sources that parse and compile: the
++// formatted source compiles to the same code, formatting it again changes
++// nothing, its comments and literals are those of the source.
++func FuzzFormat(f *testing.F) {
++	fuzzSeeds(f)
++	f.Fuzz(func(t *testing.T, src []byte, jit bool) {
++		opts := format.Options{Dialect: fuzzDialect(jit), Width: 60}
++		if len(src) > 0 && src[0]&1 == 1 {
++			opts.TrailingComma, opts.KeepSemicolons, opts.UseTabs = true, true, true
++		}
++		var st checkStats
++		if f, _ := checkSource(src, opts, &st); f != "" {
++			t.Fatalf("%s\nsource:\n%s", f, src)
++		}
++	})
++}
++
++// FuzzPrint checks the printer on the trees of sources that parse and
++// compile: the printed tree compiles to the same code, and printing the
++// tree of the text gives the same text.
++func FuzzPrint(f *testing.F) {
++	fuzzSeeds(f)
++	f.Fuzz(func(t *testing.T, src []byte, jit bool) {
++		opts := format.Options{Dialect: fuzzDialect(jit), Width: 50}
++		want, err := compile(src, opts.Dialect)
++		if err != nil {
++			return
++		}
++		if f := checkPrinter(src, want, opts); f != "" {
++			t.Fatalf("%s\nsource:\n%s", f, src)
++		}
++	})
++}
+--- a/format/golden_test.go
++++ b/format/golden_test.go
+@@ -0,0 +1,67 @@
++package format_test
++
++import (
++	"bytes"
++	"flag"
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/format"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++var update = flag.Bool("update", false, "rewrite the golden files of testdata/golden")
++
++// TestGolden formats testdata/golden/*.lua and compares with the .golden
++// files (go test -update rewrites them): LuaJIT for luajit.lua, Lua 5.1
++// for the others; module.lua also with tabs, quotes and trailing commas
++// (.options.golden).
++func TestGolden(t *testing.T) {
++	paths, _ := filepath.Glob(filepath.Join("testdata", "golden", "*.lua"))
++	if len(paths) == 0 {
++		t.Fatal("no golden sources")
++	}
++	for _, p := range paths {
++		src, err := os.ReadFile(p)
++		if err != nil {
++			t.Fatal(err)
++		}
++		opts := format.Options{}
++		if strings.HasSuffix(p, "luajit.lua") {
++			opts.Dialect = parse.LuaJIT
++		}
++		golden(t, p, ".golden", src, opts)
++		if strings.HasSuffix(p, "module.lua") {
++			golden(t, p, ".options.golden", src, format.Options{UseTabs: true, Quotes: format.QuotesSingle, TrailingComma: true, Width: 80})
++		}
++	}
++}
++
++func golden(t *testing.T, path, suffix string, src []byte, opts format.Options) {
++	t.Helper()
++	out, err := format.Source(src, opts)
++	if err != nil {
++		t.Errorf("%s: %v", path, err)
++		return
++	}
++	var st checkStats
++	if f, _ := checkSource(src, opts, &st); f != "" {
++		t.Errorf("%s: %s", path, f)
++	}
++	gp := strings.TrimSuffix(path, ".lua") + suffix
++	if *update {
++		if err := os.WriteFile(gp, out, 0o644); err != nil {
++			t.Fatal(err)
++		}
++		return
++	}
++	want, err := os.ReadFile(gp)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if !bytes.Equal(out, want) {
++		t.Errorf("%s: differs from %s:\n%s", path, gp, firstDiff(want, out))
++	}
++}
+--- a/format/layout.go
++++ b/format/layout.go
+@@ -0,0 +1,567 @@
++package format
++
++// The layout: a document of texts, line breaks, groups and indentation,
++// laid out within a width as Wadler's "prettier printer" and Oppen's
++// algorithm do, in the variant of JavaScript's Prettier (a stack machine
++// that measures a group in flat mode against the rest of the line). The
++// printer builds the document from the tree; render lays it out.
++
++import (
++	"unicode/utf8"
++)
++
++// doc is a document: text, num, space, *concat, *group, *nest, line,
++// blank, *ifBreak, *choice, *comment, or nil (nothing).
++type doc any
++
++// text is a piece of text; a long string or comment may hold line breaks.
++type text string
++
++// num is a numeral: text after which a "." or a name character needs a
++// space.
++type num string
++
++// concat is a sequence of documents; hard is set if one of them is.
++type concat struct {
++	parts []doc
++	hard  bool
++}
++
++// group is laid out flat (its lines as spaces or nothing) if it fits in
++// the rest of the line, else broken (its lines as line breaks, its groups
++// laid out in turn). A hard group is always broken: it holds a hard line
++// break, or a comment that ends a line.
++type group struct {
++	d    doc
++	hard bool
++	// strict: flat only if it fits flat whole, a call's arguments
++	// hugging their last one included (a block on one line)
++	strict bool
++}
++
++// nest indents the lines in it one level more.
++type nest struct {
++	d    doc
++	hard bool
++}
++
++// line is a line break of its group.
++type line uint8
++
++const (
++	lineSpace line = iota // a space if flat
++	lineSoft              // nothing if flat
++	lineHard              // always a line break
++)
++
++// blank asks for an empty line before the next text, if its group is
++// broken: a blank line of the source, kept.
++type blank struct{}
++
++// ifBreak is broken or flat, as its group is laid out.
++type ifBreak struct {
++	broken, flat doc
++}
++
++// choice is a call's arguments, laid out as the first of its options that
++// fits (Prettier's conditional group of the arguments): expanded flat,
++// else hug broken up to its first line break, else expanded broken.
++// Unlike a group, it does not break the groups around it when expanded
++// holds a hard line break: hug, which then fits up to its line break, may
++// open on their line.
++type choice struct {
++	expanded doc
++	hugs     []doc
++}
++
++// flat lays out its document flat (its hard line breaks broken).
++type flat struct {
++	d doc
++}
++
++// comment is a comment as written (raw), short or long. It goes on its
++// own line unless sameLine, after an empty line if blank, and the next
++// text goes on a new line if short or nlAfter.
++type comment struct {
++	raw                           string
++	short, sameLine, blank, nlAft bool
++}
++
++func (c *comment) isHard() bool { return c.short || c.nlAft || !c.sameLine }
++
++// isHard reports whether d holds a hard line break.
++func isHard(d doc) bool {
++	switch d := d.(type) {
++	case *concat:
++		return d.hard
++	case *group:
++		return d.hard
++	case *nest:
++		return d.hard
++	case *flat:
++		return isHard(d.d)
++	case line:
++		return d == lineHard
++	case *comment:
++		return d.isHard()
++	case *ifBreak:
++		return isHard(d.broken) || isHard(d.flat)
++	}
++	return false
++}
++
++// cat concatenates documents, leaving out nils and flattening concats.
++func cat(ds ...doc) doc {
++	n, last := 0, doc(nil)
++	for _, d := range ds {
++		if d != nil {
++			n++
++			last = d
++		}
++	}
++	switch n {
++	case 0:
++		return nil
++	case 1:
++		return last
++	}
++	var c *concat
++	if n <= 4 { // the concat and its parts in one allocation
++		s := &struct {
++			c concat
++			a [4]doc
++		}{}
++		c = &s.c
++		c.parts = s.a[:0]
++	} else {
++		c = &concat{parts: make([]doc, 0, n)}
++	}
++	for _, d := range ds {
++		if d == nil {
++			continue
++		}
++		c.parts = append(c.parts, d)
++		if !c.hard && isHard(d) {
++			c.hard = true
++		}
++	}
++	return c
++}
++
++// catList is cat of a list it may keep.
++func catList(ds []doc) doc {
++	return cat(ds...)
++}
++
++func mkGroup(d doc) doc {
++	if d == nil {
++		return nil
++	}
++	return &group{d: d, hard: isHard(d)}
++}
++
++// forceBreak returns d with its group always broken: d, or the last part
++// of d (a function's body).
++func forceBreak(d doc) doc {
++	switch g := d.(type) {
++	case *group:
++		return &group{d: g.d, hard: true}
++	case *concat:
++		if len(g.parts) > 0 {
++			if last, ok := g.parts[len(g.parts)-1].(*group); ok {
++				parts := append(append([]doc(nil), g.parts[:len(g.parts)-1]...), &group{d: last.d, hard: true})
++				return &concat{parts: parts, hard: true}
++			}
++		}
++	}
++	return d
++}
++
++func mkNest(d doc) doc {
++	if d == nil {
++		return nil
++	}
++	return &nest{d: d, hard: isHard(d)}
++}
++
++// mode is how a group is laid out.
++type mode uint8
++
++const (
++	modeBreak mode = iota
++	modeFlat
++)
++
++type cmd struct {
++	ind  int
++	mode mode
++	d    doc
++}
++
++// mcmd is a command being measured, in a strict group or not, of what is
++// measured or of the rest of the line.
++type mcmd struct {
++	cmd
++	strict, rest bool
++}
++
++// renderer lays out a document.
++type renderer struct {
++	width    int
++	indent   string // one level of indentation
++	indentW  int    // its width
++	out      []byte
++	col      int  // the width of the current line
++	empty    bool // nothing on the current line yet (but the pending indentation)
++	ind      int  // the indentation of the current line, written with its first text
++	nlRun    int  // the line breaks at the end of out
++	needNL   bool // the next text goes on a new line (after a short comment)
++	nlInd    int  // its indentation, the comment's
++	needSp   bool // a space goes before the next text
++	wantBlk  bool // an empty line goes before the next text
++	lastNum  bool // the last text was a numeral
++	cmds     []cmd
++	fitStack []mcmd
++	// measuring is the depth of the measures under way
++	measuring int
++}
++
++func newRenderer(width int, indent string, indentW int, size int) *renderer {
++	return &renderer{width: width, indent: indent, indentW: indentW, empty: true, out: make([]byte, 0, size)}
++}
++
++func (r *renderer) newline(ind int) {
++	if r.nlRun < 2 {
++		r.out = append(r.out, '\n')
++		r.nlRun++
++	}
++	r.col = ind * r.indentW
++	r.ind = ind
++	r.empty = true
++	r.needNL = false
++	r.needSp = false
++}
++
++// glue reports whether a space must separate a and b so that they are not
++// read as one token: names and keywords, a numeral and a "." or a name
++// character, "-" and "-" (a comment), "[" and "[" or "=" (a long
++// bracket), "." and "." or a digit, and an operator and "=".
++func (r *renderer) glue(b byte) bool {
++	if len(r.out) == 0 {
++		return false
++	}
++	a := r.out[len(r.out)-1]
++	switch {
++	case isWordByte(a) && isWordByte(b):
++		return true
++	case r.lastNum && (b == '.' || isWordByte(b)):
++		return true
++	case a == '-' && b == '-':
++		return true
++	case a == '[' && (b == '[' || b == '='):
++		return true
++	case a == '.' && (b == '.' || isDigit(b)):
++		return true
++	case (a == '=' || a == '<' || a == '>' || a == '~') && b == '=':
++		return true
++	case a == ':' && b == ':':
++		return true
++	}
++	return false
++}
++
++func isWordByte(b byte) bool {
++	return b == '_' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b >= 0x80
++}
++
++func isDigit(b byte) bool { return b >= '0' && b <= '9' }
++
++// write writes a text at indentation ind.
++func (r *renderer) write(s string, ind int, isNum bool) {
++	if s == "" {
++		return
++	}
++	if r.needNL {
++		r.newline(r.nlInd)
++	}
++	if r.wantBlk {
++		if !r.empty {
++			r.newline(ind)
++		}
++		if r.nlRun < 2 && len(r.out) > 0 {
++			r.out = append(r.out, '\n')
++			r.nlRun++
++		}
++		r.wantBlk = false
++	}
++	if r.empty {
++		for i := 0; i < r.ind; i++ {
++			r.out = append(r.out, r.indent...)
++		}
++		r.empty = false
++	} else if r.needSp || r.glue(s[0]) {
++		r.out = append(r.out, ' ')
++		r.col++
++	}
++	r.needSp = false
++	r.out = append(r.out, s...)
++	r.nlRun = 0
++	r.lastNum = isNum
++	if i := lastLineBreak(s); i >= 0 {
++		r.col = utf8.RuneCountInString(s[i+1:])
++	} else {
++		r.col += utf8.RuneCountInString(s)
++	}
++}
++
++func lastLineBreak(s string) int {
++	for i := len(s) - 1; i >= 0; i-- {
++		if s[i] == '\n' || s[i] == '\r' {
++			return i
++		}
++	}
++	return -1
++}
++
++func firstLineBreak(s string) int {
++	for i := 0; i < len(s); i++ {
++		if s[i] == '\n' || s[i] == '\r' {
++			return i
++		}
++	}
++	return -1
++}
++
++func (r *renderer) writeComment(c *comment, ind int) {
++	if !c.sameLine || r.needNL {
++		if !r.empty {
++			r.newline(ind)
++		}
++		if c.blank {
++			r.wantBlk = true
++		}
++	} else if !r.empty {
++		r.needSp = true
++	}
++	r.write(c.raw, ind, false)
++	if c.short || c.nlAft {
++		r.needNL, r.nlInd = true, ind
++	} else {
++		r.needSp = true
++	}
++}
++
++func (r *renderer) push(ind int, m mode, d doc) {
++	r.cmds = append(r.cmds, cmd{ind, m, d})
++}
++
++// render lays out d.
++func (r *renderer) render(d doc) {
++	r.push(0, modeBreak, d)
++	for len(r.cmds) > 0 {
++		c := r.cmds[len(r.cmds)-1]
++		r.cmds = r.cmds[:len(r.cmds)-1]
++		switch d := c.d.(type) {
++		case nil:
++		case text:
++			r.write(string(d), c.ind, false)
++		case num:
++			r.write(string(d), c.ind, true)
++		case *concat:
++			for i := len(d.parts) - 1; i >= 0; i-- {
++				r.push(c.ind, c.mode, d.parts[i])
++			}
++		case *nest:
++			// flat, its lines are spaces: the line breaks in it are those
++			// of the arguments hugged, at the indentation of the line
++			if c.mode == modeFlat {
++				r.push(c.ind, c.mode, d.d)
++			} else {
++				r.push(c.ind+1, c.mode, d.d)
++			}
++		case *group:
++			switch {
++			case c.mode == modeFlat && !d.hard:
++				r.push(c.ind, modeFlat, d.d)
++			case !d.hard && r.fits(cmd{c.ind, modeFlat, d.d}, d.strict):
++				r.push(c.ind, modeFlat, d.d)
++			default:
++				r.push(c.ind, modeBreak, d.d)
++			}
++		case *choice:
++			switch {
++			case !isHard(d.expanded) && r.fits(cmd{c.ind, modeFlat, d.expanded}, false):
++				r.push(c.ind, modeFlat, d.expanded)
++			default:
++				chosen := d.expanded
++				for _, h := range d.hugs {
++					if r.fits(cmd{c.ind, modeFlat, h}, false) {
++						chosen = h
++						break
++					}
++				}
++				r.push(c.ind, modeBreak, chosen)
++			}
++		case *flat:
++			r.push(c.ind, modeFlat, d.d)
++		case *ifBreak:
++			if c.mode == modeBreak {
++				r.push(c.ind, c.mode, d.broken)
++			} else {
++				r.push(c.ind, c.mode, d.flat)
++			}
++		case line:
++			if c.mode == modeFlat && d != lineHard {
++				if r.needNL {
++					r.newline(r.nlInd)
++				} else if d == lineSpace {
++					r.needSp = true
++				}
++			} else {
++				r.newline(c.ind)
++			}
++		case blank:
++			if c.mode == modeBreak {
++				r.wantBlk = true
++			}
++		case space:
++			if !r.empty {
++				r.needSp = true
++			}
++		case *comment:
++			r.writeComment(d, c.ind)
++		default:
++			panic("format: unknown document")
++		}
++	}
++}
++
++// fits reports whether next fits in the rest of the line, followed by
++// the commands on the stack up to their first line break; strict: next
++// fits flat whole.
++func (r *renderer) fits(next cmd, strict bool) bool {
++	width := r.width - r.col
++	if r.needNL {
++		width = r.width - r.nlInd*r.indentW
++	} else if r.needSp {
++		width--
++	}
++	return r.measure(next, width, true, strict)
++}
++
++// fitsLine reports whether c fits in width up to its first line break.
++func (r *renderer) fitsLine(c cmd, width int) bool {
++	return r.measure(c, width, false, false)
++}
++
++// measure reports whether next fits in width, followed (withRest) by the
++// commands on the stack, up to the first line break; without the rest,
++// next must have a line break. In a strict group (next if strict), the
++// arguments of a call fit only flat.
++func (r *renderer) measure(next cmd, width int, withRest, strict bool) bool {
++	var st []mcmd
++	if r.measuring == 0 {
++		st = r.fitStack[:0]
++	}
++	r.measuring++
++	defer func() {
++		r.measuring--
++		if r.measuring == 0 {
++			r.fitStack = st[:0]
++		}
++	}()
++	st = append(st, mcmd{next, strict, false})
++	rest := 0
++	if withRest {
++		rest = len(r.cmds)
++	}
++	for width >= 0 {
++		if len(st) == 0 {
++			if rest == 0 {
++				return withRest
++			}
++			rest--
++			st = append(st, mcmd{r.cmds[rest], false, true})
++			continue
++		}
++		mc := st[len(st)-1]
++		st = st[:len(st)-1]
++		c, strict, inRest := mc.cmd, mc.strict, mc.rest
++		switch d := c.d.(type) {
++		case nil:
++		case text:
++			if i := firstLineBreak(string(d)); i >= 0 {
++				return width-utf8.RuneCountInString(string(d[:i])) >= 0
++			}
++			width -= utf8.RuneCountInString(string(d))
++		case num:
++			width -= len(d)
++		case *concat:
++			for i := len(d.parts) - 1; i >= 0; i-- {
++				st = append(st, mcmd{cmd{c.ind, c.mode, d.parts[i]}, strict, inRest})
++			}
++		case *nest:
++			st = append(st, mcmd{cmd{c.ind + 1, c.mode, d.d}, strict, inRest})
++		case *group:
++			if strict && d.hard {
++				return false
++			}
++			// a group of the rest of the line is measured up to its
++			// first line break, a group of next flat
++			m := modeFlat
++			if inRest {
++				m = c.mode
++			}
++			if d.hard {
++				m = modeBreak
++			}
++			st = append(st, mcmd{cmd{c.ind, m, d.d}, strict || d.strict && m == modeFlat, inRest})
++		case *choice:
++			// the arguments fit if hug fits up to its line break, as it
++			// is then laid out (render), or if expanded does
++			// (expanded broken breaks a group being laid flat)
++			if !strict {
++				for _, h := range d.hugs {
++					if r.fitsLine(cmd{c.ind, modeFlat, h}, width) {
++						return true
++					}
++				}
++			}
++			if isHard(d.expanded) && (strict || c.mode == modeFlat) {
++				return false
++			}
++			st = append(st, mcmd{cmd{c.ind, c.mode, d.expanded}, strict, inRest})
++		case *flat:
++			st = append(st, mcmd{cmd{c.ind, modeFlat, d.d}, strict, inRest})
++		case *ifBreak:
++			if c.mode == modeBreak {
++				st = append(st, mcmd{cmd{c.ind, c.mode, d.broken}, strict, inRest})
++			} else {
++				st = append(st, mcmd{cmd{c.ind, c.mode, d.flat}, strict, inRest})
++			}
++		case line:
++			if c.mode == modeBreak || d == lineHard {
++				return true
++			}
++			if d == lineSpace {
++				width--
++			}
++		case blank:
++		case space:
++			width--
++		case *comment:
++			if !d.sameLine {
++				return true
++			}
++			raw := d.raw
++			if i := firstLineBreak(raw); i >= 0 {
++				return width-1-utf8.RuneCountInString(raw[:i]) >= 0
++			}
++			width -= 1 + utf8.RuneCountInString(raw)
++			if d.short || d.nlAft {
++				return width >= 0
++			}
++		}
++	}
++	return false
++}
+--- a/format/literal.go
++++ b/format/literal.go
+@@ -0,0 +1,240 @@
++package format
++
++import (
++	"math"
++	"strconv"
++	"strings"
++	"unicode/utf8"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++var keywords = map[string]bool{
++	"and": true, "break": true, "do": true, "else": true, "elseif": true, "end": true,
++	"false": true, "for": true, "function": true, "if": true, "in": true, "local": true,
++	"nil": true, "not": true, "or": true, "repeat": true, "return": true, "then": true,
++	"true": true, "until": true, "while": true,
++}
++
++// isName reports whether s is a name of the dialect: letters, digits and
++// "_", not starting with a digit, no keyword ("goto" is one under LuaJIT,
++// whose names may also hold bytes 128-255).
++func isName(s string, jit bool) bool {
++	if s == "" || isDigit(s[0]) {
++		return false
++	}
++	for i := 0; i < len(s); i++ {
++		c := s[i]
++		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || jit && c >= 0x80) {
++			return false
++		}
++	}
++	if keywords[s] {
++		return false
++	}
++	return !(jit && s == "goto")
++}
++
++// quoteString returns a short string literal holding the bytes of s:
++// double-quoted, or single-quoted if s holds a double quote and no single
++// one (or the reverse if single quotes are preferred). It escapes the
++// backslash, the quote, the control characters (as \a \b \f \n \r \t \v
++// or decimal \ddd), DEL and the bytes that are not part of valid UTF-8
++// (as \ddd); decimal escapes are written with three digits before a digit.
++// The escapes are those of Lua 5.1, which LuaJIT reads the same.
++func quoteString(s string, single bool) string {
++	q := byte('"')
++	if single {
++		q = '\''
++	}
++	if strings.IndexByte(s, q) >= 0 {
++		other := byte('\'')
++		if single {
++			other = '"'
++		}
++		if strings.IndexByte(s, other) < 0 {
++			q = other
++		}
++	}
++	var b strings.Builder
++	b.Grow(len(s) + 2)
++	b.WriteByte(q)
++	for i := 0; i < len(s); {
++		c := s[i]
++		switch {
++		case c == q || c == '\\':
++			b.WriteByte('\\')
++			b.WriteByte(c)
++			i++
++			continue
++		case c == '\a':
++			b.WriteString(`\a`)
++		case c == '\b':
++			b.WriteString(`\b`)
++		case c == '\f':
++			b.WriteString(`\f`)
++		case c == '\n':
++			b.WriteString(`\n`)
++		case c == '\r':
++			b.WriteString(`\r`)
++		case c == '\t':
++			b.WriteString(`\t`)
++		case c == '\v':
++			b.WriteString(`\v`)
++		case c < 0x20 || c == 0x7f:
++			writeDecimal(&b, c, i+1 < len(s) && isDigit(s[i+1]))
++		case c < 0x80:
++			b.WriteByte(c)
++		default:
++			r, n := utf8.DecodeRuneInString(s[i:])
++			if r == utf8.RuneError && n <= 1 {
++				writeDecimal(&b, c, i+1 < len(s) && isDigit(s[i+1]))
++				i++
++				continue
++			}
++			b.WriteString(s[i : i+n])
++			i += n
++			continue
++		}
++		i++
++	}
++	b.WriteByte(q)
++	return b.String()
++}
++
++func writeDecimal(b *strings.Builder, c byte, beforeDigit bool) {
++	b.WriteByte('\\')
++	d := strconv.Itoa(int(c))
++	if beforeDigit {
++		for i := len(d); i < 3; i++ {
++			b.WriteByte('0')
++		}
++	}
++	b.WriteString(d)
++}
++
++// requote returns the short string literal raw with the quote style
++// asked for (single or double quotes), if that needs no more escapes: its
++// escaped old quotes are unescaped, as they need not be escaped anymore.
++// It returns raw if raw is no short string literal, already has the quote,
++// or holds the new quote unescaped.
++func requote(raw string, single bool) string {
++	q := byte('"')
++	if single {
++		q = '\''
++	}
++	if len(raw) < 2 || raw[0] != '"' && raw[0] != '\'' || raw[0] == q {
++		return raw
++	}
++	old := raw[0]
++	body := raw[1 : len(raw)-1]
++	var b strings.Builder
++	b.Grow(len(raw))
++	b.WriteByte(q)
++	for i := 0; i < len(body); i++ {
++		c := body[i]
++		switch {
++		case c == q:
++			return raw
++		case c == '\\' && i+1 < len(body):
++			if body[i+1] == old {
++				b.WriteByte(old)
++			} else {
++				b.WriteByte(c)
++				b.WriteByte(body[i+1])
++			}
++			i++
++		default:
++			b.WriteByte(c)
++		}
++	}
++	b.WriteByte(q)
++	return b.String()
++}
++
++// numeral is a canonical numeral for the value a NumberExpr's Value
++// stands for (as the compiler converts it): Value itself if it is a
++// numeral of the dialect, else the shortest decimal numeral of the value,
++// 1e999 for the infinity. neg is set for a negative value (the numeral is
++// of its magnitude, to write after a unary minus) and nan for NaN (which
++// has no numeral: 0/0, which the compiler folds to NaN).
++func numeral(value string, jit bool) (s string, neg, nan bool) {
++	if isNumeral(value, jit) {
++		return value, false, false
++	}
++	v, ok := numberValue(value)
++	if !ok || math.IsNaN(v) {
++		return "", false, true
++	}
++	if math.Signbit(v) {
++		neg, v = true, -v
++	}
++	if math.IsInf(v, 0) {
++		return "1e999", neg, false
++	}
++	return strconv.FormatFloat(v, 'g', -1, 64), neg, false
++}
++
++// isNumeral reports whether s is one numeral token of the dialect that is
++// no LuaJIT cdata numeral.
++func isNumeral(s string, jit bool) bool {
++	if s == "" || !isDigit(s[0]) && !(s[0] == '.' && len(s) > 1 && isDigit(s[1])) {
++		return false
++	}
++	d := parse.Lua51
++	if jit {
++		d = parse.LuaJIT
++	}
++	toks, err := parse.Tokenize([]byte(s), "numeral", parse.Options{Dialect: d})
++	if err != nil || len(toks) != 2 || toks[0].Span().End != len(s) {
++		return false
++	}
++	if jit {
++		_, ok := parse.ScanNumberLuaJIT(s)
++		return ok
++	}
++	return true
++}
++
++// numberValue converts a numeral as the compiler does (C's strtod, with
++// spaces around it): decimal or hexadecimal, inf, nan.
++func numberValue(s string) (float64, bool) {
++	s = strings.Trim(s, " \t\n\v\f\r")
++	if i := strings.IndexByte(s, 0); i >= 0 {
++		s = s[:i]
++	}
++	neg := false
++	if s != "" && (s[0] == '-' || s[0] == '+') {
++		neg = s[0] == '-'
++		s = s[1:]
++	}
++	if s == "" {
++		return 0, false
++	}
++	var v float64
++	switch strings.ToLower(s) {
++	case "inf", "infinity":
++		v = math.Inf(1)
++	case "nan":
++		v = math.NaN()
++	default:
++		t := s
++		if len(t) > 1 && t[0] == '0' && t[1]|0x20 == 'x' && !strings.ContainsAny(t, "pP") {
++			t += "p0"
++		}
++		if strings.ContainsAny(t, "_") {
++			return 0, false
++		}
++		var err error
++		v, err = strconv.ParseFloat(t, 64)
++		if err != nil {
++			if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange {
++				return 0, false
++			}
++		}
++	}
++	if neg {
++		v = -v
++	}
++	return v, true
++}
+--- a/format/printer.go
++++ b/format/printer.go
+@@ -0,0 +1,1525 @@
++package format
++
++import (
++	"fmt"
++	"strconv"
++	"strings"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// printer builds the document of a tree. With a source (src and toks: the
++// tree was parsed from it, with its tokens), it keeps what the author chose
++// for the elements that have a span in it: the text of literals, the form
++// of keys and calls, the parentheses, the blank lines, one-line blocks and
++// broken tables. Without, or for an element without a span, it uses the
++// canonical forms. It prints the comments of cm with their elements.
++type printer struct {
++	opts  Options
++	jit   bool
++	src   []byte
++	toks  ast.Tokens
++	lines *ast.Lines
++
++	cm      CommentMap
++	done    map[*Comment]bool
++	emitted int
++	frames  []frame
++	// noBlank: the next comment opens a block, without an empty line
++	// before it
++	noBlank bool
++	depth   int
++}
++
++// frame is an element being printed: its inner comments not printed yet
++// and the number of its children printed.
++type frame struct {
++	el    ast.Element
++	inner []*Comment
++	n     int
++}
++
++type printError struct{ err error }
++
++func (p *printer) fail(format string, args ...any) {
++	panic(printError{fmt.Errorf("format: "+format, args...)})
++}
++
++const maxDepth = 10000
++
++func (p *printer) enter() {
++	p.depth++
++	if p.depth > maxDepth {
++		p.fail("tree too deep")
++	}
++}
++
++func (p *printer) leave() { p.depth-- }
++
++/* source */
++
++// fromSource reports whether el has a span in the printer's source.
++func (p *printer) fromSource(el ast.Element) bool {
++	if p.src == nil {
++		return false
++	}
++	s := el.Span()
++	return s != (ast.Span{}) && s.End <= len(p.src) && s.Start < s.End
++}
++
++// tokenAt returns the index of the token starting at off, or -1.
++func (p *printer) tokenAt(off int) int {
++	i := p.toks.At(off)
++	if i < 0 || p.toks[i].Span().Start != off {
++		return -1
++	}
++	return i
++}
++
++// kindAt returns the kind of the token starting at off, TokenInvalid if
++// none does.
++func (p *printer) kindAt(off int) ast.TokenKind {
++	if i := p.tokenAt(off); i >= 0 {
++		return p.toks[i].Kind
++	}
++	return ast.TokenInvalid
++}
++
++// raw returns the text of the token of the kind that the span of el is,
++// or "".
++func (p *printer) raw(el ast.Element, kind ast.TokenKind) string {
++	if !p.fromSource(el) {
++		return ""
++	}
++	s := el.Span()
++	i := p.tokenAt(s.Start)
++	if i < 0 || p.toks[i].Kind != kind || p.toks[i].Span() != s {
++		return ""
++	}
++	return string(p.src[s.Start:s.End])
++}
++
++// nextKind returns the kind of the first token of the grammar at or after
++// off.
++func (p *printer) nextKind(off int) ast.TokenKind {
++	i := p.toks.At(off)
++	if i < 0 {
++		return ast.TokenInvalid
++	}
++	for ; i < len(p.toks); i++ {
++		if !p.toks[i].Kind.IsTrivia() {
++			return p.toks[i].Kind
++		}
++	}
++	return ast.TokenInvalid
++}
++
++// prevKind returns the kind of the last token of the grammar before off.
++func (p *printer) prevKind(off int) ast.TokenKind {
++	i := p.toks.At(off)
++	if i < 0 {
++		return ast.TokenInvalid
++	}
++	for i--; i >= 0; i-- {
++		if !p.toks[i].Kind.IsTrivia() {
++			return p.toks[i].Kind
++		}
++	}
++	return ast.TokenInvalid
++}
++
++// blankBefore reports whether an empty line is right before el in the
++// source: two line breaks with only white space between them and el.
++func (p *printer) blankBefore(el ast.Element) bool {
++	if !p.fromSource(el) {
++		return false
++	}
++	i := p.tokenAt(outerSpan(el).Start)
++	if i < 0 {
++		return false
++	}
++	nl := 0
++	for i--; i >= 0; i-- {
++		switch p.toks[i].Kind {
++		case ast.TokenNewline:
++			nl++
++		case ast.TokenWhitespace:
++		default:
++			return nl >= 2
++		}
++	}
++	return false
++}
++
++// newlineAfter reports whether a line break follows the token starting at
++// off before the next token that is not white space.
++func (p *printer) newlineAfter(off int) bool {
++	i := p.tokenAt(off)
++	if i < 0 {
++		return false
++	}
++	for i++; i < len(p.toks); i++ {
++		switch p.toks[i].Kind {
++		case ast.TokenNewline:
++			return true
++		case ast.TokenWhitespace:
++		default:
++			return false
++		}
++	}
++	return false
++}
++
++// oneLine reports whether el, holding blocks, is on one line of the
++// source with at most one statement in each block: it is laid out on one
++// line if it fits.
++func (p *printer) oneLine(el ast.Element, blocks ...[]ast.Stmt) bool {
++	if !p.fromSource(el) {
++		return false
++	}
++	for _, b := range blocks {
++		if len(b) > 1 {
++			return false
++		}
++	}
++	s := el.Span()
++	return p.lines.Pos(s.Start).Line == p.lines.Pos(s.End).Line
++}
++
++/* comments */
++
++func (p *printer) commentDoc(c *Comment) doc {
++	if p.done[c] {
++		return nil
++	}
++	if p.done == nil {
++		p.done = map[*Comment]bool{}
++	}
++	p.done[c] = true
++	p.emitted++
++	raw := c.Raw
++	if raw == "" {
++		raw = commentRaw(c.Text, c.Long)
++	}
++	long := strings.HasPrefix(raw, "--") && ast.LongBracketLevel([]byte(raw[2:])) >= 0
++	d := &comment{raw: raw, short: !long, sameLine: c.SameLine, blank: c.BlankBefore && !p.noBlank, nlAft: c.NewlineAfter}
++	p.noBlank = false
++	return d
++}
++
++// commentRaw writes a comment of the text: short if it fits on a line,
++// else long, with a long bracket that the text does not close.
++func commentRaw(t string, long bool) string {
++	if !long && firstLineBreak(t) < 0 {
++		if ast.LongBracketLevel([]byte(t)) >= 0 {
++			return "-- " + t
++		}
++		return "--" + t
++	}
++	level := 0
++	for strings.Contains(t+"]", "]"+strings.Repeat("=", level)+"]") {
++		level++
++	}
++	eq := strings.Repeat("=", level)
++	nl := ""
++	if t != "" && (t[0] == '\n' || t[0] == '\r') {
++		nl = "\n"
++	}
++	return "--[" + eq + "[" + nl + t + "]" + eq + "]"
++}
++
++// open starts printing el: it returns the inner comments of the element
++// being printed that go before el and el's leading comments, and makes
++// el the element being printed.
++func (p *printer) open(el ast.Element) doc {
++	if p.cm == nil {
++		return nil
++	}
++	var out []doc
++	if len(p.frames) > 0 {
++		f := &p.frames[len(p.frames)-1]
++		out = p.flush(f, out, func(c *Comment) bool { return c.Index <= f.n })
++	}
++	var inner []*Comment
++	for _, c := range p.cm[el] {
++		switch c.Place {
++		case Leading:
++			if d := p.commentDoc(c); d != nil {
++				out = append(out, d)
++			}
++		case Inner:
++			if !p.done[c] {
++				inner = append(inner, c)
++			}
++		}
++	}
++	p.frames = append(p.frames, frame{el: el, inner: inner})
++	return catList(out)
++}
++
++// close ends printing an element: it returns its inner comments not
++// printed yet and its trailing comments.
++func (p *printer) close() (rest, trail doc) {
++	if p.cm == nil {
++		return nil, nil
++	}
++	f := &p.frames[len(p.frames)-1]
++	r := p.flush(f, nil, func(*Comment) bool { return true })
++	el := f.el
++	p.frames = p.frames[:len(p.frames)-1]
++	if len(p.frames) > 0 {
++		p.frames[len(p.frames)-1].n++
++	}
++	var t []doc
++	for _, c := range p.cm[el] {
++		if c.Place == Trailing {
++			if d := p.commentDoc(c); d != nil {
++				t = append(t, d)
++			}
++		}
++	}
++	return catList(r), catList(t)
++}
++
++// flush appends to out the docs of the first inner comments of f that ok
++// accepts.
++func (p *printer) flush(f *frame, out []doc, ok func(*Comment) bool) []doc {
++	i := 0
++	for i < len(f.inner) && ok(f.inner[i]) {
++		if d := p.commentDoc(f.inner[i]); d != nil {
++			out = append(out, d)
++		}
++		i++
++	}
++	f.inner = f.inner[i:]
++	return out
++}
++
++// before returns the inner comments of the element being printed that go
++// before its own token of one of the kinds.
++func (p *printer) before(kinds ...ast.TokenKind) doc {
++	return catList(p.beforeDocs(kinds...))
++}
++
++// beforeDocs is before, a list.
++func (p *printer) beforeDocs(kinds ...ast.TokenKind) []doc {
++	if p.cm == nil || len(p.frames) == 0 {
++		return nil
++	}
++	f := &p.frames[len(p.frames)-1]
++	if len(f.inner) == 0 {
++		return nil
++	}
++	return p.flush(f, nil, func(c *Comment) bool {
++		if c.Index < f.n {
++			return true
++		}
++		if c.Index > f.n {
++			return false
++		}
++		for _, k := range kinds {
++			if c.Next == k {
++				return true
++			}
++		}
++		return false
++	})
++}
++
++// tok is an own token of the element being printed, after the inner
++// comments that go before it.
++func (p *printer) tok(kind ast.TokenKind, s string) doc {
++	return cat(p.before(kind), text(s))
++}
++
++// dangling returns the inner comments of the element being printed that
++// go in an empty list or at the end of a block: all those not printed yet
++// that are after its children printed.
++func (p *printer) dangling() []doc {
++	if p.cm == nil || len(p.frames) == 0 {
++		return nil
++	}
++	f := &p.frames[len(p.frames)-1]
++	return p.flush(f, nil, func(c *Comment) bool { return c.Index <= f.n })
++}
++
++// hasLeading reports whether el has leading comments.
++func (p *printer) hasLeading(el ast.Element) bool {
++	for _, c := range p.cm[el] {
++		if c.Place == Leading {
++			return true
++		}
++	}
++	return false
++}
++
++// sameLineLead takes the leading comments of el that are on the line of
++// the token before it: to print them on the line of the token that opens
++// a block or a list.
++func (p *printer) sameLineLead(el ast.Element) doc {
++	if p.cm == nil || isNil(el) {
++		return nil
++	}
++	var out []doc
++	for _, c := range p.cm[el] {
++		if c.Place != Leading || !c.SameLine || !(c.NewlineAfter || !c.Long) {
++			break
++		}
++		if d := p.commentDoc(c); d != nil {
++			out = append(out, d)
++		}
++	}
++	return catList(out)
++}
++
++// dangle lays out comments in an empty list: those on the line of open
++// after it, the others indented on lines of their own.
++func dangle(open doc, ds []doc, closeTok doc) doc {
++	pre, rest := splitSameLine(noBlankFirst(ds))
++	if len(rest) == 0 {
++		if isHard(pre) {
++			return cat(open, pre, lineHard, closeTok)
++		}
++		return cat(open, pre, closeTok)
++	}
++	return cat(open, pre, mkNest(cat(lineHard, catList(rest))), lineHard, closeTok)
++}
++
++// noBlankFirst drops the empty line before the first of the comments
++// opening a block or a list.
++func noBlankFirst(ds []doc) []doc {
++	for _, d := range ds {
++		if c, ok := d.(*comment); ok {
++			c.blank = false
++			break
++		}
++	}
++	return ds
++}
++
++// splitSameLine returns the docs of the comments at the start of ds that
++// are on the line of the token before them, and the rest.
++func splitSameLine(ds []doc) (doc, []doc) {
++	i := 0
++	for i < len(ds) {
++		c, ok := ds[i].(*comment)
++		if !ok || !c.sameLine {
++			break
++		}
++		i++
++	}
++	return catList(ds[:i]), ds[i:]
++}
++
++/* expressions */
++
++// precedence levels: an operand needs parentheses if its level is lower
++// than its context's
++const (
++	precOr     = 1
++	precAnd    = 2
++	precCmp    = 3
++	precConcat = 4 // right associative
++	precAdd    = 5
++	precMul    = 6
++	precUnary  = 7
++	precPow    = 8 // right associative; its right operand may be unary
++	precSimple = 9 // literals, tables, functions, "..."
++	precPrefix = 10
++)
++
++func (p *printer) prec(e ast.Expr) int {
++	switch e := e.(type) {
++	case *ast.LogicalOpExpr:
++		if e.Operator == "or" {
++			return precOr
++		}
++		return precAnd
++	case *ast.RelationalOpExpr:
++		return precCmp
++	case *ast.StringConcatOpExpr:
++		return precConcat
++	case *ast.ArithmeticOpExpr:
++		switch e.Operator {
++		case "+", "-":
++			return precAdd
++		case "^":
++			return precPow
++		}
++		return precMul
++	case *ast.UnaryMinusOpExpr, *ast.UnaryNotOpExpr, *ast.UnaryLenOpExpr:
++		return precUnary
++	case *ast.NumberExpr:
++		if p.raw(e, ast.TokenNumber) != "" {
++			return precSimple
++		}
++		_, neg, nan := numeral(e.Value, p.jit)
++		switch {
++		case nan:
++			return precMul
++		case neg:
++			return precUnary
++		}
++	case *ast.IdentExpr, *ast.AttrGetExpr, *ast.FuncCallExpr:
++		return precPrefix
++	}
++	return precSimple
++}
++
++func adjustRet(e ast.Expr) bool {
++	switch e := e.(type) {
++	case *ast.FuncCallExpr:
++		return e.AdjustRet
++	case *ast.Comma3Expr:
++		return e.AdjustRet
++	}
++	return false
++}
++
++// parenCount is the number of parentheses around e in a context of
++// precedence min: those of the source, or one if needed, by precedence
++// or, the last of a list (multi), for a call or "..." truncated to one
++// value.
++func (p *printer) parenCount(e ast.Expr, min int, multi bool) int {
++	need := p.prec(e) < min || multi && adjustRet(e)
++	n := 0
++	if ps := e.Parens(); ps.Count > 0 && p.fromSource(e) && p.kindAt(ps.Span.Start) == ast.TokenLParen {
++		n = ps.Count
++	}
++	if need && n == 0 {
++		n = 1
++	}
++	return n
++}
++
++// expr prints an expression in a context of precedence min, with its
++// comments.
++func (p *printer) expr(e ast.Expr, min int, multi bool) doc {
++	d, t := p.exprT(e, min, multi, false)
++	return cat(d, t)
++}
++
++// exprT prints an expression and returns its trailing comments apart;
++// bare prints it without parentheses (an assignment target, a call
++// statement).
++func (p *printer) exprT(e ast.Expr, min int, multi, bare bool) (doc, doc) {
++	if isNil(e) {
++		p.fail("missing expression")
++	}
++	p.enter()
++	defer p.leave()
++	lead := p.open(e)
++	n := 0
++	if !bare {
++		n = p.parenCount(e, min, multi)
++	}
++	body := p.exprBody(e)
++	if n > 0 {
++		body = cat(text(strings.Repeat("(", n)), body, text(strings.Repeat(")", n)))
++	}
++	rest, trail := p.close()
++	return cat(lead, body, rest), trail
++}
++
++func (p *printer) exprBody(e ast.Expr) doc {
++	switch e := e.(type) {
++	case *ast.NilExpr:
++		return text("nil")
++	case *ast.TrueExpr:
++		return text("true")
++	case *ast.FalseExpr:
++		return text("false")
++	case *ast.Comma3Expr:
++		return text("...")
++	case *ast.IdentExpr:
++		p.checkName(e.Value)
++		return text(e.Value)
++	case *ast.NumberExpr:
++		if r := p.raw(e, ast.TokenNumber); r != "" && p.sameNumber(r, e.Value) {
++			return num(r)
++		}
++		s, neg, nan := numeral(e.Value, p.jit)
++		switch {
++		case nan:
++			return text("0 / 0")
++		case neg:
++			return cat(text("-"), num(s))
++		}
++		return num(s)
++	case *ast.CdataNumberExpr:
++		if !p.jit {
++			p.fail("LuaJIT cdata numeral %s under Lua 5.1", e.Value)
++		}
++		if !isCdataNumeral(e.Value) {
++			p.fail("invalid cdata numeral %q", e.Value)
++		}
++		return num(e.Value)
++	case *ast.StringExpr:
++		return text(p.stringLit(e))
++	case *ast.TableExpr:
++		return p.table(e)
++	case *ast.FunctionExpr:
++		return cat(p.tok(ast.TokenFunction, "function"), p.funcBody(e))
++	case *ast.AttrGetExpr:
++		return p.index(e)
++	case *ast.FuncCallExpr:
++		return p.call(e)
++	case *ast.LogicalOpExpr, *ast.RelationalOpExpr, *ast.StringConcatOpExpr, *ast.ArithmeticOpExpr:
++		return p.binary(e)
++	case *ast.UnaryMinusOpExpr:
++		return cat(p.tok(ast.TokenMinus, "-"), p.expr(e.Expr, precUnary, false))
++	case *ast.UnaryNotOpExpr:
++		return cat(p.tok(ast.TokenNot, "not"), sp, p.expr(e.Expr, precUnary, false))
++	case *ast.UnaryLenOpExpr:
++		return cat(p.tok(ast.TokenHash, "#"), p.expr(e.Expr, precUnary, false))
++	}
++	p.fail("unknown expression %T", e)
++	return nil
++}
++
++func (p *printer) checkName(s string) {
++	if !isName(s, p.jit) {
++		p.fail("%q is no name", s)
++	}
++}
++
++func isCdataNumeral(s string) bool {
++	toks, err := parse.Tokenize([]byte(s), "numeral", parse.Options{Dialect: parse.LuaJIT})
++	return err == nil && len(toks) == 2 && toks[0].Kind == ast.TokenNumber && toks[0].Span().End == len(s)
++}
++
++// sameNumber reports whether the numeral raw has the value value, as the
++// parser of the dialect gives it.
++func (p *printer) sameNumber(raw, value string) bool {
++	if !p.jit {
++		// a NUL may end a Lua 5.1 numeral, which converts up to it
++		if i := strings.IndexByte(raw, 0); i >= 0 {
++			raw = raw[:i]
++		}
++		return raw == value
++	}
++	v, ok := parse.ScanNumberLuaJIT(raw)
++	return ok && strconv.FormatFloat(v, 'g', -1, 64) == value
++}
++
++// stringLit returns the literal of a string: as written, its quotes
++// normalized if asked, if it is the literal of the value; else quoted.
++func (p *printer) stringLit(e *ast.StringExpr) string {
++	if r := p.raw(e, ast.TokenString); r != "" && p.sameString(r, e.Value) {
++		switch p.opts.Quotes {
++		case QuotesDouble:
++			return requote(r, false)
++		case QuotesSingle:
++			return requote(r, true)
++		}
++		return r
++	}
++	return quoteString(e.Value, p.opts.Quotes == QuotesSingle)
++}
++
++// sameString reports whether the literal raw reads as value.
++func (p *printer) sameString(raw, value string) bool {
++	if raw[0] == '[' {
++		level := ast.LongBracketLevel([]byte(raw))
++		t := raw[level+2 : len(raw)-level-2]
++		if len(t) > 0 && (t[0] == '\n' || t[0] == '\r') {
++			if len(t) > 1 && (t[1] == '\n' || t[1] == '\r') && t[1] != t[0] {
++				t = t[2:]
++			} else {
++				t = t[1:]
++			}
++		}
++		return normalizeNewlines(t) == value
++	}
++	body := raw[1 : len(raw)-1]
++	if strings.IndexByte(body, '\\') < 0 {
++		return body == value
++	}
++	return decodeString(raw, p.jit) == value
++}
++
++// decodeString returns the value of a short string literal with escapes,
++// as the parser reads it, or "\xff\xfe" (no value the check compares with
++// equal for such a literal... see sameString) if it does not parse.
++func decodeString(raw string, jit bool) string {
++	d := parse.Lua51
++	if jit {
++		d = parse.LuaJIT
++	}
++	stmts, err := parse.ParseBytes([]byte("return "+raw), "string", d)
++	if err != nil || len(stmts) != 1 {
++		return "\x00invalid"
++	}
++	r, ok := stmts[0].(*ast.ReturnStmt)
++	if !ok || len(r.Exprs) != 1 {
++		return "\x00invalid"
++	}
++	s, ok := r.Exprs[0].(*ast.StringExpr)
++	if !ok {
++		return "\x00invalid"
++	}
++	return s.Value
++}
++
++// keyIsName reports whether the key of an index or a field is printed as
++// a name: as written in the source, else if it is a string that is a name.
++func (p *printer) keyIsName(key ast.Expr) bool {
++	s, ok := key.(*ast.StringExpr)
++	if !ok || !isName(s.Value, p.jit) {
++		return false
++	}
++	if p.fromSource(s) && s.Parens().Count == 0 {
++		return p.raw(s, ast.TokenName) == s.Value
++	}
++	return true
++}
++
++// bracketKey prints "[key]", "[ [[key]] ]" for a key starting with a long
++// bracket.
++func (p *printer) bracketKey(key ast.Expr) doc {
++	open := p.tok(ast.TokenLBracket, "[")
++	k := p.expr(key, 0, false)
++	if p.startsLong(key) {
++		return cat(open, sp, k, sp, p.tok(ast.TokenRBracket, "]"))
++	}
++	return cat(open, k, p.tok(ast.TokenRBracket, "]"))
++}
++
++// startsLong reports whether e is printed starting with a long string.
++func (p *printer) startsLong(e ast.Expr) bool {
++	for !isNil(e) && p.parenCount(e, 0, false) == 0 {
++		switch x := e.(type) {
++		case *ast.StringExpr:
++			return strings.HasPrefix(p.stringLit(x), "[")
++		case *ast.LogicalOpExpr:
++			e = x.Lhs
++		case *ast.RelationalOpExpr:
++			e = x.Lhs
++		case *ast.StringConcatOpExpr:
++			e = x.Lhs
++		case *ast.ArithmeticOpExpr:
++			e = x.Lhs
++		case *ast.AttrGetExpr:
++			e = x.Object
++		case *ast.FuncCallExpr:
++			if !isNil(x.Receiver) {
++				e = x.Receiver
++			} else {
++				e = x.Func
++			}
++		default:
++			return false
++		}
++	}
++	return false
++}
++
++// nameKey prints a key written as a name, with its comments.
++func (p *printer) nameKey(key ast.Expr) doc {
++	lead := p.open(key)
++	d := text(key.(*ast.StringExpr).Value)
++	rest, trail := p.close()
++	return cat(lead, d, rest, trail)
++}
++
++func (p *printer) index(e *ast.AttrGetExpr) doc {
++	obj := p.expr(e.Object, precPrefix, false)
++	if isNil(e.Key) {
++		p.fail("index without a key")
++	}
++	if p.keyIsName(e.Key) {
++		return cat(obj, p.tok(ast.TokenDot, "."), p.nameKey(e.Key))
++	}
++	return cat(obj, p.bracketKey(e.Key))
++}
++
++func (p *printer) call(e *ast.FuncCallExpr) doc {
++	var fn, fnTrail doc
++	if !isNil(e.Receiver) {
++		p.checkName(e.Method)
++		fn = cat(p.expr(e.Receiver, precPrefix, false), p.tok(ast.TokenColon, ":"), p.tok(ast.TokenName, e.Method))
++	} else {
++		if isNil(e.Func) {
++			p.fail("call without a function")
++		}
++		fn, fnTrail = p.exprT(e.Func, precPrefix, false, false)
++	}
++	return cat(fn, p.args(e, fnTrail))
++}
++
++// sugar reports whether a call is written f"s" or f{...} in the source.
++func (p *printer) sugar(e *ast.FuncCallExpr) bool {
++	if len(e.Args) != 1 || !p.fromSource(e) {
++		return false
++	}
++	a := e.Args[0]
++	switch a.(type) {
++	case *ast.StringExpr, *ast.TableExpr:
++	default:
++		return false
++	}
++	if !p.fromSource(a) || a.Parens().Count > 0 || a.Span().End != e.Span().End {
++		return false
++	}
++	k := p.kindAt(a.Span().Start)
++	if k != ast.TokenString && k != ast.TokenLBrace {
++		return false
++	}
++	return p.prevKind(a.Span().Start) != ast.TokenLParen
++}
++
++func (p *printer) args(e *ast.FuncCallExpr, fnTrail doc) doc {
++	if p.sugar(e) {
++		a := e.Args[0]
++		d := p.expr(a, 0, false)
++		if _, ok := a.(*ast.StringExpr); ok {
++			return cat(fnTrail, sp, d)
++		}
++		return cat(fnTrail, d)
++	}
++	// comments before the "(" go after it: a line break before it would
++	// make a new statement of the arguments
++	open := cat(text("("), p.before(ast.TokenLParen), fnTrail)
++	if len(e.Args) == 0 {
++		ds := p.dangling()
++		closeTok := p.tok(ast.TokenRParen, ")")
++		if len(ds) == 0 {
++			return cat(open, closeTok)
++		}
++		return dangle(open, ds, closeTok)
++	}
++	pre := p.sameLineLead(e.Args[0])
++	listComments := pre != nil
++	last := len(e.Args) - 1
++	items := make([]doc, 0, 4*len(e.Args))
++	docs := make([]doc, len(e.Args))
++	hard := 0 // the arguments holding a line break
++	for i, a := range e.Args {
++		if i > 0 {
++			items = append(items, lineSpace)
++		}
++		d, t := p.exprT(a, 0, i == last, false)
++		docs[i] = d
++		if isHard(d) {
++			hard++
++		}
++		items = append(items, d)
++		if i < last {
++			c := p.before(ast.TokenComma)
++			items = append(items, c, text(","))
++			listComments = listComments || c != nil
++		}
++		items = append(items, t)
++		listComments = listComments || t != nil || p.hasLeading(a)
++	}
++	c := p.before(ast.TokenRParen)
++	listComments = listComments || c != nil
++	closeTok := cat(c, text(")"))
++	expanded := mkGroup(cat(open, pre, mkNest(cat(lineSoft, catList(items))), lineSoft, closeTok))
++	if listComments {
++		return expanded // comments between the arguments: one a line
++	}
++	// the last argument opens on the line of the call, f(a, function()
++	// ... end), or the first, f(function() ... end, a), the others flat
++	ch := &choice{expanded: expanded}
++	if p.huggable(e.Args[last]) && (hard == 0 || hard == 1 && isHard(docs[last])) {
++		ch.hugs = append(ch.hugs, hugArgs(open, docs, last, closeTok))
++	}
++	if last > 0 && p.huggable(e.Args[0]) && isFunction(e.Args[0]) && (hard == 0 || hard == 1 && isHard(docs[0])) {
++		ch.hugs = append(ch.hugs, hugArgs(open, docs, 0, closeTok))
++	}
++	if len(ch.hugs) == 0 {
++		return expanded
++	}
++	return ch
++}
++
++// hugArgs lays out arguments with the one hugged broken, the others flat.
++func hugArgs(open doc, docs []doc, hugged int, closeTok doc) doc {
++	hug := make([]doc, 0, 3*len(docs)+2)
++	hug = append(hug, open)
++	for i, d := range docs {
++		if i > 0 {
++			hug = append(hug, text(","), sp)
++		}
++		if i == hugged {
++			hug = append(hug, forceBreak(d))
++		} else {
++			hug = append(hug, &flat{d})
++		}
++	}
++	hug = append(hug, closeTok)
++	return catList(hug)
++}
++
++func isFunction(e ast.Expr) bool {
++	_, ok := e.(*ast.FunctionExpr)
++	return ok
++}
++
++// huggable reports whether the last argument of a call may open on the
++// line of the call and close on the line of its ")": a table or a
++// function without parentheses.
++func (p *printer) huggable(a ast.Expr) bool {
++	switch a.(type) {
++	case *ast.TableExpr, *ast.FunctionExpr:
++		return p.parenCount(a, 0, true) == 0
++	}
++	return false
++}
++
++// binary prints a chain of binary operators of one level.
++func (p *printer) binary(e ast.Expr) doc {
++	var parts []doc
++	p.chain(e, p.prec(e), &parts)
++	k := 0
++	for k < len(parts) && parts[k] != lineSpace {
++		k++
++	}
++	return mkGroup(cat(catList(parts[:k]), mkNest(catList(parts[k:]))))
++}
++
++func binaryParts(e ast.Expr) (op string, lhs, rhs ast.Expr, kind ast.TokenKind) {
++	switch e := e.(type) {
++	case *ast.LogicalOpExpr:
++		op, lhs, rhs = e.Operator, e.Lhs, e.Rhs
++	case *ast.RelationalOpExpr:
++		op, lhs, rhs = e.Operator, e.Lhs, e.Rhs
++	case *ast.StringConcatOpExpr:
++		op, lhs, rhs = "..", e.Lhs, e.Rhs
++	case *ast.ArithmeticOpExpr:
++		op, lhs, rhs = e.Operator, e.Lhs, e.Rhs
++	}
++	return op, lhs, rhs, opKinds[op]
++}
++
++var opKinds = map[string]ast.TokenKind{
++	"or": ast.TokenOr, "and": ast.TokenAnd, "==": ast.TokenEq, "~=": ast.TokenNe,
++	"<": ast.TokenLt, "<=": ast.TokenLe, ">": ast.TokenGt, ">=": ast.TokenGe,
++	"..": ast.TokenConcat, "+": ast.TokenPlus, "-": ast.TokenMinus, "*": ast.TokenStar,
++	"/": ast.TokenSlash, "%": ast.TokenPercent, "^": ast.TokenCaret,
++}
++
++func (p *printer) chainable(e ast.Expr, level int) bool {
++	switch e.(type) {
++	case *ast.LogicalOpExpr, *ast.RelationalOpExpr, *ast.StringConcatOpExpr, *ast.ArithmeticOpExpr:
++		return p.prec(e) == level && p.parenCount(e, level, false) == 0
++	}
++	return false
++}
++
++// chain appends the parts of the binary operation e of the level, and of
++// the operations of the level that are its operands on the side of its
++// associativity: the operands, each operator followed by a line.
++func (p *printer) chain(e ast.Expr, level int, parts *[]doc) {
++	op, lhs, rhs, kind := binaryParts(e)
++	if kind == ast.TokenInvalid {
++		p.fail("unknown operator %q", op)
++	}
++	if isNil(lhs) || isNil(rhs) {
++		p.fail("missing operand of %q", op)
++	}
++	switch e := e.(type) {
++	case *ast.LogicalOpExpr:
++		if op != "and" && op != "or" {
++			p.fail("unknown logical operator %q", op)
++		}
++	case *ast.RelationalOpExpr:
++		if p.prec(e) != precCmp || kind < ast.TokenEq || kind > ast.TokenGt {
++			p.fail("unknown relational operator %q", op)
++		}
++	case *ast.ArithmeticOpExpr:
++		if kind < ast.TokenPlus || kind > ast.TokenCaret {
++			p.fail("unknown arithmetic operator %q", op)
++		}
++	}
++	right := level == precConcat || level == precPow
++	lmin, rmin := level, level+1
++	if right {
++		lmin, rmin = level+1, level
++	}
++	if level == precPow {
++		lmin, rmin = precSimple, precUnary
++	}
++	sub := func(x ast.Expr, min int, chain bool) {
++		if chain && p.chainable(x, level) {
++			p.enter()
++			*parts = append(*parts, p.open(x))
++			p.chain(x, level, parts)
++			rest, trail := p.close()
++			*parts = append(*parts, rest, trail)
++			p.leave()
++			return
++		}
++		*parts = append(*parts, p.expr(x, min, false))
++	}
++	sub(lhs, lmin, !right)
++	*parts = append(*parts, sp, p.tok(kind, op), lineSpace)
++	sub(rhs, rmin, right)
++}
++
++/* tables and functions */
++
++func (p *printer) table(t *ast.TableExpr) doc {
++	open := p.tok(ast.TokenLBrace, "{")
++	if len(t.Fields) == 0 {
++		ds := p.dangling()
++		closeTok := p.tok(ast.TokenRBrace, "}")
++		if len(ds) == 0 {
++			return cat(open, closeTok)
++		}
++		return dangle(open, ds, closeTok)
++	}
++	broken := p.fromSource(t) && p.newlineAfter(t.Span().Start)
++	pre := p.sameLineLead(t.Fields[0])
++	last := len(t.Fields) - 1
++	items := make([]doc, 0, 4*len(t.Fields))
++	for i, f := range t.Fields {
++		if f == nil {
++			p.fail("nil table field")
++		}
++		if i > 0 {
++			items = append(items, lineSpace)
++		}
++		d, tr, bl := p.field(f, i == last && f.Key == nil, i == 0)
++		broken = broken || bl
++		items = append(items, d)
++		if i < last {
++			items = append(items, p.tok(ast.TokenComma, ","))
++		} else {
++			items = append(items, p.before(ast.TokenComma, ast.TokenSemicolon))
++			if p.opts.TrailingComma || p.trailingSep(t) {
++				items = append(items, &ifBreak{broken: text(",")})
++			}
++		}
++		items = append(items, tr)
++	}
++	closeTok := p.tok(ast.TokenRBrace, "}")
++	d := cat(open, pre, mkNest(cat(lineSoft, catList(items))), lineSoft, closeTok)
++	return &group{d: d, hard: broken || isHard(d)}
++}
++
++// trailingSep reports whether the table has a separator after its last
++// field in the source.
++func (p *printer) trailingSep(t *ast.TableExpr) bool {
++	if !p.fromSource(t) {
++		return false
++	}
++	f := t.Fields[len(t.Fields)-1]
++	if !p.fromSource(f) {
++		return false
++	}
++	k := p.nextKind(f.Span().End)
++	return k == ast.TokenComma || k == ast.TokenSemicolon
++}
++
++func (p *printer) field(f *ast.Field, multi, first bool) (doc, doc, bool) {
++	p.enter()
++	defer p.leave()
++	p.noBlank = first
++	lead := p.open(f)
++	p.noBlank = false
++	var bl doc
++	if (!first || lead != nil) && p.blankBefore(f) {
++		bl = blank{}
++	}
++	if isNil(f.Value) {
++		p.fail("table field without a value")
++	}
++	var body doc
++	switch {
++	case isNil(f.Key):
++		body = p.expr(f.Value, 0, multi)
++	case p.keyIsName(f.Key):
++		body = cat(p.nameKey(f.Key), sp, p.tok(ast.TokenAssign, "="), sp, p.expr(f.Value, 0, false))
++	default:
++		body = cat(p.bracketKey(f.Key), sp, p.tok(ast.TokenAssign, "="), sp, p.expr(f.Value, 0, false))
++	}
++	rest, trail := p.close()
++	return cat(lead, bl, body, rest), trail, bl != nil
++}
++
++// funcBody prints the parameters, the body and the "end" of a function.
++func (p *printer) funcBody(fn *ast.FunctionExpr) doc {
++	params := p.parList(fn.ParList)
++	one := p.oneLine(fn, fn.Stmts)
++	return p.maybeGroup(one, cat(params, p.block(fn.Stmts, one), p.tok(ast.TokenEnd, "end")))
++}
++
++// funcElem prints a function that is a child element (of a function
++// statement or a local function): its body, with its comments.
++func (p *printer) funcElem(fn *ast.FunctionExpr) doc {
++	if fn == nil {
++		p.fail("function statement without a function")
++	}
++	lead := p.open(fn)
++	body := p.funcBody(fn)
++	rest, trail := p.close()
++	return cat(lead, body, rest, trail)
++}
++
++func (p *printer) parList(pl *ast.ParList) doc {
++	if pl == nil {
++		return text("()")
++	}
++	lead := p.open(pl)
++	open := p.tok(ast.TokenLParen, "(")
++	var items []doc
++	for i, name := range pl.Names {
++		p.checkName(name)
++		if i > 0 {
++			items = append(items, p.tok(ast.TokenComma, ","), lineSpace)
++		}
++		items = append(items, p.tok(ast.TokenName, name))
++	}
++	if pl.HasVargs {
++		if len(pl.Names) > 0 {
++			items = append(items, p.tok(ast.TokenComma, ","), lineSpace)
++		}
++		items = append(items, p.tok(ast.TokenDots, "..."))
++	}
++	var d doc
++	if len(items) == 0 {
++		ds := p.dangling()
++		closeTok := p.tok(ast.TokenRParen, ")")
++		if len(ds) == 0 {
++			d = cat(open, closeTok)
++		} else {
++			d = dangle(open, ds, closeTok)
++		}
++	} else {
++		ds := p.dangling()
++		closeTok := p.tok(ast.TokenRParen, ")")
++		d = mkGroup(cat(open, mkNest(cat(lineSoft, catList(items), catList(ds))), lineSoft, closeTok))
++	}
++	rest, trail := p.close()
++	return cat(lead, d, rest, trail)
++}
++
++/* statements */
++
++// block prints the statements of a block that the element being printed
++// holds, and the comments at its end; oneLine lays it out on the line of
++// its keywords if it fits (the caller groups them).
++func (p *printer) block(list []ast.Stmt, oneLine bool) doc {
++	var pre doc
++	if len(list) > 0 {
++		pre = p.sameLineLead(list[0])
++	}
++	parts := p.stmtList(list)
++	ds := p.dangling()
++	if len(list) == 0 {
++		pre, ds = splitSameLine(noBlankFirst(ds))
++	}
++	parts = append(parts, ds...)
++	body := catList(parts)
++	if body == nil {
++		if pre != nil {
++			return cat(pre, lineHard)
++		}
++		return sp
++	}
++	sep := lineHard
++	if oneLine {
++		sep = lineSpace
++	}
++	return cat(pre, mkNest(cat(sep, body)), sep)
++}
++
++// stmtList prints a list of statements, one a line.
++func (p *printer) stmtList(list []ast.Stmt) []doc {
++	parts := make([]doc, 0, 4*len(list))
++	for i, s := range list {
++		if isNil(s) {
++			p.fail("nil statement")
++		}
++		if i > 0 {
++			parts = append(parts, lineHard)
++		}
++		p.noBlank = i == 0
++		lead := p.open(s)
++		p.noBlank = false
++		if (i > 0 || lead != nil) && p.blankBefore(s) {
++			lead = cat(lead, blank{})
++		}
++		body := p.stmt(s)
++		rest, trail := p.close()
++		parts = append(parts, lead, body, rest)
++		if i+1 < len(list) && p.startsWithParen(list[i+1]) || p.opts.KeepSemicolons && p.hasSemicolon(s) {
++			if c := p.before(ast.TokenSemicolon); c != nil {
++				parts = append(parts, trail, c, text(";"))
++			} else {
++				parts = append(parts, text(";"), trail)
++			}
++		} else {
++			parts = append(parts, trail)
++		}
++	}
++	return parts
++}
++
++// hasSemicolon reports whether a ";" follows s in the source.
++func (p *printer) hasSemicolon(s ast.Stmt) bool {
++	return p.fromSource(s) && p.nextKind(s.Span().End) == ast.TokenSemicolon
++}
++
++// startsWithParen reports whether a statement is printed starting with
++// "(": after another statement, it needs a ";" not to be read as the
++// arguments of a call ending that statement.
++func (p *printer) startsWithParen(s ast.Stmt) bool {
++	switch s := s.(type) {
++	case *ast.AssignStmt:
++		if len(s.Lhs) > 0 && !isNil(s.Lhs[0]) {
++			return p.leftParen(s.Lhs[0], true)
++		}
++	case *ast.FuncCallStmt:
++		if !isNil(s.Expr) {
++			return p.leftParen(s.Expr, true)
++		}
++	}
++	return false
++}
++
++func (p *printer) leftParen(e ast.Expr, bare bool) bool {
++	if !bare && p.parenCount(e, precPrefix, false) > 0 {
++		return true
++	}
++	switch e := e.(type) {
++	case *ast.AttrGetExpr:
++		return !isNil(e.Object) && p.leftParen(e.Object, false)
++	case *ast.FuncCallExpr:
++		if !isNil(e.Receiver) {
++			return p.leftParen(e.Receiver, false)
++		}
++		return !isNil(e.Func) && p.leftParen(e.Func, false)
++	}
++	return false
++}
++
++// exprList prints a list of expressions; its last one is multi.
++func (p *printer) exprList(list []ast.Expr, multi bool) doc {
++	if len(list) == 1 {
++		return p.expr(list[0], 0, multi)
++	}
++	items := make([]doc, 0, 3*len(list))
++	for i, e := range list {
++		if i > 0 {
++			items = append(items, lineSpace)
++		}
++		d, t := p.exprT(e, 0, multi && i == len(list)-1, false)
++		items = append(items, d)
++		if i < len(list)-1 {
++			items = append(items, p.tok(ast.TokenComma, ","))
++		}
++		items = append(items, t)
++	}
++	return mkGroup(mkNest(catList(items)))
++}
++
++// names prints the names of a local statement or a for loop.
++func (p *printer) names(list []string) doc {
++	if len(list) == 0 {
++		p.fail("no names")
++	}
++	items := make([]doc, 0, 3*len(list))
++	for i, n := range list {
++		p.checkName(n)
++		if i > 0 {
++			items = append(items, p.tok(ast.TokenComma, ","), sp)
++		}
++		items = append(items, p.tok(ast.TokenName, n))
++	}
++	return catList(items)
++}
++
++func (p *printer) target(e ast.Expr) (doc, doc) {
++	switch e.(type) {
++	case *ast.IdentExpr, *ast.AttrGetExpr:
++	default:
++		p.fail("cannot assign to %T", e)
++	}
++	return p.exprT(e, 0, false, true)
++}
++
++func (p *printer) stmt(s ast.Stmt) doc {
++	p.enter()
++	defer p.leave()
++	switch s := s.(type) {
++	case *ast.AssignStmt:
++		if len(s.Lhs) == 0 || len(s.Rhs) == 0 {
++			p.fail("assignment without targets or values")
++		}
++		var lhs []doc
++		for i, e := range s.Lhs {
++			if isNil(e) {
++				p.fail("missing assignment target")
++			}
++			if i > 0 {
++				lhs = append(lhs, lineSpace)
++			}
++			d, t := p.target(e)
++			lhs = append(lhs, d)
++			if i < len(s.Lhs)-1 {
++				lhs = append(lhs, p.tok(ast.TokenComma, ","))
++			}
++			lhs = append(lhs, t)
++		}
++		l := catList(lhs)
++		if len(s.Lhs) > 1 {
++			l = mkGroup(mkNest(l))
++		}
++		return cat(l, sp, p.tok(ast.TokenAssign, "="), sp, p.exprList(s.Rhs, true))
++	case *ast.LocalAssignStmt:
++		if s.IsFunction {
++			if len(s.Names) != 1 || len(s.Exprs) != 1 {
++				p.fail("local function with %d names and %d values", len(s.Names), len(s.Exprs))
++			}
++			fn, ok := s.Exprs[0].(*ast.FunctionExpr)
++			if !ok {
++				p.fail("local function of a %T", s.Exprs[0])
++			}
++			p.checkName(s.Names[0])
++			return cat(p.tok(ast.TokenLocal, "local"), sp, p.tok(ast.TokenFunction, "function"), sp,
++				p.tok(ast.TokenName, s.Names[0]), p.funcElem(fn))
++		}
++		d := cat(p.tok(ast.TokenLocal, "local"), sp, p.names(s.Names))
++		if len(s.Exprs) > 0 {
++			d = cat(d, sp, p.tok(ast.TokenAssign, "="), sp, p.exprList(s.Exprs, true))
++		}
++		return d
++	case *ast.FuncCallStmt:
++		if _, ok := s.Expr.(*ast.FuncCallExpr); !ok {
++			p.fail("call statement of a %T", s.Expr)
++		}
++		d, t := p.exprT(s.Expr, 0, false, true)
++		return cat(d, t)
++	case *ast.DoBlockStmt:
++		one := p.oneLine(s, s.Stmts)
++		return p.maybeGroup(one, cat(p.tok(ast.TokenDo, "do"), p.block(s.Stmts, one), p.tok(ast.TokenEnd, "end")))
++	case *ast.WhileStmt:
++		one := p.oneLine(s, s.Stmts)
++		return p.maybeGroup(one, cat(p.tok(ast.TokenWhile, "while"), sp, p.cond(s.Condition), sp,
++			p.tok(ast.TokenDo, "do"), p.block(s.Stmts, one), p.tok(ast.TokenEnd, "end")))
++	case *ast.RepeatStmt:
++		one := p.oneLine(s, s.Stmts)
++		return p.maybeGroup(one, cat(p.tok(ast.TokenRepeat, "repeat"), p.block(s.Stmts, one),
++			p.tok(ast.TokenUntil, "until"), sp, p.expr(s.Condition, 0, false)))
++	case *ast.IfStmt:
++		return p.ifStmt(s)
++	case *ast.NumberForStmt:
++		p.checkName(s.Name)
++		one := p.oneLine(s, s.Stmts)
++		d := cat(p.tok(ast.TokenFor, "for"), sp, p.tok(ast.TokenName, s.Name), sp, p.tok(ast.TokenAssign, "="), sp,
++			p.expr(s.Init, 0, false), p.tok(ast.TokenComma, ","), sp, p.expr(s.Limit, 0, false))
++		if !isNil(s.Step) {
++			d = cat(d, p.tok(ast.TokenComma, ","), sp, p.expr(s.Step, 0, false))
++		}
++		return p.maybeGroup(one, cat(d, sp, p.tok(ast.TokenDo, "do"), p.block(s.Stmts, one), p.tok(ast.TokenEnd, "end")))
++	case *ast.GenericForStmt:
++		if len(s.Exprs) == 0 {
++			p.fail("for loop without values")
++		}
++		one := p.oneLine(s, s.Stmts)
++		return p.maybeGroup(one, cat(p.tok(ast.TokenFor, "for"), sp, p.names(s.Names), sp, p.tok(ast.TokenIn, "in"), sp,
++			p.exprList(s.Exprs, true), sp, p.tok(ast.TokenDo, "do"), p.block(s.Stmts, one), p.tok(ast.TokenEnd, "end")))
++	case *ast.FuncDefStmt:
++		if s.Name == nil {
++			p.fail("function statement without a name")
++		}
++		return cat(p.tok(ast.TokenFunction, "function"), sp, p.funcName(s.Name), p.funcElem(s.Func))
++	case *ast.ReturnStmt:
++		if len(s.Exprs) == 0 {
++			return p.tok(ast.TokenReturn, "return")
++		}
++		return cat(p.tok(ast.TokenReturn, "return"), sp, p.exprList(s.Exprs, true))
++	case *ast.BreakStmt:
++		return p.tok(ast.TokenBreak, "break")
++	case *ast.LabelStmt:
++		if !p.jit {
++			p.fail("label under Lua 5.1")
++		}
++		p.checkName(s.Name)
++		return cat(p.tok(ast.TokenDoubleColon, "::"), p.tok(ast.TokenName, s.Name), p.tok(ast.TokenDoubleColon, "::"))
++	case *ast.GotoStmt:
++		if !p.jit {
++			p.fail("goto under Lua 5.1")
++		}
++		p.checkName(s.Label)
++		return cat(p.tok(ast.TokenGoto, "goto"), sp, p.tok(ast.TokenName, s.Label))
++	}
++	p.fail("unknown statement %T", s)
++	return nil
++}
++
++func (p *printer) maybeGroup(one bool, d doc) doc {
++	if one {
++		return &group{d: d, hard: isHard(d), strict: true}
++	}
++	return d
++}
++
++func (p *printer) funcName(n *ast.FuncName) doc {
++	lead := p.open(n)
++	var d doc
++	if !isNil(n.Receiver) {
++		p.checkName(n.Method)
++		d = cat(p.dotted(n.Receiver), p.tok(ast.TokenColon, ":"), p.tok(ast.TokenName, n.Method))
++	} else {
++		if isNil(n.Func) {
++			p.fail("function name without a name")
++		}
++		d = p.dotted(n.Func)
++	}
++	rest, trail := p.close()
++	return cat(lead, d, rest, trail)
++}
++
++// dotted prints a name of a function statement: a name and fields.
++func (p *printer) dotted(e ast.Expr) doc {
++	p.enter()
++	defer p.leave()
++	lead := p.open(e)
++	var d doc
++	switch e := e.(type) {
++	case *ast.IdentExpr:
++		p.checkName(e.Value)
++		d = text(e.Value)
++	case *ast.AttrGetExpr:
++		k, ok := e.Key.(*ast.StringExpr)
++		if !ok || !isName(k.Value, p.jit) || isNil(e.Object) {
++			p.fail("function name with a key that is no name")
++		}
++		d = cat(p.dotted(e.Object), p.tok(ast.TokenDot, "."), p.nameKey(k))
++	default:
++		p.fail("function name of a %T", e)
++	}
++	rest, trail := p.close()
++	return cat(lead, d, rest, trail)
++}
++
++func (p *printer) ifStmt(s *ast.IfStmt) doc {
++	one := p.ifOneLine(s)
++	multi := len(s.Else) > 0 || p.fromSource(s) && s.ElseSpan != (ast.Span{})
++	cur := s
++	var opened []*ast.IfStmt
++	out := []doc{p.tok(ast.TokenIf, "if"), sp, p.cond(s.Condition), sp, p.tok(ast.TokenThen, "then")}
++	bp := p.blockParts(cur.Then, multi)
++	for {
++		if next := p.elseif(cur); next != nil {
++			// the comments above the "elseif" go at the end of the block
++			bp.tail = append(bp.tail, p.open(next))
++			out = append(out, p.wrap(bp, one),
++				p.tok(ast.TokenElseif, "elseif"), sp, p.cond(next.Condition), sp, p.tok(ast.TokenThen, "then"))
++			bp = p.blockParts(next.Then, multi)
++			opened = append(opened, next)
++			cur = next
++			continue
++		}
++		if len(cur.Else) > 0 || p.fromSource(cur) && cur.ElseSpan != (ast.Span{}) && p.elseif(cur) == nil {
++			bp.tail = append(bp.tail, p.beforeDocs(ast.TokenElse)...)
++			out = append(out, p.wrap(bp, one), p.tok(ast.TokenElse, "else"))
++			bp = p.blockParts(cur.Else, multi)
++		}
++		break
++	}
++	for range opened {
++		bp.tail = append(bp.tail, p.dangling()...)
++		rest, trail := p.close()
++		bp.tail = append(bp.tail, rest, trail)
++	}
++	bp.tail = append(bp.tail, p.dangling()...)
++	out = append(out, p.wrap(bp, one), p.tok(ast.TokenEnd, "end"))
++	return p.maybeGroup(one, catList(out))
++}
++
++// ifOneLine reports whether an if statement is on one line of the source
++// with at most a statement in each of its blocks.
++func (p *printer) ifOneLine(s *ast.IfStmt) bool {
++	if !p.oneLine(s) {
++		return false
++	}
++	for cur := s; ; {
++		if len(cur.Then) > 1 {
++			return false
++		}
++		next := p.elseif(cur)
++		if next == nil {
++			return len(cur.Else) <= 1
++		}
++		cur = next
++	}
++}
++
++// elseif returns the IfStmt that is the "elseif" of s, or nil.
++func (p *printer) elseif(s *ast.IfStmt) *ast.IfStmt {
++	if len(s.Else) != 1 {
++		return nil
++	}
++	next, ok := s.Else[0].(*ast.IfStmt)
++	if !ok || next == nil {
++		return nil
++	}
++	if p.fromSource(next) && p.kindAt(next.Span().Start) == ast.TokenIf {
++		return nil // "else if ... end" as written
++	}
++	return next
++}
++
++// blockParts are the parts of a block whose end is not known yet.
++type blockParts struct {
++	empty bool
++	multi bool // one of several blocks
++	pre   doc
++	parts []doc
++	tail  []doc
++}
++
++func (p *printer) blockParts(list []ast.Stmt, multi bool) *blockParts {
++	bp := &blockParts{empty: len(list) == 0, multi: multi}
++	if len(list) > 0 {
++		bp.pre = p.sameLineLead(list[0])
++	}
++	bp.parts = p.stmtList(list)
++	return bp
++}
++
++func (p *printer) wrap(bp *blockParts, oneLine bool) doc {
++	pre := bp.pre
++	tail := bp.tail
++	if bp.empty {
++		var t []doc
++		for _, d := range tail {
++			if d != nil {
++				t = append(t, d)
++			}
++		}
++		pre, tail = splitSameLine(noBlankFirst(t))
++	}
++	body := cat(catList(bp.parts), catList(tail))
++	if body == nil {
++		switch {
++		case pre != nil:
++			return cat(pre, lineHard)
++		case !oneLine && bp.multi:
++			return lineHard // "else" on a line of its own
++		}
++		return sp
++	}
++	sep := lineHard
++	if oneLine {
++		sep = lineSpace
++	}
++	return cat(pre, mkNest(cat(sep, body)), sep)
++}
++
++// cond prints the condition of an if or a while statement: its lines
++// indented two levels, not to align with the block.
++func (p *printer) cond(e ast.Expr) doc {
++	return mkNest(p.expr(e, 0, false))
++}
++
++// space is a space between tokens, never written at the end of a line.
++type space struct{}
++
++var sp doc = space{}
+--- a/format/printer_test.go
++++ b/format/printer_test.go
+@@ -0,0 +1,345 @@
++package format_test
++
++import (
++	"bytes"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/format"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++)
++
++// Builders of trees without positions.
++
++func id(s string) *ast.IdentExpr   { return &ast.IdentExpr{Value: s} }
++func str(s string) *ast.StringExpr { return &ast.StringExpr{Value: s} }
++func numx(s string) *ast.NumberExpr {
++	return &ast.NumberExpr{Value: s}
++}
++func arith(op string, a, b ast.Expr) *ast.ArithmeticOpExpr {
++	return &ast.ArithmeticOpExpr{Operator: op, Lhs: a, Rhs: b}
++}
++func concatx(a, b ast.Expr) *ast.StringConcatOpExpr {
++	return &ast.StringConcatOpExpr{Lhs: a, Rhs: b}
++}
++func logic(op string, a, b ast.Expr) *ast.LogicalOpExpr {
++	return &ast.LogicalOpExpr{Operator: op, Lhs: a, Rhs: b}
++}
++func rel(op string, a, b ast.Expr) *ast.RelationalOpExpr {
++	return &ast.RelationalOpExpr{Operator: op, Lhs: a, Rhs: b}
++}
++func neg(e ast.Expr) *ast.UnaryMinusOpExpr { return &ast.UnaryMinusOpExpr{Expr: e} }
++func not(e ast.Expr) *ast.UnaryNotOpExpr   { return &ast.UnaryNotOpExpr{Expr: e} }
++func index(o, k ast.Expr) *ast.AttrGetExpr { return &ast.AttrGetExpr{Object: o, Key: k} }
++func call(f ast.Expr, args ...ast.Expr) *ast.FuncCallExpr {
++	return &ast.FuncCallExpr{Func: f, Args: args}
++}
++func method(r ast.Expr, m string, args ...ast.Expr) *ast.FuncCallExpr {
++	return &ast.FuncCallExpr{Receiver: r, Method: m, Args: args}
++}
++func adjusted(e ast.Expr) ast.Expr {
++	switch e := e.(type) {
++	case *ast.FuncCallExpr:
++		e.AdjustRet = true
++	case *ast.Comma3Expr:
++		e.AdjustRet = true
++	}
++	return e
++}
++func fn(stmts ...ast.Stmt) *ast.FunctionExpr {
++	return &ast.FunctionExpr{ParList: &ast.ParList{}, Stmts: stmts}
++}
++func varargFn(stmts ...ast.Stmt) *ast.FunctionExpr {
++	return &ast.FunctionExpr{ParList: &ast.ParList{HasVargs: true}, Stmts: stmts}
++}
++func ret(es ...ast.Expr) *ast.ReturnStmt { return &ast.ReturnStmt{Exprs: es} }
++func assign(l []ast.Expr, r ...ast.Expr) *ast.AssignStmt {
++	return &ast.AssignStmt{Lhs: l, Rhs: r}
++}
++func local(names []string, es ...ast.Expr) *ast.LocalAssignStmt {
++	return &ast.LocalAssignStmt{Names: names, Exprs: es}
++}
++func callStmt(c *ast.FuncCallExpr) *ast.FuncCallStmt { return &ast.FuncCallStmt{Expr: c} }
++func table(fields ...*ast.Field) *ast.TableExpr      { return &ast.TableExpr{Fields: fields} }
++func field(k, v ast.Expr) *ast.Field                 { return &ast.Field{Key: k, Value: v} }
++
++func printNode(t *testing.T, n ast.Element, d parse.Dialect) string {
++	t.Helper()
++	var b bytes.Buffer
++	if err := format.Node(&b, n, format.Options{Dialect: d}); err != nil {
++		t.Fatalf("print: %v", err)
++	}
++	return b.String()
++}
++
++// numeralsNormalized: the tree of the text may have other numerals (the
++// LuaJIT parser normalizes them, 0x10 to 16), so print differently.
++var numeralsNormalized bool
++
++// checkTree prints a statement list, checks the text, and that it parses
++// to a tree that prints the same and compiles as the tree does.
++func checkTree(t *testing.T, d parse.Dialect, want string, stmts ...ast.Stmt) {
++	t.Helper()
++	got := printNode(t, &ast.Chunk{Stmts: stmts}, d)
++	if got != want {
++		t.Errorf("%s: got\n%s\nwant\n%s", dialectName(d), got, want)
++		return
++	}
++	chunk, err := parse.ParseChunk([]byte(got), "test", parse.Options{Dialect: d})
++	if err != nil {
++		t.Errorf("%s: %q does not parse: %v", dialectName(d), got, err)
++		return
++	}
++	if again := printNode(t, chunk, d); again != got && !numeralsNormalized {
++		t.Errorf("%s: the tree of %q prints as %q", dialectName(d), got, again)
++	}
++	p1, err1 := luaCompile(stmts, d)
++	p2, err2 := luaCompile(chunk.Stmts, d)
++	if err1 != nil || err2 != nil {
++		t.Errorf("%s: compile: %v, %v", dialectName(d), err1, err2)
++		return
++	}
++	if diff := protoDiff(p1, p2, "main"); diff != "" {
++		t.Errorf("%s: %q compiles to other code than its tree: %s", dialectName(d), got, diff)
++	}
++}
++
++// checkExpr checks e printed in "x = e".
++func checkExpr(t *testing.T, want string, e ast.Expr) {
++	t.Helper()
++	for _, d := range dialects {
++		checkTree(t, d, "x = "+want+"\n", assign([]ast.Expr{id("x")}, e))
++	}
++}
++
++func TestPrintPrecedence(t *testing.T) {
++	a, b, c := id("a"), id("b"), id("c")
++	cases := []struct {
++		e    ast.Expr
++		want string
++	}{
++		{arith("*", arith("+", a, b), c), "(a + b) * c"},
++		{arith("+", a, arith("*", b, c)), "a + b * c"},
++		{arith("-", arith("-", a, b), c), "a - b - c"},
++		{arith("-", a, arith("-", b, c)), "a - (b - c)"},
++		{arith("/", a, arith("*", b, c)), "a / (b * c)"},
++		{concatx(a, concatx(b, c)), "a .. b .. c"},
++		{concatx(concatx(a, b), c), "(a .. b) .. c"},
++		{arith("^", a, arith("^", b, c)), "a ^ b ^ c"},
++		{arith("^", arith("^", a, b), c), "(a ^ b) ^ c"},
++		{neg(arith("^", a, numx("2"))), "-a ^ 2"},
++		{arith("^", neg(a), numx("2")), "(-a) ^ 2"},
++		{arith("^", numx("2"), neg(a)), "2 ^ -a"},
++		{arith("^", numx("2"), neg(arith("^", a, b))), "2 ^ -a ^ b"},
++		{arith("*", arith("^", a, neg(b)), c), "a ^ -b * c"},
++		{not(rel("==", a, b)), "not (a == b)"},
++		{rel("==", not(a), b), "not a == b"},
++		{rel("<", rel("<", a, b), c), "a < b < c"},
++		{rel("<", a, rel("<", b, c)), "a < (b < c)"},
++		{logic("or", logic("and", a, b), c), "a and b or c"},
++		{logic("and", a, logic("or", b, c)), "a and (b or c)"},
++		{logic("or", a, logic("or", b, c)), "a or (b or c)"},
++		{concatx(arith("+", a, b), c), "a + b .. c"},
++		{arith("+", a, concatx(b, c)), "a + (b .. c)"},
++		{neg(neg(a)), "- -a"},
++		{neg(numx("1")), "-1"},
++		{neg(neg(numx("1"))), "- -1"},
++		{arith("-", a, neg(b)), "a - -b"},
++		{&ast.UnaryLenOpExpr{Expr: neg(a)}, "#-a"},
++		{not(not(a)), "not not a"},
++	}
++	for _, c := range cases {
++		checkExpr(t, c.want, c.e)
++	}
++}
++
++func TestPrintPrefix(t *testing.T) {
++	a := id("a")
++	cases := []struct {
++		e    ast.Expr
++		want string
++	}{
++		{method(str("x"), "rep", numx("2")), `("x"):rep(2)`},
++		{index(table(), str("x")), "({}).x"},
++		{call(fn()), "(function() end)()"},
++		{call(logic("or", id("f"), id("g"))), "(f or g)()"},
++		{index(numx("1"), str("x")), "(1).x"},
++		{index(neg(a), str("x")), "(-a).x"},
++		{index(call(a), str("x")), "a().x"},
++		{call(index(index(a, str("b")), str("c"))), "a.b.c()"},
++	}
++	for _, c := range cases {
++		checkExpr(t, c.want, c.e)
++	}
++	// "..." in a function
++	for _, d := range dialects {
++		checkTree(t, d, "f = function(...)\n    return (...).x\nend\n",
++			assign([]ast.Expr{id("f")}, varargFn(ret(index(&ast.Comma3Expr{}, str("x"))))))
++	}
++}
++
++func TestPrintAdjustRet(t *testing.T) {
++	f, g := id("f"), id("g")
++	for _, d := range dialects {
++		checkTree(t, d, "return (f())\n", ret(adjusted(call(f))))
++		checkTree(t, d, "return f(), (g())\n", ret(call(f), adjusted(call(g))))
++		checkTree(t, d, "return g(), f()\n", ret(adjusted(call(g)), call(f)))
++		checkTree(t, d, "local a, b = (f())\n", local([]string{"a", "b"}, adjusted(call(f))))
++		checkTree(t, d, "f((g()))\n", callStmt(call(f, adjusted(call(g)))))
++		checkTree(t, d, "f(g(), 1)\n", callStmt(call(f, adjusted(call(g)), numx("1"))))
++		checkTree(t, d, "t = {(f())}\n", assign([]ast.Expr{id("t")}, table(field(nil, adjusted(call(f))))))
++		checkTree(t, d, "t = {f(), a = g()}\n",
++			assign([]ast.Expr{id("t")}, table(field(nil, call(f)), field(str("a"), adjusted(call(g))))))
++		checkTree(t, d, "f = function(...)\n    return (...)\nend\n",
++			assign([]ast.Expr{f}, varargFn(ret(adjusted(&ast.Comma3Expr{})))))
++		// a call statement and a target take no parentheses
++		checkTree(t, d, "f()\n", callStmt(adjusted(call(f)).(*ast.FuncCallExpr)))
++	}
++}
++
++func TestPrintKeys(t *testing.T) {
++	tt := id("t")
++	for _, d := range dialects {
++		checkTree(t, d, "x = t.b\n", assign([]ast.Expr{id("x")}, index(tt, str("b"))))
++		checkTree(t, d, "x = t[\"end\"]\n", assign([]ast.Expr{id("x")}, index(tt, str("end"))))
++		checkTree(t, d, "x = t[\"a-b\"]\n", assign([]ast.Expr{id("x")}, index(tt, str("a-b"))))
++		checkTree(t, d, "x = t[\"1a\"]\n", assign([]ast.Expr{id("x")}, index(tt, str("1a"))))
++		checkTree(t, d, "x = t[\"\"]\n", assign([]ast.Expr{id("x")}, index(tt, str(""))))
++		checkTree(t, d, "x = t[1]\n", assign([]ast.Expr{id("x")}, index(tt, numx("1"))))
++		checkTree(t, d, "t.b = 1\n", assign([]ast.Expr{index(tt, str("b"))}, numx("1")))
++		checkTree(t, d, "x = {b = 1, [\"end\"] = 2, [1] = 3, [\"1\"] = 4, 5}\n", assign([]ast.Expr{id("x")},
++			table(field(str("b"), numx("1")), field(str("end"), numx("2")), field(numx("1"), numx("3")),
++				field(str("1"), numx("4")), field(nil, numx("5")))))
++		checkTree(t, d, "function a.b.c:d() end\n", &ast.FuncDefStmt{
++			Name: &ast.FuncName{Receiver: index(index(id("a"), str("b")), str("c")), Method: "d"}, Func: fn()})
++	}
++	// goto is a keyword of LuaJIT only
++	checkTree(t, parse.Lua51, "x = t.goto\n", assign([]ast.Expr{id("x")}, index(tt, str("goto"))))
++	checkTree(t, parse.LuaJIT, "x = t[\"goto\"]\n", assign([]ast.Expr{id("x")}, index(tt, str("goto"))))
++}
++
++func TestPrintStrings(t *testing.T) {
++	cases := []struct{ value, want string }{
++		{"abc", `"abc"`},
++		{`say "hi"`, `'say "hi"'`},
++		{`it's`, `"it's"`},
++		{`'"`, `"'\""`},
++		{"a\\b", `"a\\b"`},
++		{"\a\b\f\n\r\t\v", `"\a\b\f\n\r\t\v"`},
++		{"\x00", `"\0"`},
++		{"\x001", `"\0001"`},
++		{"\x01\x1f\x7f", `"\1\31\127"`},
++		{"\x7f9", `"\1279"`},
++		{"\xff\xfe", `"\255\254"`},
++		{"\xe2\x82\xac", "\"€\""},  // valid UTF-8 is kept
++		{"\xe2\x82", `"\226\130"`}, // a truncated sequence is not
++		{"]]", `"]]"`},
++		{"--[[", `"--[["`},
++	}
++	for _, c := range cases {
++		checkExpr(t, c.want, str(c.value))
++	}
++	var b bytes.Buffer
++	if err := format.Node(&b, str("x"), format.Options{Quotes: format.QuotesSingle}); err != nil || b.String() != "'x'" {
++		t.Errorf("single quotes: %q, %v", b.String(), err)
++	}
++}
++
++func TestPrintNumbers(t *testing.T) {
++	cases := []struct{ value, want string }{
++		{"1", "1"},
++		{"0.5", "0.5"},
++		{"1e+100", "1e+100"},
++		{"5e-324", "5e-324"},
++		{"0x10", "0x10"},
++		{"+Inf", "1e999"},
++		{"-Inf", "-1e999"},
++		{"NaN", "0 / 0"},
++		{"-0", "-0"},
++		{"-2", "-2"},
++		{" 12 ", "12"},
++		{"1e400", "1e400"},
++	}
++	numeralsNormalized = true
++	defer func() { numeralsNormalized = false }()
++	for _, c := range cases {
++		checkExpr(t, c.want, numx(c.value))
++	}
++	// a negative number is a unary minus, NaN a division
++	checkExpr(t, "(-2) ^ 2", arith("^", numx("-2"), numx("2")))
++	checkExpr(t, "2 ^ (0 / 0)", arith("^", numx("2"), numx("nan")))
++	checkExpr(t, "a - -1", arith("-", id("a"), numx("-1")))
++	// numerals next to "..": spaces, never "1..2"
++	checkExpr(t, "1 .. 2", concatx(numx("1"), numx("2")))
++	checkExpr(t, "a .. .5", concatx(id("a"), numx(".5")))
++}
++
++// TestPrintStatementAmbiguity checks the ";" before a statement starting
++// with "(", which would else be the arguments of a call ending the
++// statement before it ("f\n(g)").
++func TestPrintStatementAmbiguity(t *testing.T) {
++	fg := logic("or", id("f"), id("g"))
++	for _, d := range dialects {
++		checkTree(t, d, "x = y;\n(f or g)()\n", assign([]ast.Expr{id("x")}, id("y")), callStmt(call(fg)))
++		checkTree(t, d, "f();\n(\"s\").x = 1\n", callStmt(call(id("f"))),
++			assign([]ast.Expr{index(str("s"), str("x"))}, numx("1")))
++		checkTree(t, d, "(f or g)()\n", callStmt(call(fg)))
++		checkTree(t, d, "do\n    (f or g)()\nend\n", &ast.DoBlockStmt{Stmts: []ast.Stmt{callStmt(call(fg))}})
++		checkTree(t, d, "local a = f;\n(g or f)(a)\n", local([]string{"a"}, id("f")),
++			callStmt(call(logic("or", id("g"), id("f")), id("a"))))
++	}
++}
++
++func TestPrintStatements(t *testing.T) {
++	for _, d := range dialects {
++		checkTree(t, d, "local a, b = 1, 2\n", local([]string{"a", "b"}, numx("1"), numx("2")))
++		checkTree(t, d, "local a\n", local([]string{"a"}))
++		checkTree(t, d, "local function f()\n    return f\nend\n",
++			&ast.LocalAssignStmt{Names: []string{"f"}, Exprs: []ast.Expr{fn(ret(id("f")))}, IsFunction: true})
++		checkTree(t, d, "local f = function()\n    return f\nend\n",
++			local([]string{"f"}, fn(ret(id("f")))))
++		checkTree(t, d, "if a then\n    b()\nelseif c then\n    d()\nelse\n    e()\nend\n", &ast.IfStmt{
++			Condition: id("a"), Then: []ast.Stmt{callStmt(call(id("b")))},
++			Else: []ast.Stmt{&ast.IfStmt{Condition: id("c"), Then: []ast.Stmt{callStmt(call(id("d")))},
++				Else: []ast.Stmt{callStmt(call(id("e")))}}}})
++		checkTree(t, d, "for i = 1, 10, 2 do end\n", &ast.NumberForStmt{Name: "i", Init: numx("1"), Limit: numx("10"), Step: numx("2")})
++		checkTree(t, d, "for k, v in pairs(t) do\n    break\nend\n", &ast.GenericForStmt{Names: []string{"k", "v"},
++			Exprs: []ast.Expr{call(id("pairs"), id("t"))}, Stmts: []ast.Stmt{&ast.BreakStmt{}}})
++		checkTree(t, d, "while true do end\n", &ast.WhileStmt{Condition: &ast.TrueExpr{}})
++		checkTree(t, d, "repeat until false\n", &ast.RepeatStmt{Condition: &ast.FalseExpr{}})
++		checkTree(t, d, "a, b = b, a\n", assign([]ast.Expr{id("a"), id("b")}, id("b"), id("a")))
++		checkTree(t, d, "o:m(1)\n", callStmt(method(id("o"), "m", numx("1"))))
++	}
++	checkTree(t, parse.LuaJIT, "goto l\n::l::\n", &ast.GotoStmt{Label: "l"}, &ast.LabelStmt{Name: "l"})
++}
++
++func TestPrintErrors(t *testing.T) {
++	cases := []struct {
++		name string
++		n    ast.Element
++		d    parse.Dialect
++	}{
++		{"keyword name", id("end"), parse.Lua51},
++		{"goto under LuaJIT", id("goto"), parse.LuaJIT},
++		{"empty name", id(""), parse.Lua51},
++		{"method name", method(id("o"), "a-b"), parse.Lua51},
++		{"assignment to a call", assign([]ast.Expr{call(id("f"))}, numx("1")), parse.Lua51},
++		{"nil operand", arith("+", id("a"), nil), parse.Lua51},
++		{"unknown operator", arith("//", id("a"), id("b")), parse.Lua51},
++		{"local name", local([]string{"a b"}), parse.Lua51},
++		{"goto under Lua 5.1", &ast.GotoStmt{Label: "l"}, parse.Lua51},
++		{"function name", &ast.FuncDefStmt{Name: &ast.FuncName{Func: index(id("a"), str("b-c"))}, Func: fn()}, parse.Lua51},
++		{"call statement of a name", &ast.FuncCallStmt{Expr: id("f")}, parse.Lua51},
++		{"nil", nil, parse.Lua51},
++	}
++	for _, c := range cases {
++		var b bytes.Buffer
++		err := format.Node(&b, c.n, format.Options{Dialect: c.d})
++		if err == nil {
++			t.Errorf("%s: no error, printed %q", c.name, b.String())
++		} else if !strings.HasPrefix(err.Error(), "format: ") {
++			t.Errorf("%s: error %q", c.name, err)
++		}
++	}
++}
+--- a/format/testdata/fuzz/FuzzFormat/20f93bbed431305f
++++ b/format/testdata/fuzz/FuzzFormat/20f93bbed431305f
+@@ -0,0 +1,3 @@
++go test fuzz v1
++[]byte("A=0\x00")
++bool(false)
+--- a/format/testdata/fuzz/FuzzFormat/71f4864a5268d840
++++ b/format/testdata/fuzz/FuzzFormat/71f4864a5268d840
+@@ -0,0 +1,3 @@
++go test fuzz v1
++[]byte("function A(...)loca,A0=0 do A(...)A=(0)A0\"0\"end retur.A0()end function A(...)A((A(...)))loca,A0=0 %A000000()end do do A(A..\"\"..A00\"\")(\"\"..A..\"\"..0,0,0,A\"\")(\"\"..0%0%0,function(...)retur.A0(\"\"%...)end)end end")
++bool(true)
+--- a/format/testdata/golden/luajit.golden
++++ b/format/testdata/golden/luajit.golden
+@@ -0,0 +1,26 @@
++#!/usr/bin/env luajit
++-- LuaJIT: goto, labels, hexadecimal floats, escapes and cdata numerals.
++local bit = require("bit")
++
++for i = 1, 3 do
++    for j = 1, 3 do
++        if (i + j) % 2 == 0 then goto continue end
++        io.write(i, j, "\n")
++        ::continue::
++    end
++end
++
++local x = 0x1p4 + 0x.8 + 1e-3 -- 16.5 and a bit
++local s = "tab\tbell\a\x41\u{20AC}\z
++           continued"
++local big = 1LL
++local mask = bit.band(bit.bor(0xff, 0x100), bit.lshift(1, 8))
++
++local t = {
++    -- the dot form and the bracket form are the author's
++    a = 1,
++    ["b"] = 2,
++    [ [[c]] ] = 3,
++    nested = {x = {y = {z = "deep"}}},
++}
++print(t.a, t["b"], t[ [[c]] ], x .. "", #s, big, mask)
+--- a/format/testdata/golden/luajit.lua
++++ b/format/testdata/golden/luajit.lua
+@@ -0,0 +1,24 @@
++#!/usr/bin/env luajit
++-- LuaJIT: goto, labels, hexadecimal floats, escapes and cdata numerals.
++local bit = require("bit")
++
++for i = 1, 3 do
++  for j = 1, 3 do
++    if (i + j) % 2 == 0 then goto continue end
++    io.write(i, j, "\n")
++    ::continue::
++  end
++end
++
++local x = 0x1p4 + 0x.8 + 1e-3 -- 16.5 and a bit
++local s = "tab\tbell\a\x41\u{20AC}\z
++           continued"
++local big = 1LL
++local mask=bit.band(bit.bor(0xff,0x100),bit.lshift(1,8))
++
++local t = {
++  -- the dot form and the bracket form are the author's
++  a = 1, ["b"] = 2, [ [[c]] ] = 3,
++  nested = {x = {y = {z = "deep"}}},
++}
++print(t.a, t["b"], t[ [[c]] ], x .. "", #s, big, mask)
+--- a/format/testdata/golden/module.golden
++++ b/format/testdata/golden/module.golden
+@@ -0,0 +1,39 @@
++-- A module in the style of Tarantool's.
++local log = require('log')
++local fiber = require 'fiber'
++
++local M = {}
++local DEFAULT_TIMEOUT = 0.5 -- seconds
++
++--- Calls fn until it returns true or the timeout ends.
++-- @param fn the function
++function M.retry(fn, timeout, ...)
++    timeout = timeout or DEFAULT_TIMEOUT
++    local deadline = fiber.clock() + timeout
++    repeat
++        local ok, res = pcall(fn, ...)
++        if ok and res then return res end
++        if not ok then log.warn('retry: %s', res) end
++        fiber.sleep(0.01)
++    until fiber.clock() > deadline
++    return nil, 'timed out after ' .. timeout .. ' seconds waiting for the condition to hold'
++end
++
++local cfg = {
++    listen = 3301,
++    memtx_memory = 256 * 1024 * 1024, -- 256 MiB
++
++    -- replication
++    replication = {'replicator:password@127.0.0.1:3301', 'replicator:password@127.0.0.1:3302'},
++    read_only = false,
++}
++
++function M:start(opts)
++    opts = opts or {}
++    for k, v in pairs(cfg) do if opts[k] == nil then opts[k] = v end end
++    box.cfg(opts)
++    box.schema.user.grant('guest', 'read,write,execute', 'universe', nil, {if_not_exists = true})
++    self.started = true
++end
++
++return M
+--- a/format/testdata/golden/module.lua
++++ b/format/testdata/golden/module.lua
+@@ -0,0 +1,41 @@
++-- A module in the style of Tarantool's.
++local log = require('log')
++local fiber = require 'fiber'
++
++local M = {}
++local DEFAULT_TIMEOUT=0.5   -- seconds
++
++
++
++--- Calls fn until it returns true or the timeout ends.
++-- @param fn the function
++function M.retry(fn,timeout,...)
++    timeout = timeout or DEFAULT_TIMEOUT
++    local deadline=fiber.clock()+timeout
++    repeat
++        local ok,res = pcall(fn,...)
++        if ok and res then return res end
++        if not ok then log.warn('retry: %s',res) end
++        fiber.sleep(0.01)
++    until fiber.clock()>deadline
++    return nil,'timed out after '..timeout..' seconds waiting for the condition to hold'
++end
++
++local cfg = {
++    listen = 3301,
++    memtx_memory = 256 * 1024 * 1024; -- 256 MiB
++
++    -- replication
++    replication = {'replicator:password@127.0.0.1:3301','replicator:password@127.0.0.1:3302'},
++    read_only = false,
++}
++
++function M:start(opts)
++    opts=opts or {}
++    for k,v in pairs(cfg) do if opts[k]==nil then opts[k]=v end end
++    box.cfg(opts)
++    box.schema.user.grant('guest','read,write,execute','universe',nil,{if_not_exists=true})
++    self.started = true
++end
++
++return M
+--- a/format/testdata/golden/module.options.golden
++++ b/format/testdata/golden/module.options.golden
+@@ -0,0 +1,47 @@
++-- A module in the style of Tarantool's.
++local log = require('log')
++local fiber = require 'fiber'
++
++local M = {}
++local DEFAULT_TIMEOUT = 0.5 -- seconds
++
++--- Calls fn until it returns true or the timeout ends.
++-- @param fn the function
++function M.retry(fn, timeout, ...)
++	timeout = timeout or DEFAULT_TIMEOUT
++	local deadline = fiber.clock() + timeout
++	repeat
++		local ok, res = pcall(fn, ...)
++		if ok and res then return res end
++		if not ok then log.warn('retry: %s', res) end
++		fiber.sleep(0.01)
++	until fiber.clock() > deadline
++	return nil,
++		'timed out after ' ..
++			timeout ..
++			' seconds waiting for the condition to hold'
++end
++
++local cfg = {
++	listen = 3301,
++	memtx_memory = 256 * 1024 * 1024, -- 256 MiB
++
++	-- replication
++	replication = {
++		'replicator:password@127.0.0.1:3301',
++		'replicator:password@127.0.0.1:3302',
++	},
++	read_only = false,
++}
++
++function M:start(opts)
++	opts = opts or {}
++	for k, v in pairs(cfg) do if opts[k] == nil then opts[k] = v end end
++	box.cfg(opts)
++	box.schema.user.grant('guest', 'read,write,execute', 'universe', nil, {
++		if_not_exists = true,
++	})
++	self.started = true
++end
++
++return M
+--- a/format/testdata/golden/tests.golden
++++ b/format/testdata/golden/tests.golden
+@@ -0,0 +1,34 @@
++local t = require('luatest')
++local g = t.group('format', {{engine = 'memtx'}, {engine = 'vinyl'}})
++
++g.before_all(function(cg)
++    cg.server = server:new({alias = 'master', box_cfg = {memtx_use_mvcc_engine = true}})
++    cg.server:start()
++end)
++
++g.after_all(function(cg) cg.server:drop() end)
++
++g.test_insert = function(cg)
++    cg.server:exec(function(engine)
++        local s = box.schema.space.create('test', {engine = engine})
++        s:create_index('pk')
++        s:insert{1, 'one'} -- table call sugar is kept
++        t.assert_equals(s:get(1), {1, 'one'})
++        t.assert_error_msg_content_equals(
++            "Duplicate key exists in unique index \"pk\" in space \"test\"",
++            s.insert,
++            s,
++            {1, 'two'}
++        )
++    end, {cg.params.engine})
++end
++
++local function check(cases) for _, c in ipairs(cases) do t.assert_equals(c[1], c[2], c.msg) end end
++
++check{
++    {1 + 1, 2, msg = 'sum'},
++    {('x'):rep(3), 'xxx'},
++    {#{n = 1}, 0},
++    {-2 ^ 2, -4},
++    {(-2) ^ 2, 4},
++}
+--- a/format/testdata/golden/tests.lua
++++ b/format/testdata/golden/tests.lua
+@@ -0,0 +1,27 @@
++local t = require('luatest')
++local g = t.group('format', {{engine = 'memtx'}, {engine = 'vinyl'}})
++
++g.before_all(function(cg)
++    cg.server = server:new({alias = 'master', box_cfg = {memtx_use_mvcc_engine = true}})
++    cg.server:start()
++end)
++
++g.after_all(function(cg) cg.server:drop() end)
++
++g.test_insert = function(cg)
++    cg.server:exec(function(engine)
++        local s = box.schema.space.create('test', {engine = engine})
++        s:create_index('pk')
++        s:insert{1, 'one'}  -- table call sugar is kept
++        t.assert_equals(s:get(1), {1, 'one'})
++        t.assert_error_msg_content_equals("Duplicate key exists in unique index \"pk\" in space \"test\"", s.insert, s, {1, 'two'})
++    end, {cg.params.engine})
++end
++
++local function check(cases) for _, c in ipairs(cases) do t.assert_equals(c[1], c[2], c.msg) end end
++
++check{
++    {1 + 1, 2, msg = 'sum'},
++    {('x'):rep(3), 'xxx'},
++    {#{n = 1}, 0}, {-2 ^ 2, -4}, {(-2) ^ 2, 4},
 +}
 --- a/function.go
 +++ b/function.go
