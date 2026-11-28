@@ -1,0 +1,55 @@
+name: Set up Go
+description: >
+  Go, with the module cache and the build cache of the job restored.
+  setup-go's own cache shares one key between all the jobs, and the first
+  job to finish (often the smallest) would save its build cache for every
+  other: here each job has its key, and a run on master or the nightly
+  saves a fresh one (the save step is in the job, after the work: see
+  .github/workflows/ci.yml).
+
+inputs:
+  go-version:
+    description: the Go version (setup-go's go-version)
+    required: true
+  cache-key:
+    description: the job's cache key, without the Go version and go.sum's hash
+    required: true
+
+outputs:
+  cache-key:
+    description: the key to save the caches under, at the end of the job
+    value: ${{ steps.key.outputs.key }}
+  cache-path:
+    description: the module cache and the build cache, to save
+    value: ${{ steps.key.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      id: go
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: false
+
+    - id: key
+      shell: bash
+      env:
+        PREFIX: go-${{ runner.os }}-${{ inputs.cache-key }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+        MODCACHE: ${{ steps.go.outputs.GOMODCACHE }}
+        BUILDCACHE: ${{ steps.go.outputs.GOCACHE }}
+      run: |
+        {
+          echo "prefix=$PREFIX-"
+          echo "key=$PREFIX-$GITHUB_RUN_ID"
+          echo "path<<EOF"
+          echo "$MODCACHE"
+          echo "$BUILDCACHE"
+          echo "EOF"
+        } >>"$GITHUB_OUTPUT"
+
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.path }}
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.prefix }}

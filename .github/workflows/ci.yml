@@ -4,45 +4,64 @@ name: CI
 # MoonScript port (moonscript/, cmd/moon, cmd/moonc), luascope/ and
 # luamerge/, one Go module.
 #
-# lint: go vet over every package but the fork's root package (upstream's
-# VM, which has 4 known findings); golangci-lint with the root config
-# (moonscript/, cmd/, internal/ and the fork's own packages lua/scope,
-# lua/format, lua/flow and lua/sandbox, not upstream's code) and with the
-# configs luascope/ and luamerge/ had in their repositories; codespell over
-# luascope/ and luamerge/ (.codespellrc).
-# generate: the generated files (moonscript/parse/parser_gen.go,
-# moonscript/runtime/lua) and go.mod are up to date.
-# test: the test suite on the oldest and the newest supported Go, with the
-# Lua interpreters luamerge's tests run bundles on, and pristine
-# gopher-lua's own suites against the fork; the race detector and coverage
-# on the newest.
-# testrace: luascope and luamerge 100 times with the race detector, as in
-# their repositories.
-# govulncheck: the module's dependencies against the Go vulnerability
-# database.
-# goreleaser: luamerge/.goreleaser.yml is valid (release.yml publishes, on a
-# version tag only).
-# corpus: the parser, the compiler and the linter against upstream moonc
-# 0.8.0 on real-world code (scripts/check-corpus.sh,
-# moonscript/testdata/corpus/).
+# A pull request runs what its change affects. The job changes runs
+# internal/tools/affected over the diff from the merge base: the packages
+# whose tests the change affects (their code, the code of what they
+# import, through the tests too, or the data they read), and the areas it
+# touches. Every other job runs only if its area is selected; the full
+# checks run everything:
 #
-# Weekly, everything runs again, against the latest patch release of each
-# Go version.
+#   - on a push to master, nightly, on workflow_dispatch, and on a pull
+#     request with the label full-ci;
+#   - before a release (release.yml calls this workflow);
+#   - for a change of go.mod, go.sum, .github/, the linters' configs, the
+#     scripts CI runs or the change detection itself.
+#
+# Jobs:
+#   changes       the selection (see the job summary), and the tool's tests
+#   changelog     pull requests: a change of a non-test file of lua/ adds an
+#                 entry to lua/CHANGES.md (or has the label no-changelog)
+#   vet           go vet of the affected packages, gofmt, go mod tidy -diff
+#   lint          golangci-lint, per tree with its config: root (all but
+#                 luascope/ and luamerge/), luascope/, luamerge/
+#   test          go test of the affected packages on the oldest and the
+#                 newest supported Go; with the Lua interpreters if luamerge
+#                 is affected; pristine gopher-lua's suites for lua/
+#   coverage      full checks: go test -race ./... with coverage
+#   testrace      luascope and luamerge with -race -count=100 (full
+#                 checks; 10 on a pull request)
+#   govulncheck   the module's dependencies and code against the Go
+#                 vulnerability database
+#   codespell     luascope/ and luamerge/ (.codespellrc)
+#   generate      go generate leaves the tree unchanged
+#   goreleaser    luamerge/.goreleaser.yml is valid (release.yml publishes)
+#   corpus        the parser, the compiler and the linter against upstream
+#                 moonc 0.8.0 on real-world code (scripts/check-corpus.sh)
+#   fuzz          nightly: short runs of the fuzz targets
+#   ci-ok         the one required check: every job succeeded or was
+#                 skipped by the change detection
+#
+# The commands of the jobs are in scripts/ci/run.sh, which runs them
+# locally too.
 
 on:
   push:
     branches: [master]
-    tags: ['v*']
   pull_request:
+    # labeled, unlabeled: full-ci and no-changelog
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   schedule:
-    - cron: '23 3 * * 1'
+    - cron: '23 3 * * *'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # a new push to a pull request cancels the run of the previous one; the
+  # other runs (master, nightly, a release) are never cancelled
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -52,140 +71,214 @@ env:
   # Go it sets up. v1.7.0 was seen panicking in a scheduled run of
   # go-luamerge; v1.8.0 needs go >= 1.26.0.
   GOVULNCHECK_VERSION: v1.8.0
+  GORELEASER_VERSION: v2.13.3
   # luamerge's tests run every bundle on each Lua interpreter on PATH and
   # skip when there is none; listing the interpreters the jobs install makes
   # a missing one fail those tests instead (see luamerge/internal/luatest).
   # Each name is also the Ubuntu package that provides it.
-  LUATEST_INTERPRETERS: lua5.1,lua5.2,lua5.3,lua5.4,luajit
+  LUATEST_INTERPRETERS: lua5.1,luajit
 
 jobs:
-  lint:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      packages: ${{ steps.select.outputs.packages }}
+      all: ${{ steps.select.outputs.all }}
+      go: ${{ steps.select.outputs.go }}
+      lua: ${{ steps.select.outputs.lua }}
+      moonscript: ${{ steps.select.outputs.moonscript }}
+      luascope: ${{ steps.select.outputs.luascope }}
+      luamerge: ${{ steps.select.outputs.luamerge }}
+      docs-only: ${{ steps.select.outputs.docs-only }}
+      corpus: ${{ steps.select.outputs.corpus }}
+      generate: ${{ steps.select.outputs.generate }}
+      goreleaser: ${{ steps.select.outputs.goreleaser }}
+      codespell: ${{ steps.select.outputs.codespell }}
+      lint-trees: ${{ steps.select.outputs.lint-trees }}
+      race-trees: ${{ steps.select.outputs.race-trees }}
+      changelog: ${{ steps.select.outputs.changelog }}
+    steps:
+      # the history for the merge base (trees and commits, no blobs)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: ./.github/actions/go
+        id: go
+        with:
+          go-version: '1.27.x'
+          cache-key: changes
+
+      - name: select
+        id: select
+        env:
+          PR: ${{ github.event_name == 'pull_request' }}
+          FULL: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          args=(-github)
+          [ "$FULL" != true ] || args+=(-all)
+          [ "$PR" != true ] || args+=(-base "$BASE" -head "$HEAD")
+          go run ./internal/tools/affected "${args[@]}"
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'pull_request'
+        with:
+          path: ${{ steps.go.outputs.cache-path }}
+          key: ${{ steps.go.outputs.cache-key }}
+
+  changelog:
+    # lua/CHANGES.md lists every change of the fork (CONTRIBUTING.md)
+    if: github.event_name == 'pull_request'
+    needs: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: lua/CHANGES.md
+        env:
+          CHANGELOG: ${{ needs.changes.outputs.changelog }}
+          NO_CHANGELOG: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+        run: |
+          if [ "$CHANGELOG" = missing ] && [ "$NO_CHANGELOG" != true ]; then
+            echo "::error file=lua/CHANGES.md::the change modifies non-test files of lua/ but not lua/CHANGES.md: add an entry (what, where, from whom, how it is tested), or the label no-changelog"
+            exit 1
+          fi
+          echo "changelog: $CHANGELOG, no-changelog label: $NO_CHANGELOG"
+
+  vet:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      - uses: ./.github/actions/go
         with:
           go-version: '1.27.x'
+          cache-key: vet
 
-      - name: go vet
-        run: go vet $(go list ./... | grep -v '/lua$')
-
-      # every tree, also those whose golangci-lint config formats nothing
-      # (luascope's) or which it excludes (upstream's code in lua/)
-      - name: gofmt
+      - name: go vet, gofmt, go mod tidy
+        env:
+          PACKAGES: ${{ needs.changes.outputs.packages }}
         run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::not gofmt-ed: $unformatted"
-            exit 1
-          fi
+          read -ra pkgs <<<"$PACKAGES"
+          scripts/ci/run.sh vet "${pkgs[@]}"
+
+  lint:
+    name: lint (${{ matrix.tree }})
+    needs: changes
+    if: needs.changes.outputs.lint-trees != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: ${{ fromJSON(needs.changes.outputs.lint-trees) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/go
+        with:
+          go-version: '1.27.x'
+          cache-key: lint
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-
-      - name: golangci-lint (luascope)
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          working-directory: luascope
-
-      - name: golangci-lint (luamerge)
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          working-directory: luamerge
-
-  codespell:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: install codespell
-        run: pipx install codespell==${CODESPELL_VERSION}
-
-      - name: codespell
-        run: codespell ./luascope ./luamerge
-
-  generate:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version: '1.27.x'
-
-      - name: go mod tidy
-        run: go mod tidy -diff
-
-      - name: go generate
-        run: |
-          go generate ./...
-          git add -N .
-          git diff --exit-code --stat || {
-            echo "::error::generated files are out of date: run go generate ./... and commit the result"
-            git diff
-            exit 1
-          }
+          working-directory: ${{ matrix.tree == 'root' && '.' || matrix.tree }}
 
   test:
     name: test (Go ${{ matrix.go }})
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        # the oldest and the newest supported Go
         go: ['1.26.x', '1.27.x']
     steps:
+      # the history: internal/tools/affected's tests select real commits
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
 
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      - uses: ./.github/actions/go
+        id: go
         with:
           go-version: ${{ matrix.go }}
+          cache-key: test
 
-      - name: install Lua interpreters
-        run: |
-          interpreters="${LUATEST_INTERPRETERS//,/ }"
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends $interpreters
-          for lua in $interpreters; do
-            printf '%s: ' "$lua"
-            "$lua" -e 'print((jit and jit.version) or _VERSION)'
-          done
+      - uses: ./.github/actions/lua
+        if: needs.changes.outputs.luamerge == 'true'
+        with:
+          interpreters: ${{ env.LUATEST_INTERPRETERS }}
 
       - name: go test
-        run: go test ./...
+        env:
+          PACKAGES: ${{ needs.changes.outputs.packages }}
+        run: |
+          read -ra pkgs <<<"$PACKAGES"
+          scripts/ci/run.sh test "${pkgs[@]}"
 
       - name: pristine gopher-lua suites against lua/
-        run: scripts/check-gopher-lua-suite.sh
+        if: needs.changes.outputs.lua == 'true'
+        run: scripts/ci/run.sh gopher-lua
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'pull_request'
+        with:
+          path: ${{ steps.go.outputs.cache-path }}
+          key: ${{ steps.go.outputs.cache-key }}
+
+  coverage:
+    # the race detector over everything, with coverage of the module but
+    # the fork's upstream code (the VM, ast, parse, pm) and internal/tools
+    needs: changes
+    if: needs.changes.outputs.all == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - uses: ./.github/actions/go
+        id: go
+        with:
+          go-version: '1.27.x'
+          cache-key: coverage
+
+      - uses: ./.github/actions/lua
+        with:
+          interpreters: ${{ env.LUATEST_INTERPRETERS }}
 
       - name: go test -race, with coverage
-        if: matrix.go == '1.27.x'
-        run: |
-          go test -race -coverprofile=coverage.out \
-            -coverpkg=$(go list ./... | grep -v -e '/lua$' -e '/lua/' -e /internal/tools/ | paste -sd, -) ./...
-          {
-            echo '### Coverage'
-            echo
-            echo '```'
-            go tool cover -func=coverage.out | tail -1
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: scripts/ci/run.sh coverage
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: matrix.go == '1.27.x'
         with:
           name: coverage
           path: coverage.out
 
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'pull_request'
+        with:
+          path: ${{ steps.go.outputs.cache-path }}
+          key: ${{ steps.go.outputs.cache-key }}
+
   testrace:
     name: testrace (${{ matrix.tree }})
+    needs: changes
+    if: needs.changes.outputs.race-trees != '[]'
     runs-on: ubuntu-24.04
     # luascope's suite takes 22 minutes with -race -count=100 on a GitHub
     # runner; timeout-minutes = go test -timeout + 5 leaves room for a slow
@@ -194,47 +287,85 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tree: [luascope, luamerge]
+        tree: ${{ fromJSON(needs.changes.outputs.race-trees) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      - uses: ./.github/actions/go
+        id: go
         with:
           go-version: '1.27.x'
+          cache-key: testrace-${{ matrix.tree }}
 
-      - name: install Lua interpreters
+      - uses: ./.github/actions/lua
         if: matrix.tree == 'luamerge'
-        run: |
-          interpreters="${LUATEST_INTERPRETERS//,/ }"
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends $interpreters
-          for lua in $interpreters; do
-            printf '%s: ' "$lua"
-            "$lua" -e 'print((jit and jit.version) or _VERSION)'
-          done
+        with:
+          interpreters: ${{ env.LUATEST_INTERPRETERS }}
 
-      # -count=100 shakes out tests that depend on the order of execution.
-      - name: go test -race -count=100
-        run: go test -race -count=100 -timeout=40m ./${{ matrix.tree }}/...
+      # -count shakes out tests that depend on the order of execution: 100
+      # in the full checks, 10 on a pull request
+      - name: go test -race -count=N
+        env:
+          TREE: ${{ matrix.tree }}
+          COUNT: ${{ needs.changes.outputs.all == 'true' && '100' || '10' }}
+        run: scripts/ci/run.sh testrace "$TREE" "$COUNT"
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'pull_request'
+        with:
+          path: ${{ steps.go.outputs.cache-path }}
+          key: ${{ steps.go.outputs.cache-key }}
 
   govulncheck:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      - uses: ./.github/actions/go
         with:
           go-version: '1.27.x'
-
-      - name: install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+          cache-key: govulncheck
 
       - name: govulncheck
-        run: govulncheck ./...
+        run: scripts/ci/run.sh govulncheck
+
+  codespell:
+    needs: changes
+    if: needs.changes.outputs.codespell == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: install codespell
+        run: pipx install "codespell==${CODESPELL_VERSION}"
+
+      - name: codespell
+        run: scripts/ci/run.sh codespell
+
+  generate:
+    needs: changes
+    if: needs.changes.outputs.generate == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/go
+        with:
+          go-version: '1.27.x'
+          cache-key: generate
+
+      - name: go generate
+        run: scripts/ci/run.sh generate
 
   goreleaser:
     # Checks the release config only; nothing is built or published here.
+    needs: changes
+    if: needs.changes.outputs.goreleaser == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -243,7 +374,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
-          version: v2.13.3
+          version: ${{ env.GORELEASER_VERSION }}
           args: check
           workdir: luamerge
 
@@ -255,6 +386,8 @@ jobs:
     # and cached under the manifest's hash, so a fetch happens only when
     # the manifest changes or the cache was evicted. Repositories that are
     # gone are reported and skipped.
+    needs: changes
+    if: needs.changes.outputs.corpus == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -262,9 +395,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      - uses: ./.github/actions/go
         with:
           go-version: '1.27.x'
+          cache-key: corpus
 
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache
@@ -306,3 +440,76 @@ jobs:
         with:
           name: corpus-reports
           path: .corpus/reports/
+
+  fuzz:
+    # nightly: 90 seconds of each fuzz target, from its seed corpus (the
+    # f.Add seeds and testdata/fuzz); a failure uploads the input it found
+    name: fuzz (${{ matrix.target }})
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {pkg: ./lua/parse, target: FuzzSpans}
+          - {pkg: ./lua/parse, target: FuzzTokens}
+          - {pkg: ./lua/parse, target: FuzzScanNumberLuaJIT}
+          - {pkg: ./lua/scope, target: FuzzResolve}
+          - {pkg: ./lua/format, target: FuzzFormat}
+          - {pkg: ./lua/format, target: FuzzPrint}
+          - {pkg: ./lua/flow, target: FuzzAnalyze}
+          - {pkg: ./lua, target: FuzzCompileAST}
+          - {pkg: ./luascope, target: FuzzParse}
+          - {pkg: ./moonscript/parse, target: FuzzDifferential}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/go
+        with:
+          go-version: '1.27.x'
+          cache-key: fuzz
+
+      - name: go test -fuzz
+        env:
+          PKG: ${{ matrix.pkg }}
+          TARGET: ${{ matrix.target }}
+        run: scripts/ci/run.sh fuzz "$PKG" "$TARGET" 90s
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: fuzz-${{ matrix.target }}
+          path: '**/testdata/fuzz/${{ matrix.target }}/'
+
+  ci-ok:
+    # The one check branch protection requires (CONTRIBUTING.md): a job the
+    # change detection skipped counts as passed, one that failed or was
+    # cancelled does not (nor does changes failing, which skips the rest).
+    if: always()
+    needs:
+      - changes
+      - changelog
+      - vet
+      - lint
+      - test
+      - coverage
+      - testrace
+      - govulncheck
+      - codespell
+      - generate
+      - goreleaser
+      - corpus
+      - fuzz
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: every job succeeded or was skipped
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
+          if jq -e 'any(.[]; .result != "success" and .result != "skipped")' <<<"$NEEDS" >/dev/null; then
+            echo "::error::a job failed or was cancelled"
+            exit 1
+          fi

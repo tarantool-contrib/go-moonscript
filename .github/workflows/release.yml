@@ -4,7 +4,7 @@ name: Release
 # published by GoReleaser (luamerge/.goreleaser.yml, run in luamerge/) for a
 # version tag of the module. Only a pushed tag v* runs this workflow: pushes
 # to master and pull requests never publish anything (ci.yml checks the
-# config with goreleaser check).
+# config with goreleaser check). The full checks of ci.yml run first.
 
 on:
   push:
@@ -15,36 +15,16 @@ on:
 permissions:
   contents: read
 
-env:
-  # Keep in sync with ci.yml.
-  LUATEST_INTERPRETERS: lua5.1,lua5.2,lua5.3,lua5.4,luajit
-
 jobs:
-  test:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: go.mod
-
-      - name: install Lua interpreters
-        run: |
-          interpreters="${LUATEST_INTERPRETERS//,/ }"
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends $interpreters
-          for lua in $interpreters; do
-            printf '%s: ' "$lua"
-            "$lua" -e 'print((jit and jit.version) or _VERSION)'
-          done
-
-      - name: go test
-        run: go test -count=1 ./luamerge/... ./lua/...
+  # The full checks of ci.yml (every job, regardless of the diff; its
+  # ci-ok fails if one does) before anything is published.
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   release:
-    needs: test
+    needs: ci
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

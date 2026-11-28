@@ -1,7 +1,10 @@
 package main
 
 import (
+	"os"
 	"path"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -211,6 +214,32 @@ func TestGenerateInputs(t *testing.T) {
 	}
 	if n == 0 {
 		t.Error("no //go:generate directive")
+	}
+}
+
+// TestFuzzMatrix: the nightly fuzz job of ci.yml runs every fuzz target
+// of the repository.
+func TestFuzzMatrix(t *testing.T) {
+	out, err := git(repoRoot, "grep", "-h", "-o", "-E", `^func Fuzz[A-Za-z0-9_]*`, "--", "*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var targets []string
+	for line := range strings.Lines(out) {
+		targets = append(targets, strings.TrimSpace(strings.TrimPrefix(line, "func ")))
+	}
+	ci, err := os.ReadFile(filepath.Join(repoRoot, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matrix []string
+	for _, m := range regexp.MustCompile(`\{pkg: \S+, target: (\w+)\}`).FindAllSubmatch(ci, -1) {
+		matrix = append(matrix, string(m[1]))
+	}
+	slices.Sort(targets)
+	slices.Sort(matrix)
+	if !slices.Equal(targets, matrix) {
+		t.Errorf("the fuzz job of ci.yml runs %q, the fuzz targets are %q", matrix, targets)
 	}
 }
 
