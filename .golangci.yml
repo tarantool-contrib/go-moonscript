@@ -42,7 +42,14 @@ linters:
     # files with a "// Code generated ... DO NOT EDIT." header
     generated: strict
     paths:
-      - ^lua/ # the gopher-lua fork, kept close to upstream
+      # The gopher-lua fork: the code of upstream's packages, kept close to
+      # upstream, is not linted; the fork's own packages (lua/scope,
+      # lua/format, lua/flow, lua/sandbox) are.
+      - ^lua/[^/]+$
+      - ^lua/(ast|parse|pm|_tools|testdata)/
+      # linted with their own configs, as in their repositories
+      - ^luascope/ # luascope/.golangci.yml
+      - ^luamerge/ # luamerge/.golangci.yml
       - testdata/
       - ^moonscript/parse/parser_gen\.go$ # internal/tools/genparser
       - ^moonscript/parse/dispatch_gen\.go$ # internal/tools/gendispatch
@@ -58,7 +65,10 @@ formatters:
   exclusions:
     generated: strict
     paths:
-      - ^lua/
+      - ^lua/[^/]+$
+      - ^lua/(ast|parse|pm|_tools|testdata)/
+      - ^luascope/
+      - ^luamerge/
       - testdata/
       - ^moonscript/parse/parser_gen\.go$
       - ^moonscript/parse/dispatch_gen\.go$

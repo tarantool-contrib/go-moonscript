@@ -29,7 +29,7 @@ func TestLoadOptions_MissingNamedFile(t *testing.T) {
 // TestLoadOptions_MissingDefaultFile checks that without a path the default
 // file is optional: the defaults apply.
 //
-//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+// Not parallel: t.Chdir changes the working directory of the whole process.
 func TestLoadOptions_MissingDefaultFile(t *testing.T) {
 	t.Chdir(t.TempDir())
 

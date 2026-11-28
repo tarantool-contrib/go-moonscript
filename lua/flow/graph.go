@@ -182,7 +182,6 @@ type Graph struct {
 	fallOff *Block // the block that reaches the end of the body
 	alloc   *alloc
 	slot    int32 // the expression of Creator it is created in
-	slab    []Node
 }
 
 // alloc hands out the blocks and edges of a Program's graphs from slabs.

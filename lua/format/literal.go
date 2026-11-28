@@ -1,6 +1,7 @@
 package format
 
 import (
+	"errors"
 	"math"
 	"strconv"
 	"strings"
@@ -227,10 +228,8 @@ func numberValue(s string) (float64, bool) {
 		}
 		var err error
 		v, err = strconv.ParseFloat(t, 64)
-		if err != nil {
-			if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange {
-				return 0, false
-			}
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
+			return 0, false
 		}
 	}
 	if neg {

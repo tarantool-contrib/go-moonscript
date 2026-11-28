@@ -356,6 +356,12 @@ func (p *parser) genericFor(pos ast.Pos, first *ast.Local) *ast.GenericFor {
 	return s
 }
 
+// The iterators predictNext looks for.
+const (
+	iterPairs = "pairs"
+	iterNext  = "next"
+)
+
 // predictNext guesses from the first instruction of the iterator whether
 // it is next() or pairs() (predict_next).
 func (p *parser) predictNext(pc uint32) bool {
@@ -374,7 +380,7 @@ func (p *parser) predictNext(pc uint32) bool {
 	case bcUGET:
 		name = fs.uvmap[ins.d()].Name
 	case bcGGET:
-		for _, s := range []string{"pairs", "next"} {
+		for _, s := range []string{iterPairs, iterNext} {
 			if k, ok := fs.kstr[s]; ok && k == ins.d() {
 				return true
 			}
@@ -385,7 +391,7 @@ func (p *parser) predictNext(pc uint32) bool {
 		return false
 	}
 
-	return name == "pairs" || name == "next"
+	return name == iterPairs || name == iterNext
 }
 
 func (p *parser) functionStmt(line int) *ast.FunctionStmt {

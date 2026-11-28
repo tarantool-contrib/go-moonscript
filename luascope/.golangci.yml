@@ -40,7 +40,7 @@ linters:
           allow:
             - $gostd
             - github.com/stretchr/testify
-            - github.com/bigbes/go-luascope
+            - github.com/tarantool-contrib/go-moonscript/luascope
 
     gocyclo:
       min-complexity: 15

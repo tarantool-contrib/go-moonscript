@@ -341,18 +341,6 @@ func (f *flowState) solve(vf *varFlow) {
 	}
 }
 
-func setRange(s []uint64, lo, hi int) {
-	for i := lo; i < hi; i++ {
-		s[i>>6] |= 1 << (i & 63)
-	}
-}
-
-func clearRange(s []uint64, lo, hi int) {
-	for i := lo; i < hi; i++ {
-		s[i>>6] &^= 1 << (i & 63)
-	}
-}
-
 // reachingAt appends to dst the main defs of a variable that reach a node
 // (before the node's own defs).
 func (f *flowState) reachingAt(dst []*Def, vf *varFlow, n *Node) []*Def {

@@ -102,7 +102,7 @@ func TestBundle_ZeroValueOptions(t *testing.T) {
 // The paths have the root's symbolic links resolved (on macOS the temporary
 // directory is under /var, a link to /private/var).
 //
-//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+// Not parallel: t.Chdir changes the working directory of the whole process.
 func TestBundle_Files(t *testing.T) {
 	// Arrange.
 	dir, err := filepath.EvalSymlinks(t.TempDir())

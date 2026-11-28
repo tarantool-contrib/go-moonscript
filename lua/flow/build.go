@@ -611,7 +611,7 @@ func (b *builder) isNoReturn(st *ast.FuncCallStmt) bool {
 		return false
 	}
 	var id *ast.IdentExpr
-	name := ""
+	var name string
 	switch f := call.Func.(type) {
 	case *ast.IdentExpr:
 		id, name = f, f.Value

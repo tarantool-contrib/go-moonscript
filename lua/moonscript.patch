@@ -11347,7 +11347,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/flow/analysis.go
 +++ b/flow/analysis.go
-@@ -0,0 +1,711 @@
+@@ -0,0 +1,699 @@
 +package flow
 +
 +import (
@@ -11688,18 +11688,6 @@ regenerates the diff below; this header is edited by hand.
 +				f.work = append(f.work, int32(s.ID))
 +			}
 +		}
-+	}
-+}
-+
-+func setRange(s []uint64, lo, hi int) {
-+	for i := lo; i < hi; i++ {
-+		s[i>>6] |= 1 << (i & 63)
-+	}
-+}
-+
-+func clearRange(s []uint64, lo, hi int) {
-+	for i := lo; i < hi; i++ {
-+		s[i>>6] &^= 1 << (i & 63)
 +	}
 +}
 +
@@ -12760,7 +12748,7 @@ regenerates the diff below; this header is edited by hand.
 +		return false
 +	}
 +	var id *ast.IdentExpr
-+	name := ""
++	var name string
 +	switch f := call.Func.(type) {
 +	case *ast.IdentExpr:
 +		id, name = f, f.Value
@@ -14854,7 +14842,7 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/flow/graph.go
 +++ b/flow/graph.go
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,218 @@
 +package flow
 +
 +import (
@@ -15039,7 +15027,6 @@ regenerates the diff below; this header is edited by hand.
 +	fallOff *Block // the block that reaches the end of the body
 +	alloc   *alloc
 +	slot    int32 // the expression of Creator it is created in
-+	slab    []Node
 +}
 +
 +// alloc hands out the blocks and edges of a Program's graphs from slabs.
@@ -19042,10 +19029,11 @@ regenerates the diff below; this header is edited by hand.
 +}
 --- a/format/literal.go
 +++ b/format/literal.go
-@@ -0,0 +1,240 @@
+@@ -0,0 +1,239 @@
 +package format
 +
 +import (
++	"errors"
 +	"math"
 +	"strconv"
 +	"strings"
@@ -19272,10 +19260,8 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		var err error
 +		v, err = strconv.ParseFloat(t, 64)
-+		if err != nil {
-+			if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange {
-+				return 0, false
-+			}
++		if err != nil && !errors.Is(err, strconv.ErrRange) {
++			return 0, false
 +		}
 +	}
 +	if neg {

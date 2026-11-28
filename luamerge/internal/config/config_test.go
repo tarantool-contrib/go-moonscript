@@ -40,7 +40,7 @@ func TestLoadConfig_MissingNamedFile(t *testing.T) {
 // TestLoadConfig_MissingDefaultFile checks that the default file, unlike a
 // named one, may be absent: then the defaults apply.
 //
-//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+// Not parallel: t.Chdir changes the working directory of the whole process.
 func TestLoadConfig_MissingDefaultFile(t *testing.T) {
 	t.Chdir(t.TempDir())
 
@@ -53,7 +53,7 @@ func TestLoadConfig_MissingDefaultFile(t *testing.T) {
 // TestLoadConfig_DefaultFile checks that an empty path reads DefaultPath from
 // the working directory.
 //
-//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+// Not parallel: t.Chdir changes the working directory of the whole process.
 func TestLoadConfig_DefaultFile(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, config.DefaultPath), []byte("strict: true\n"), 0o600))
@@ -530,7 +530,7 @@ func TestResolveRoot_Spellings(t *testing.T) {
 // that climbed out to the link. The list the caller passed is left as it
 // was.
 //
-//nolint:paralleltest // t.Chdir changes the working directory of the whole process.
+// Not parallel: t.Chdir changes the working directory of the whole process.
 func TestResolveRoot_SearchSpellings(t *testing.T) {
 	dir := canonicalTempDir(t)
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "src"), 0o750))
