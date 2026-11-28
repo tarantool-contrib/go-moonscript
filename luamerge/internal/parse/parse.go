@@ -58,7 +58,8 @@ type Parser interface {
 	Parse(source []byte, filename string) (Result, error)
 }
 
-// New returns a Parser backed by the gopher-lua parser.
+// New returns a Parser backed by the parser of the gopher-lua fork of this
+// repository (lua/parse).
 func New() Parser {
 	return &gopherParser{}
 }

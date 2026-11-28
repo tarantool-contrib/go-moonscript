@@ -132,7 +132,7 @@ func gopherLuaModule(t *testing.T) string {
 func gopherTokens(src []byte, lines bool) ([]string, error) {
 	body := src[lex.Header(src):]
 
-	options := parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false}
+	options := parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false, Lua52Compat: false}
 
 	lexemes, err := parse.Tokenize(body, "corpus", options)
 	if err != nil {

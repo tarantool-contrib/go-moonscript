@@ -20,7 +20,7 @@ import (
 // become or; `c ? a : b` becomes `c and a or b`; "~>>" becomes "+"; and the
 // operator of a compound assignment is left out, so `x += 1` is the
 // assignment `x = 1`, with the same calls.
-func (n *normalizer) planLuaJIT(i int) {
+func (n *rewriter) planLuaJIT(i int) {
 	if n.edits[i].drop {
 		// The second half of an operator planned at the first.
 		return
@@ -69,7 +69,7 @@ func (n *normalizer) planLuaJIT(i int) {
 // statement can start and another statement or the end of the block follows;
 // anywhere else it is a name, as in every other dialect: `local continue`,
 // `goto continue`, `::continue::`, `continue = 1`.
-func (n *normalizer) planContinue(i int) {
+func (n *rewriter) planContinue(i int) {
 	if !n.startsStatement(i) {
 		return
 	}
@@ -90,14 +90,14 @@ func (n *normalizer) planContinue(i int) {
 const statementKeywords = " end else elseif until local if for while repeat function return break goto do "
 
 // replace writes text in place of the operator of two tokens at i.
-func (n *normalizer) replace(i int, text string) {
+func (n *rewriter) replace(i int, text string) {
 	n.edits[i].text = []byte(text)
 	n.edits[i+1].drop = true
 }
 
 // joins reports whether the token right after the one at i, with nothing
 // between them, is text.
-func (n *normalizer) joins(i int, text string) bool {
+func (n *rewriter) joins(i int, text string) bool {
 	next := i + 1
 
 	return next < len(n.tokens) && n.tokens[next].Start == n.tokens[i].End && string(n.text(next)) == text
@@ -108,7 +108,7 @@ func (n *normalizer) joins(i int, text string) bool {
 // neither inside brackets or a block nor the ":" of a conditional expression
 // nested in it. As in LuaJIT, a method call there, `c ? t:m() : x`, is none:
 // write it in parentheses.
-func (n *normalizer) ternaryColon(i int) int {
+func (n *rewriter) ternaryColon(i int) int {
 	depth, pending := 0, 0
 
 	for j := i + 1; j < len(n.tokens); j++ {
@@ -139,7 +139,7 @@ func (n *normalizer) ternaryColon(i int) int {
 // assignsExclusiveOr reports whether the "~=" at i follows a variable that
 // starts a statement, `x ~= 1`: an assignment of x's exclusive or with 1.
 // Anywhere else "~=" compares.
-func (n *normalizer) assignsExclusiveOr(i int) bool {
+func (n *rewriter) assignsExclusiveOr(i int) bool {
 	start := n.variableStart(i - 1)
 
 	return start >= 0 && n.startsStatement(start)
@@ -147,7 +147,7 @@ func (n *normalizer) assignsExclusiveOr(i int) bool {
 
 // variableStart returns the index of the first token of the variable that
 // ends at i, `a.b[c].d`, or -1 when no variable ends there.
-func (n *normalizer) variableStart(i int) int {
+func (n *rewriter) variableStart(i int) int {
 	for i >= 0 {
 		switch {
 		case n.isSymbol(i, "]"):
@@ -168,7 +168,7 @@ func (n *normalizer) variableStart(i int) int {
 
 // matchingOpen returns the index of the bracket that the bracket at i
 // closes, or -1 when there is none.
-func (n *normalizer) matchingOpen(i int) int {
+func (n *rewriter) matchingOpen(i int) int {
 	depth := 0
 
 	for ; i >= 0; i-- {

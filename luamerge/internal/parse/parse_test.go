@@ -104,13 +104,21 @@ end`,
 
 // testParse parses source and returns what it found, without the positions
 // of the literals (see testWithoutLiterals); the parser, not the token
-// scanner, must read the source.
+// scanner, must read the source, and the literal of each static call must be
+// a string literal of the source whose value is its module name.
 func testParse(t *testing.T, source string) []parse.RequireInfo {
 	t.Helper()
 
 	found, err := parse.New().Parse([]byte(source), "test.lua")
 	require.NoError(t, err, "Parse(%q)", source)
 	require.Nil(t, found.Fallback, "the parser reads %q", source)
+
+	for _, call := range found.Requires {
+		if call.Static {
+			value, ok := parse.LiteralValueForTest([]byte(source[call.Literal.Start:call.Literal.End]))
+			assert.True(t, ok && value == call.Name, "%q: the literal of %+v", source, call)
+		}
+	}
 
 	return testWithoutLiterals(found.Requires)
 }

@@ -1,14 +1,17 @@
 // Package parse extracts require(...) call information from Lua source code
-// using the parser of the gopher-lua fork of this repository (lua/parse),
-// which reads Lua 5.1 and LuaJIT 2.1; the source is read with a lexer that
-// knows every dialect first, and gopher-lua gets a copy of it written in Lua
-// 5.1 (see normalize).
+// using the parser of the gopher-lua fork of this repository (lua/parse) in
+// its LuaJIT dialect. A source that it refuses, such as one written for Lua
+// 5.3 or 5.4, is read again in the syntax of LuaJIT's LJ_52 builds, from a
+// copy with the syntax that even those builds do not have written in syntax
+// they have (see rewrite).
 package parse
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -30,54 +33,88 @@ const xpcallArgsStart = 2
 // bundle missing a module must not be produced silently.
 var errUnsupportedNode = errors.New("the require walker does not handle")
 
-// errBadMark is the cause of the error for a string of the marked copy whose
-// mark names no string literal of the source (see markedCopy), which the copy
-// never writes.
-var errBadMark = errors.New("a string of the copy is marked with no literal of the source")
-
 type gopherParser struct{}
 
-// Parse reads source with the lexer, gives gopher-lua the copy of it written
-// in Lua 5.1 (see normalize), each string literal marked with its token (see
-// markedCopy), and walks the syntax tree for the uses of require. gopher-lua
-// reads the copy in its LuaJIT dialect, Lua 5.1 with goto and labels, which
-// the copy keeps. Where it rejects a call across a line break as ambiguous,
-// which Lua 5.2 reads as a call, the copy has the "(" on the line before, and
-// gopher-lua reads the copy again. When gopher-lua cannot read the copy, the
-// token scanner finds them instead (see scanRequires): a module must not fail
-// the build because of its syntax. Only a lexical error does, as no dialect
-// reads such a file.
+// Parse reads source with the fork's parser in its LuaJIT dialect and walks
+// the syntax tree for the uses of require; the positions of the module names
+// are the spans of their string literals. When the parser refuses the
+// source, the source is read with the lexer (lex.NewFile), and the parser
+// reads the copy of it that rewrite writes, with the syntax of LuaJIT's
+// LJ_52 builds (parse.Options.Lua52Compat): empty statements, statements
+// after break and calls across a line break, as Lua 5.2 reads them. When it
+// refuses the copy too, the token scanner finds the uses of require instead
+// (see scanRequires): a module must not fail the build because of its
+// syntax. Only a lexical error does, as no dialect reads such a file.
 func (p *gopherParser) Parse(source []byte, filename string) (Result, error) {
+	chunk, err := parse.ParseChunk(readable(source), filename, luaJIT(false))
+	if err == nil {
+		return walk(chunk, nil)
+	}
+
 	tokens, err := significantTokens(source)
 	if err != nil {
 		return Result{}, fmt.Errorf("parsing lua source %q: %w", filename, err)
 	}
 
-	var (
-		chunk []ast.Stmt
-		joins map[int]bool
-	)
+	copied := rewrite(source, tokens)
 
-	for {
-		chunk, err = parse.ParseBytes(markedCopy(source, tokens, joins), filename, parse.LuaJIT)
-
-		line, ambiguous := ambiguousCall(err)
-		if !ambiguous || joins[line] {
-			break
-		}
-
-		if joins == nil {
-			joins = map[int]bool{}
-		}
-
-		joins[line] = true
-	}
-
+	chunk, err = parse.ParseChunk(copied.text, filename, luaJIT(true))
 	if err != nil {
-		return Result{Requires: scanRequires(source, tokens), Fallback: newFallback(err)}, nil
+		return Result{Requires: scanRequires(source, tokens), Fallback: newFallback(err, tokens)}, nil
 	}
 
-	requires, err := findRequires(chunk, tokens)
+	return walk(chunk, copied)
+}
+
+// significantTokens returns the tokens of src without its comments, read the
+// way the interpreter reads a file it loads (see lex.NewFile). The error is a
+// lexical error, of source no dialect reads.
+func significantTokens(src []byte) ([]lex.Token, error) {
+	all, err := lex.NewFile(src).Tokens()
+	if err != nil {
+		return nil, err //nolint:wrapcheck // a *lex.Error, which says what went wrong and where.
+	}
+
+	tokens := make([]lex.Token, 0, len(all))
+
+	for _, tok := range all {
+		if tok.Kind != lex.Comment && tok.Kind != lex.LongComment {
+			tokens = append(tokens, tok)
+		}
+	}
+
+	return tokens, nil
+}
+
+// luaJIT returns the options of the fork's parser in its LuaJIT dialect,
+// with the syntax of LuaJIT's LJ_52 builds when lua52 is set.
+func luaJIT(lua52 bool) parse.Options {
+	return parse.Options{Dialect: parse.LuaJIT, Comments: false, Shebang: false, Tokens: false, Lua52Compat: lua52}
+}
+
+// readable returns source as the fork's parser reads it the way the
+// interpreter reads a file it loads (lex.Header): the fork's lexer skips a
+// byte order mark and a first line that starts with "#" itself, but ends that
+// line at a "\r" too, as LuaJIT does, where PUC Lua and luamerge end it at
+// the first "\n" only. The header of such a line becomes spaces.
+func readable(source []byte) []byte {
+	header := lex.Header(source)
+	if bytes.IndexByte(source[:header], '\r') < 0 {
+		return source
+	}
+
+	readable := bytes.Clone(source)
+	for i := range header {
+		readable[i] = ' '
+	}
+
+	return readable
+}
+
+// walk returns the uses of require in chunk, read from the source or, when
+// copied is not nil, from that copy of it.
+func walk(chunk *ast.Chunk, copied *sourceCopy) (Result, error) {
+	requires, err := findRequires(chunk.Stmts, chunk.Lines.Source(), copied)
 	if err != nil {
 		return Result{}, err
 	}
@@ -85,25 +122,13 @@ func (p *gopherParser) Parse(source []byte, filename string) (Result, error) {
 	return Result{Requires: requires, Fallback: nil}, nil
 }
 
-// ambiguousCall returns the line of the "(" that err, an error gopher-lua
-// reports, rejects as the start of an ambiguous call across a line break.
-func ambiguousCall(err error) (int, bool) {
-	var syntaxErr *parse.Error
-	if !errors.As(err, &syntaxErr) || syntaxErr.Token != "(" ||
-		syntaxErr.Message != "ambiguous syntax (function call x new statement)" {
-		return 0, false
-	}
-
-	return syntaxErr.Pos.Line, true
-}
-
-// newFallback describes err, the error gopher-lua reports for the marked copy
-// of a source, as the Fallback of the source. The copy has the lines of the
-// source, but not its columns or its tokens, so only the line and the token
-// gopher-lua read are kept, a string without its mark (see errorToken). At
-// the end of the copy gopher-lua names the token "<eof>", on the line of the
-// end; an error of a limit names no token.
-func newFallback(err error) *Fallback {
+// newFallback describes err, the error the fork's parser reports for the copy
+// of a source (see rewrite), whose tokens without comments are tokens, as
+// the Fallback of the source. The copy has the lines of the source, so the
+// line is the line of the error, and at the end of the copy, where the parser
+// names the token "<eof>", the line of the last token; an error of a limit
+// names no token.
+func newFallback(err error, tokens []lex.Token) *Fallback {
 	var syntaxErr *parse.Error
 	if !errors.As(err, &syntaxErr) {
 		// Not a syntax error: the parser failed some other way.
@@ -117,7 +142,12 @@ func newFallback(err error) *Fallback {
 
 	switch syntaxErr.Token {
 	case "<eof>":
-		return &Fallback{Line: syntaxErr.Pos.Line, Reason: message + " at the end of the file"}
+		line := syntaxErr.Pos.Line
+		if len(tokens) > 0 {
+			line = tokens[len(tokens)-1].Line
+		}
+
+		return &Fallback{Line: line, Reason: message + " at the end of the file"}
 	case "":
 		return &Fallback{Line: syntaxErr.Pos.Line, Reason: message}
 	default:
@@ -127,35 +157,39 @@ func newFallback(err error) *Fallback {
 	}
 }
 
-// errorToken returns the token a syntax error of gopher-lua names, a string
-// as its value without its mark. gopher-lua names a token as Lua prints it: a
-// string by its opening quote and its value up to the first NUL byte, where
-// the mark of a string of the marked copy starts (see markValue), so a value
-// with a NUL byte of its own is cut there.
+// errorToken returns the token a syntax error of the parser names, a string
+// as its value. The parser names a token as Lua prints it: a short string by
+// its quotes around its value, a long one by its brackets around it, each up
+// to the first NUL byte of the value.
 func errorToken(token string) string {
-	if token == "" || token[0] != '"' && token[0] != '\'' {
+	switch {
+	case token == "":
+		return token
+	case token[0] == '"' || token[0] == '\'':
+		return strings.TrimSuffix(token[1:], token[:1])
+	case token[0] == '[':
+		level := strings.IndexByte(token[1:], '[')
+		if len(token) < len("[[") || level < 0 || strings.Trim(token[1:1+level], "=") != "" {
+			return token
+		}
+
+		return strings.TrimSuffix(token[level+2:], "]"+strings.Repeat("=", level)+"]")
+	default:
 		return token
 	}
-
-	value := token[1:]
-	if before, _, marked := strings.Cut(value, string(markSeparator)); marked {
-		return before
-	}
-
-	return strings.TrimSuffix(value, token[:1])
 }
 
-// findRequires walks a parsed chunk and returns every use of require in it.
-// It fails on a node type the walker does not know. When the chunk was read
-// from the marked copy of a source (see markedCopy), tokens are the tokens of
-// the source without its comments, and the literal of each static call has
-// its position in the source; nil tokens leave every position unknown.
-func findRequires(chunk []ast.Stmt, tokens []lex.Token) ([]RequireInfo, error) {
+// findRequires walks a parsed chunk, read from text, and returns every use of
+// require in it. It fails on a node type the walker does not know. When text
+// is copied, a copy of a source (see rewrite), the literal of each static
+// call has its position in the source.
+func findRequires(chunk []ast.Stmt, text []byte, copied *sourceCopy) ([]RequireInfo, error) {
 	walker := &requireWalker{
 		requires: []RequireInfo{},
 		err:      nil,
 		scopes:   nil,
-		tokens:   tokens,
+		text:     text,
+		copied:   copied,
 	}
 	walkBlock(walker, chunk)
 
@@ -172,34 +206,49 @@ type requireWalker struct {
 	err error
 	// scopes are the blocks the walk is in, the innermost last.
 	scopes []scope
-	// tokens are the tokens of the source whose marked copy the chunk was
-	// read from, or nil (see findRequires).
-	tokens []lex.Token
+	// text is the text the chunk was read from: the source, or copied.
+	text []byte
+	// copied is the copy of the source the chunk was read from, or nil.
+	copied *sourceCopy
 }
 
 // literal returns the value of the string str and where the string literal
-// it was read from lies in the source; the zero Span when the chunk was not
-// read from a marked copy, or when str was read from a name: gopher-lua reads
-// `a.b` as `a["b"]`.
+// it was read from lies in the source; the zero Span when str was read from
+// a name: the parser reads `a.b` as `a["b"]`, and a string literal starts
+// with its quote or its long bracket.
 func (w *requireWalker) literal(str *ast.StringExpr) (string, Span) {
-	if w.tokens == nil {
+	span := str.Span()
+	if span.Start >= span.End || !strings.ContainsRune(`"'[`, rune(w.text[span.Start])) {
 		return str.Value, Span{Start: 0, End: 0}
 	}
 
-	value, index, marked := cutMark(str.Value)
-	if !marked {
-		return value, Span{Start: 0, End: 0}
+	if w.copied == nil {
+		return str.Value, Span{Start: span.Start, End: span.End}
 	}
 
-	if index >= len(w.tokens) || w.tokens[index].Kind != lex.String && w.tokens[index].Kind != lex.LongString {
-		if w.err == nil {
-			w.err = fmt.Errorf("line %d: %w: %q", str.Line(), errBadMark, str.Value)
-		}
+	return str.Value, Span{Start: w.copied.offset(span.Start, false), End: w.copied.offset(span.End, true)}
+}
 
-		return value, Span{Start: 0, End: 0}
+// callLine returns the line of call that a warning about it names: the line
+// of its arguments, as the parser numbers it. In a copy of a source (see
+// rewrite), a "(" of the arguments that starts a line is a call across a
+// line break, which only Lua 5.2 and later read, and the call is on the
+// line of the token before it, the end of the called expression.
+func (w *requireWalker) callLine(call *ast.FuncCallExpr) int {
+	line := call.Line()
+	if w.copied == nil || call.Func == nil {
+		return line
 	}
 
-	return value, Span{Start: w.tokens[index].Start, End: w.tokens[index].End}
+	tokens := w.copied.tokens
+	after := w.copied.offset(call.Func.OuterSpan().End, true)
+	i := sort.Search(len(tokens), func(i int) bool { return tokens[i].Start >= after })
+
+	if i > 0 && i < len(tokens) && w.copied.isOpenParen(tokens[i]) && tokens[i].Line > tokens[i-1].Line {
+		return tokens[i-1].Line
+	}
+
+	return line
 }
 
 // scope is what a block declares about the name require. A local named
@@ -353,9 +402,7 @@ func walkAssign(w *requireWalker, stmt *ast.AssignStmt) {
 // after the declaration, but the name of a local function is in scope in its
 // own body.
 func walkLocalAssign(w *requireWalker, stmt *ast.LocalAssignStmt) {
-	// gopher-lua gives `local function f` the line of its end as its last
-	// line and `local f = function` no last line.
-	if stmt.LastLine() != 0 && len(stmt.Names) == 1 {
+	if stmt.IsFunction {
 		w.declare(stmt.Names[0], false)
 		walkExprs(w, stmt.Exprs)
 
@@ -458,7 +505,7 @@ func walkExpr(w *requireWalker, expr ast.Expr) {
 		walkExpr(w, expr.Expr)
 	case *ast.UnaryLenOpExpr:
 		walkExpr(w, expr.Expr)
-	case *ast.IdentExpr, *ast.StringExpr, *ast.NumberExpr,
+	case *ast.IdentExpr, *ast.StringExpr, *ast.NumberExpr, *ast.CdataNumberExpr,
 		*ast.TrueExpr, *ast.FalseExpr, *ast.NilExpr, *ast.Comma3Expr:
 		// Leaf expressions, no children.
 	default:
@@ -508,7 +555,7 @@ func checkRequireCall(w *requireWalker, call *ast.FuncCallExpr) ast.Expr {
 	}
 
 	info := RequireInfo{
-		Name: "", Line: call.Line(), Static: false, Literal: Span{Start: 0, End: 0}, Protected: protected,
+		Name: "", Line: w.callLine(call), Static: false, Literal: Span{Start: 0, End: 0}, Protected: protected,
 		Indirect: "",
 	}
 

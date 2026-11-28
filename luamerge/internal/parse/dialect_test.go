@@ -9,10 +9,11 @@ import (
 )
 
 // TestParse_DialectSyntax: the requires of a file in the syntax of any
-// dialect are found on their lines, next to constructs that gopher-lua, a
-// parser of Lua 5.1, rejects: the operators of Lua 5.3, the attributes of Lua
-// 5.4, the declarations of Lua 5.5, the numerals of LuaJIT, a statement after
-// break (Lua 5.2), names beyond ASCII (LuaJIT). The constructs that read
+// dialect are found on their lines, next to constructs of other dialects
+// than LuaJIT, whose parser reads the file: the operators of Lua 5.3, the
+// attributes of Lua 5.4, the declarations of Lua 5.5, a statement after
+// break, an empty statement and a call across a line break (Lua 5.2), and
+// LuaJIT's own numerals and names beyond ASCII next to them. The constructs that read
 // differently in different dialects are read the way the dialect that accepts
 // the file reads them: goto and global are names where they cannot start a
 // statement, and a numeral ends where Lua 5.1 (before "..") or Lua 5.2 and

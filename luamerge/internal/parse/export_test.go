@@ -6,6 +6,7 @@ package parse
 
 import (
 	"github.com/tarantool-contrib/go-moonscript/lua/ast"
+	gopherparse "github.com/tarantool-contrib/go-moonscript/lua/parse"
 
 	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
@@ -13,17 +14,40 @@ import (
 // ErrUnsupportedNodeForTest is errUnsupportedNode, exported for tests.
 var ErrUnsupportedNodeForTest = errUnsupportedNode
 
-// FindRequiresForTest is findRequires of a chunk read from anything but a
-// marked copy, exported for tests: a node type the walker does not know
-// cannot come out of the parser, only be built by hand.
+// FindRequiresForTest is findRequires of a tree read from a source itself,
+// exported for tests: a node type the walker does not know cannot come out of
+// the parser, only be built by hand.
 func FindRequiresForTest(chunk []ast.Stmt) ([]RequireInfo, error) {
-	return findRequires(chunk, nil)
+	return findRequires(chunk, nil, nil)
 }
 
-// NormalizeForTest is normalize, exported for tests: the copy of a source
-// that gopher-lua reads.
-func NormalizeForTest(src []byte) ([]byte, error) {
-	return normalize(src)
+// RewriteForTest is rewrite, exported for tests: the copy of a source that
+// the parser reads when it refuses the source.
+func RewriteForTest(src []byte) ([]byte, error) {
+	tokens, err := significantTokens(src)
+	if err != nil {
+		return nil, err
+	}
+
+	return rewrite(src, tokens).text, nil
+}
+
+// ParseCopyForTest returns what Parse finds in src when the parser reads its
+// copy (see rewrite), as for a source the parser refuses, whatever src is.
+func ParseCopyForTest(src []byte, filename string) (Result, error) {
+	tokens, err := significantTokens(src)
+	if err != nil {
+		return Result{}, err
+	}
+
+	copied := rewrite(src, tokens)
+
+	chunk, err := gopherparse.ParseChunk(copied.text, filename, luaJIT(true))
+	if err != nil {
+		return Result{Requires: scanRequires(src, tokens), Fallback: newFallback(err, tokens)}, nil
+	}
+
+	return walk(chunk, copied)
 }
 
 // ScanRequiresForTest runs the token scanner on src, which Parse runs only on
