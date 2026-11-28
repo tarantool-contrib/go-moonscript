@@ -1,14 +1,30 @@
 name: CI
 
-# lint: golangci-lint (go vet, staticcheck, ...; formatting) and go vet over
-# every package but the vendored gopher-lua.
-# generate: the generated files (moonscript/parse/parser_gen.go, moonscript/runtime/lua), go.mod
-# and lua/moonscript.patch are up to date.
-# test: the test suite on the oldest and the newest supported Go, and
-# pristine gopher-lua's own suites against the patched copy; the race
-# detector and coverage on the newest.
+# The monorepo of the Go Lua tooling: the gopher-lua fork (lua/), the
+# MoonScript port (moonscript/, cmd/moon, cmd/moonc), luascope/ and
+# luamerge/, one Go module.
+#
+# lint: go vet over every package but the fork's root package (upstream's
+# VM, which has 4 known findings); golangci-lint with the root config
+# (moonscript/, cmd/, internal/ and the fork's own packages lua/scope,
+# lua/format, lua/flow and lua/sandbox, not upstream's code) and with the
+# configs luascope/ and luamerge/ had in their repositories; codespell over
+# luascope/ and luamerge/ (.codespellrc).
+# generate: the generated files (moonscript/parse/parser_gen.go,
+# moonscript/runtime/lua), go.mod and lua/moonscript.patch are up to date.
+# test: the test suite on the oldest and the newest supported Go, with the
+# Lua interpreters luamerge's tests run bundles on, and pristine
+# gopher-lua's own suites against the fork; the race detector and coverage
+# on the newest.
+# testrace: luascope and luamerge 100 times with the race detector, as in
+# their repositories.
+# govulncheck: the module's dependencies against the Go vulnerability
+# database.
+# goreleaser: luamerge/.goreleaser.yml is valid (release.yml publishes, on a
+# version tag only).
 # corpus: the parser, the compiler and the linter against upstream moonc
-# 0.8.0 on real-world code (scripts/check-corpus.sh, moonscript/testdata/corpus/).
+# 0.8.0 on real-world code (scripts/check-corpus.sh,
+# moonscript/testdata/corpus/).
 #
 # Weekly, everything runs again, against the latest patch release of each
 # Go version.
@@ -31,6 +47,16 @@ concurrency:
 
 env:
   GOLANGCI_LINT_VERSION: v2.15.0
+  CODESPELL_VERSION: 2.4.1
+  # actions/setup-go exports GOTOOLCHAIN=local, so the job runs exactly the
+  # Go it sets up. v1.7.0 was seen panicking in a scheduled run of
+  # go-luamerge; v1.8.0 needs go >= 1.26.0.
+  GOVULNCHECK_VERSION: v1.8.0
+  # luamerge's tests run every bundle on each Lua interpreter on PATH and
+  # skip when there is none; listing the interpreters the jobs install makes
+  # a missing one fail those tests instead (see luamerge/internal/luatest).
+  # Each name is also the Ubuntu package that provides it.
+  LUATEST_INTERPRETERS: lua5.1,lua5.2,lua5.3,lua5.4,luajit
 
 jobs:
   lint:
@@ -44,11 +70,46 @@ jobs:
           go-version: '1.27.x'
 
       - name: go vet
-        run: go vet $(go list ./... | grep -v -e '/lua$' -e '/lua/')
+        run: go vet $(go list ./... | grep -v '/lua$')
 
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      # every tree, also those whose golangci-lint config formats nothing
+      # (luascope's) or which it excludes (upstream's code in lua/)
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt-ed: $unformatted"
+            exit 1
+          fi
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+      - name: golangci-lint (luascope)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: luascope
+
+      - name: golangci-lint (luamerge)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: luamerge
+
+  codespell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: install codespell
+        run: pipx install codespell==${CODESPELL_VERSION}
+
+      - name: codespell
+        run: codespell ./luascope ./luamerge
 
   generate:
     runs-on: ubuntu-24.04
@@ -91,6 +152,16 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
 
+      - name: install Lua interpreters
+        run: |
+          interpreters="${LUATEST_INTERPRETERS//,/ }"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $interpreters
+          for lua in $interpreters; do
+            printf '%s: ' "$lua"
+            "$lua" -e 'print((jit and jit.version) or _VERSION)'
+          done
+
       - name: go test
         run: go test ./...
 
@@ -115,6 +186,69 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+  testrace:
+    name: testrace (${{ matrix.tree }})
+    runs-on: ubuntu-24.04
+    # luascope's suite takes 22 minutes with -race -count=100 on a GitHub
+    # runner; timeout-minutes = go test -timeout + 5 leaves room for a slow
+    # one.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [luascope, luamerge]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27.x'
+
+      - name: install Lua interpreters
+        if: matrix.tree == 'luamerge'
+        run: |
+          interpreters="${LUATEST_INTERPRETERS//,/ }"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $interpreters
+          for lua in $interpreters; do
+            printf '%s: ' "$lua"
+            "$lua" -e 'print((jit and jit.version) or _VERSION)'
+          done
+
+      # -count=100 shakes out tests that depend on the order of execution.
+      - name: go test -race -count=100
+        run: go test -race -count=100 -timeout=40m ./${{ matrix.tree }}/...
+
+  govulncheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: '1.27.x'
+
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+
+      - name: govulncheck
+        run: govulncheck ./...
+
+  goreleaser:
+    # Checks the release config only; nothing is built or published here.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.13.3
+          args: check
+          workdir: luamerge
 
   corpus:
     # The real-world corpus: 19,960 files of 1,609 GitHub repositories and

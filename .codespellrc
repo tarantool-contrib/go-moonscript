@@ -1,0 +1,8 @@
+[codespell]
+# Checks luascope/ and luamerge/, as their repositories did (CI: codespell
+# ./luascope ./luamerge, run at the root); the rest of the repository has
+# upstream gopher-lua's and MoonScript's text and is not checked. The words:
+# "ue" (luamerge), "fo" (luascope).
+skip = ./.git,./vendor,./go.sum,*.tar.gz,*.gz,./luamerge/testdata
+ignore-words-list = ue,fo
+check-filenames = true

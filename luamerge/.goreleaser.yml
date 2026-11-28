@@ -1,4 +1,6 @@
-# GoReleaser configuration for luamerge
+# GoReleaser configuration for luamerge, run in luamerge/ (workdir of the
+# goreleaser action in .github/workflows/release.yml): paths are relative to
+# this directory, the module is the root one.
 # https://goreleaser.com
 
 version: 2
@@ -39,7 +41,7 @@ checksum:
 
 dockers_v2:
   - images:
-      - "ghcr.io/tarantool/go-luamerge"
+      - "ghcr.io/tarantool-contrib/luamerge"
     tags:
       - "{{ .Version }}"
       - "{{ if not .IsNightly }}latest{{ end }}"

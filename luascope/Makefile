@@ -1,13 +1,11 @@
 # Path to the LuaJIT binary of Tarantool; see "Testing" in README.md.
 LUAJIT ?=
 
-# Version of golangci-lint and the Go toolchain it must run on: a linter built
-# with an older Go cannot type-check a newer one; see CONTRIBUTING.md.
-GOLANGCI_LINT_VERSION ?= v2.11.4
-GOLANGCI_LINT_GO ?= go1.26.1
-
-# Paths checked for spelling.
-SPELL_PATHS ?= .
+# Version of golangci-lint (the monorepo's CI's) and the Go toolchain it must
+# run on: a linter built with an older Go cannot type-check a newer one; see
+# CONTRIBUTING.md. "local" is the go on PATH.
+GOLANGCI_LINT_VERSION ?= v2.15.0
+GOLANGCI_LINT_GO ?= local
 
 .PHONY: all
 all: test lint spell
@@ -33,9 +31,10 @@ cover:
 lint:
 	@GOTOOLCHAIN=$(GOLANGCI_LINT_GO) golangci-lint run ./...
 
+# The config is the root's .codespellrc.
 .PHONY: spell
 spell:
-	@codespell $(SPELL_PATHS)
+	@cd .. && codespell ./luascope
 
 .PHONY: fmt
 fmt:

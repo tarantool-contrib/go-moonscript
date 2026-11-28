@@ -1,7 +1,7 @@
-# Keeps the actions of .github/workflows (pinned by commit) at their latest
-# releases: a weekly pull request per update, grouped into one. The module
-# has no dependencies outside the standard library (gopher-lua is vendored
-# in third_party/).
+# Keeps the actions of .github/workflows (pinned by commit) and the module's
+# dependencies (luamerge's: go-config, pflag, testify) at their latest
+# releases: a weekly pull request per ecosystem, its updates grouped into
+# one.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -10,4 +10,11 @@ updates:
       interval: weekly
     groups:
       actions:
+        patterns: ['*']
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      modules:
         patterns: ['*']

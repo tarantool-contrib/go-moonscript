@@ -3,9 +3,10 @@ Thanks for the pull request! Describe what it changes and why.
 Link the issue it closes, if any: "Closes #123".
 -->
 
-- [ ] Tests added or updated
-- [ ] `go test ./...` and `golangci-lint run` pass
-- [ ] Generated files regenerated (`go generate ./...`), if their sources changed
-- [ ] Output still identical to upstream MoonScript 0.8.0, or the difference is documented in README
-- [ ] `CHANGELOG.md` updated under `Unreleased`
-- [ ] Documentation updated (README, doc comments) if the public API changed
+- [ ] Tests added or updated; a bug fix has a test that fails without the fix
+- [ ] `go test ./...` and golangci-lint pass (the root config and, for `luascope/` and `luamerge/`, their own; see CONTRIBUTING.md)
+- [ ] For `luascope/` and `luamerge/`: `codespell ./luascope ./luamerge` passes
+- [ ] Generated files regenerated (`go generate ./...`, `scripts/gen-gopher-lua-patch.sh` for `lua/`), if their sources changed
+- [ ] Output still identical to the reference (upstream MoonScript 0.8.0, lua5.1, LuaJIT), or the difference is documented
+- [ ] The changelog of the tree (`CHANGELOG.md`, `luascope/CHANGELOG.md`, `luamerge/CHANGELOG.md`) updated under `Unreleased`
+- [ ] Documentation updated (README, doc comments, `Example…` functions) if the public API changed

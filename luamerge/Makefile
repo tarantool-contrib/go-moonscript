@@ -1,11 +1,11 @@
 GOTEST := go test
 COVERAGE_FILE := coverage.out
-GOLANGCI_LINT_VERSION := v2.14.0
+GOLANGCI_LINT_VERSION := v2.15.0
 
 .PHONY: codespell
 codespell:
 	@echo "Running codespell"
-	@codespell
+	@cd .. && codespell ./luamerge # the config is the root's .codespellrc
 
 .PHONY: test
 test:

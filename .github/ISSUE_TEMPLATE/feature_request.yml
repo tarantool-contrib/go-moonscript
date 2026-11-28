@@ -2,18 +2,30 @@ name: Feature request
 description: Suggest a new feature or a change in behavior.
 labels: ["enhancement"]
 body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - "moonscript: the compiler, moonc, moon, the runtime"
+        - "lua: the gopher-lua fork (VM, parser, scope, format, flow, sandbox)"
+        - "luascope: globals and allowlists"
+        - "luamerge: the library or the CLI"
+        - "Something else"
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:
       label: Problem
-      description: What are you trying to do, and why is it hard or impossible now?
+      description: What are you trying to do, on which code, and why is it hard or impossible now?
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: Proposed solution
-      description: How you would like it to work. An API sketch in Go, or a command line, is welcome.
+      description: How you would like it to work. An API sketch in Go, a command line, a flag or a config option is welcome.
     validations:
       required: true
   - type: textarea

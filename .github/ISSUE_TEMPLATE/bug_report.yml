@@ -1,18 +1,32 @@
 # Overrides the organization's template, which asks for a Tarantool
-# version: this module doesn't run in Tarantool.
+# version: these tools don't run in Tarantool. Merges the templates of
+# go-moonscript, go-luascope and go-luamerge.
 name: Bug report
-description: The output differs from upstream MoonScript 0.8.0, or something does not work as documented.
+description: The output differs from the reference (upstream MoonScript 0.8.0, lua5.1, LuaJIT), or something does not work as documented.
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
         Thanks for the report. Security issues must not be reported here — see SECURITY.md.
+        Please reduce the problem to the smallest input you can, so it can become a test.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - "moonscript: the compiler, moonc, moon, the runtime"
+        - "lua: the gopher-lua fork (VM, parser, scope, format, flow, sandbox)"
+        - "luascope: globals and allowlists"
+        - "luamerge: the library or the CLI"
+        - "Something else"
+    validations:
+      required: true
   - type: input
     id: version
     attributes:
-      label: go-moonscript version
-      description: A release tag, a commit, or the version in your go.mod.
+      label: Version
+      description: A release tag, a commit, the version in your go.mod, or `luamerge --version`.
       placeholder: "v0.1.0"
     validations:
       required: true
@@ -27,23 +41,24 @@ body:
   - type: textarea
     id: input
     attributes:
-      label: MoonScript input
-      description: A minimal input that shows the problem.
-      render: moonscript
+      label: Input
+      description: |
+        A minimal input that shows the problem: a MoonScript or Lua chunk, or
+        for luamerge the project layout and the entry file.
     validations:
       required: true
   - type: textarea
     id: command
     attributes:
       label: Command or API call
-      description: For example `moonc -p input.moon`, `moon input.moon`, or the Go code calling the library.
+      description: For example `moonc -p input.moon`, `moon input.moon`, `luamerge --entry main.lua`, or the Go code calling the library.
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
       label: Actual output
-      description: What go-moonscript printed or returned, including error messages.
+      description: What the tool printed or returned, including error messages (for luamerge, the bundle or its output).
       render: text
     validations:
       required: true
@@ -51,7 +66,18 @@ body:
     id: expected
     attributes:
       label: Expected output
-      description: What upstream MoonScript 0.8.0 (`moonc`, `moon`) gives for the same input, if you can run it, or what you expected.
+      description: |
+        What the reference gives for the same input, if you can run it
+        (upstream `moonc`/`moon` 0.8.0, lua5.1, LuaJIT, Tarantool's LuaJIT),
+        or what you expected.
       render: text
     validations:
       required: true
+  - type: input
+    id: reference
+    attributes:
+      label: Reference version
+      description: The version of the reference, if the problem is a difference from it.
+      placeholder: "tarantool/luajit 8af934d"
+    validations:
+      required: false
