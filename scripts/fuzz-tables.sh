@@ -4,7 +4,7 @@
 #
 #   scripts/fuzz-tables.sh [seed [count [ops]]]
 #
-# runs third_party/gopher-lua/testdata/compat/table_fuzz.lua with
+# runs lua/testdata/compat/table_fuzz.lua with
 # FUZZ_SEED=seed FUZZ_N=count FUZZ_OPS=ops (default 2 1000 60) on lua5.1
 # (moonref:0.8.0 image) with its garbage collector stopped (it makes the
 # dead keys that are strings unusable for a later t[k] = v at times, which
@@ -16,7 +16,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 image=${MOONREF:-moonref:0.8.0}
 export FUZZ_SEED=${1:-2} FUZZ_N=${2:-1000} FUZZ_OPS=${3:-60}
-dir=$root/third_party/gopher-lua/testdata/compat
+dir=$root/lua/testdata/compat
 
 ref=$(mktemp)
 trap 'rm -f "$ref"' EXIT
@@ -24,4 +24,4 @@ docker run --rm --user "$(id -u):$(id -g)" -e FUZZ_SEED -e FUZZ_N -e FUZZ_OPS \
 	-v "$dir":/data -w /data "$image" \
 	lua5.1 -e 'collectgarbage("stop")' table_fuzz.lua >"$ref"
 cd "$root"
-FUZZ_REF=$ref go test -count=1 -run '^TestTableFixFuzz$' ./third_party/gopher-lua
+FUZZ_REF=$ref go test -count=1 -run '^TestTableFixFuzz$' ./lua

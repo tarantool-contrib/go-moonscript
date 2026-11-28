@@ -1,4 +1,4 @@
--- Generates third_party/gopher-lua/testdata/compat/lib_pattern_fuzz.lua, a
+-- Generates lua/testdata/compat/lib_pattern_fuzz.lua, a
 -- differential test of Lua patterns: random patterns and subjects run
 -- through string.find (also plain), string.match, string.gsub and
 -- string.gmatch, whose output TestCompat compares with PUC Lua 5.1's (see

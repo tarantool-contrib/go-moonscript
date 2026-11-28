@@ -6,7 +6,7 @@ package runtime
 // interpreter:
 //
 //   - chunk names, syntax errors, loadfile/dofile and require are
-//     gopher-lua's own (third_party/gopher-lua/chunkname.go and loadlib.go):
+//     gopher-lua's own (lua/chunkname.go and loadlib.go):
 //     Lua chunk names ("@foo.moon", "=(command line)", source strings) are
 //     shown as luaO_chunkid does ("foo.moon:3:", "(command line)", [string
 //     "..."]) and debug.getinfo reports them as source (short_src is the
@@ -33,7 +33,7 @@ import (
 	"strconv"
 	"strings"
 
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 )
 
 // ChunkID is luaO_chunkid: the name Lua 5.1 shows in error positions and

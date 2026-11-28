@@ -7,7 +7,7 @@ package runtime
 // loadfile, with Lua chunk names, are gopher-lua's own.
 
 import (
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 )
 
 // numberString converts a number to a string as tostring does in the

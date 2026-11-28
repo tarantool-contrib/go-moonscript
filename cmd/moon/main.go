@@ -11,7 +11,7 @@
 // reference; argument parsing is an emulation of the argparse parser
 // moon.moon builds (args.go), with the same usage and error texts and exit
 // codes. --coverage/-c runs moonscript.cmd.coverage on the debug.sethook of
-// the patched gopher-lua (third_party/gopher-lua/hook.go).
+// the patched gopher-lua (lua/hook.go).
 // Line events fall on the lines they do in PUC Lua (the patched compiler
 // gives instructions luac's lines), so a hook of a script's own sees the
 // same lines.
@@ -73,7 +73,7 @@ import (
 	"os"
 	"runtime/debug"
 
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 
 	moonrt "github.com/tarantool-contrib/go-moonscript/runtime"
 )

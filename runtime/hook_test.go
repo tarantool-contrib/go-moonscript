@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 )
 
 // TestHooks runs the scripts in testdata/hooks, which record debug hook

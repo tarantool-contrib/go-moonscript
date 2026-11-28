@@ -1,4 +1,4 @@
-// Command luabench compares the speed of our VM (third_party/gopher-lua
+// Command luabench compares the speed of our VM (lua/
 // with the runtime's Lua 5.1 compatibility layer, set up as cmd/moon sets
 // it up) with PUC Lua 5.1.5 and LuaJIT 2.1 (interpreter, luajit -joff, and
 // JIT) on LuaJIT's benchmark suite (LuaJIT-test-cleanup bench/ at a pinned

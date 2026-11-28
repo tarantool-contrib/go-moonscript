@@ -38,13 +38,13 @@
 // sharing locals with the frames that survive the error (and the moon
 // driver loses the error its xpcall handler stored). This module therefore
 // carries a patched copy as one of its packages,
-// github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua
-// (third_party/gopher-lua/moonscript.patch is the change); the *lua.LState
+// github.com/tarantool-contrib/go-moonscript/lua
+// (lua/moonscript.patch is the change); the *lua.LState
 // and other Lua types of this package's API are that package's, not
 // github.com/yuin/gopher-lua's.
 //
 // The patched gopher-lua also has debug.sethook and debug.gethook with Lua
-// 5.1 semantics (third_party/gopher-lua/hook.go), which
+// 5.1 semantics (lua/hook.go), which
 // moonscript.cmd.coverage uses. That module deliberately differs from
 // upstream 0.8.0, whose hook is a tail call and never records anything on
 // Lua 5.1: its hook is not a tail call, and its report lists files sorted
@@ -63,7 +63,7 @@ import (
 	"fmt"
 	"strings"
 
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 
 	"github.com/tarantool-contrib/go-moonscript/ast"
 	"github.com/tarantool-contrib/go-moonscript/compiler"

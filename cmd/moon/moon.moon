@@ -3,7 +3,7 @@
 -- (cmd/moon/args.go emulates the argparse 0.7.2 parser below) and passed in
 -- as the chunk's first vararg, parse_args. --coverage uses the embedded
 -- moonscript.cmd.coverage on the debug.sethook of the patched gopher-lua
--- (third_party/gopher-lua/hook.go).
+-- (lua/hook.go).
 parse_args = ...
 
 moonscript = require "moonscript.base"

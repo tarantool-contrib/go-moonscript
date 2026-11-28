@@ -42,7 +42,7 @@ linters:
     # files with a "// Code generated ... DO NOT EDIT." header
     generated: strict
     paths:
-      - third_party/ # vendored gopher-lua, kept close to upstream
+      - ^lua/ # the gopher-lua fork, kept close to upstream
       - testdata/
       - parse/parser_gen\.go$ # internal/tools/genparser
       - parse/dispatch_gen\.go$ # internal/tools/gendispatch
@@ -58,7 +58,7 @@ formatters:
   exclusions:
     generated: strict
     paths:
-      - third_party/
+      - ^lua/
       - testdata/
       - parse/parser_gen\.go$
       - parse/dispatch_gen\.go$

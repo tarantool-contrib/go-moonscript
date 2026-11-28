@@ -18,7 +18,7 @@ import (
 	"strings"
 	"sync"
 
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 )
 
 // luaDefaultPath is package.path of the reference moonc: its launcher

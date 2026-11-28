@@ -3,7 +3,7 @@ name: CI
 # lint: golangci-lint (go vet, staticcheck, ...; formatting) and go vet over
 # every package but the vendored gopher-lua.
 # generate: the generated files (parse/parser_gen.go, runtime/lua), go.mod
-# and third_party/gopher-lua/moonscript.patch are up to date.
+# and lua/moonscript.patch are up to date.
 # test: the test suite on the oldest and the newest supported Go, and
 # pristine gopher-lua's own suites against the patched copy; the race
 # detector and coverage on the newest.
@@ -44,7 +44,7 @@ jobs:
           go-version: '1.27.x'
 
       - name: go vet
-        run: go vet $(go list ./... | grep -v /third_party/)
+        run: go vet $(go list ./... | grep -v -e '/lua$' -e '/lua/')
 
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
@@ -63,7 +63,7 @@ jobs:
       - name: go mod tidy
         run: go mod tidy -diff
 
-      - name: third_party/gopher-lua/moonscript.patch
+      - name: lua/moonscript.patch
         run: scripts/gen-gopher-lua-patch.sh --check
 
       - name: go generate
@@ -94,14 +94,14 @@ jobs:
       - name: go test
         run: go test ./...
 
-      - name: pristine gopher-lua suites against third_party/gopher-lua
+      - name: pristine gopher-lua suites against lua/
         run: scripts/check-gopher-lua-suite.sh
 
       - name: go test -race, with coverage
         if: matrix.go == '1.27.x'
         run: |
           go test -race -coverprofile=coverage.out \
-            -coverpkg=$(go list ./... | grep -v -e /third_party/ -e /internal/tools/ | paste -sd, -) ./...
+            -coverpkg=$(go list ./... | grep -v -e '/lua$' -e '/lua/' -e /internal/tools/ | paste -sd, -) ./...
           {
             echo '### Coverage'
             echo

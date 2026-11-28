@@ -1,5 +1,5 @@
 -- closures keep sharing locals with their frames after errors are caught
--- (gopher-lua v1.1.2 detached them: see third_party/gopher-lua)
+-- (gopher-lua v1.1.2 detached them: see lua)
 count = 0
 inc = -> count += 1
 pcall -> error "caught"

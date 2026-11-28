@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 )
 
 func TestMain(m *testing.M) {

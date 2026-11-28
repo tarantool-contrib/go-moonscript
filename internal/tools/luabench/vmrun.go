@@ -9,8 +9,8 @@ import (
 	"runtime/pprof"
 	"syscall"
 
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 	moonrt "github.com/tarantool-contrib/go-moonscript/runtime"
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
 )
 
 // vmMain is the "vm" subcommand: the runner of our VM,

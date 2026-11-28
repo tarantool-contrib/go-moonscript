@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 )
 
 // archives are the suites in testdata/archives, see SOURCES.md there.

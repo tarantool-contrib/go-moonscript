@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the test suites of pristine gopher-lua v1.1.2 (its Go tests,
 # _glua-tests and _lua5.1-tests, which are not vendored) against
-# third_party/gopher-lua, to catch regressions of the patched copy.
+# lua, to catch regressions of the patched copy.
 #
 # The copy deliberately behaves like PUC Lua 5.1 where gopher-lua didn't,
 # and some pristine assertions check the old behaviour. Those are corrected
@@ -13,7 +13,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 module=github.com/yuin/gopher-lua@v1.1.2
-ourpath=github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua
+ourpath=github.com/tarantool-contrib/go-moonscript/lua
 
 # Go tests of pristine behaviour that isn't Lua 5.1's
 skip_tests=(
@@ -33,10 +33,13 @@ mkdir -p "$cache"
 work=$(mktemp -d "$cache/go-moonscript-glsuite.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
-cp -a "$root/third_party/gopher-lua/." "$work/"
+cp -a "$root/lua/." "$work/"
 rm -f "$work/moonscript.patch"
 chmod -R u+w "$work"
-grep -rl "$ourpath" "$work" --include='*.go' --include='*.y' | xargs sed -i "s#$ourpath#github.com/yuin/gopher-lua#g"
+# the fork's import paths back to gopher-lua's ($ourpath alone is a prefix
+# of .../luamerge and .../luascope too)
+grep -rl "$ourpath" "$work" --include='*.go' --include='*.y' |
+	xargs sed -i -E "s#$ourpath([/\"])#github.com/yuin/gopher-lua\1#g"
 cp "$pristine"/*_test.go "$pristine/go.mod" "$pristine/go.sum" "$work/"
 cp -r "$pristine/_glua-tests" "$pristine/_lua5.1-tests" "$work/"
 chmod -R u+w "$work"

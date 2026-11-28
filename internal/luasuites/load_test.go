@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
-	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
-	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/parse"
 )
 
 // archiveSource is a Lua file of the archives (isLuaFile), as the parse

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerates the diff part of third_party/gopher-lua/moonscript.patch: the
+# Regenerates the diff part of lua/moonscript.patch: the
 # changes of the vendored copy against pristine gopher-lua v1.1.2, over the
 # files vendored here. The header (everything before the first "--- a/"
 # line: what changed, where it comes from, how to regenerate the generated
@@ -8,17 +8,17 @@
 # The pristine module comes from the Go module cache (`go mod download`).
 # Its import paths are rewritten to the vendored package's first, so the
 # diff doesn't show that change. The result is checked: applying the diff to
-# the pristine copy must reproduce third_party/gopher-lua exactly.
+# the pristine copy must reproduce lua exactly.
 #
 # Usage: scripts/gen-gopher-lua-patch.sh [--check]
 #   --check  fail if moonscript.patch is not up to date (CI)
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-vendored=$root/third_party/gopher-lua
+vendored=$root/lua
 patch_file=$vendored/moonscript.patch
 module=github.com/yuin/gopher-lua@v1.1.2
-ourpath=github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua
+ourpath=github.com/tarantool-contrib/go-moonscript/lua
 
 pristine=$(cd "$root" && go mod download -json "$module" | sed -n 's/^\s*"Dir": "\(.*\)",$/\1/p')
 [ -d "$pristine" ] || { echo "can't download $module" >&2; exit 1; }
@@ -49,7 +49,7 @@ done
 
 if [ "${1:-}" = "--check" ]; then
 	cmp -s "$work/new.patch" "$patch_file" || {
-		echo "third_party/gopher-lua/moonscript.patch is out of date: run scripts/gen-gopher-lua-patch.sh" >&2
+		echo "lua/moonscript.patch is out of date: run scripts/gen-gopher-lua-patch.sh" >&2
 		exit 1
 	}
 	echo "moonscript.patch is up to date"

@@ -5,8 +5,8 @@ import (
 
 	moonscript "github.com/tarantool-contrib/go-moonscript"
 	"github.com/tarantool-contrib/go-moonscript/lint"
+	lua "github.com/tarantool-contrib/go-moonscript/lua"
 	"github.com/tarantool-contrib/go-moonscript/runtime"
-	lua "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua"
 )
 
 func ExampleToLua() {

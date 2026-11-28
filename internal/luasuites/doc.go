@@ -1,5 +1,5 @@
 // Package luasuites runs third-party Lua test suites on the Lua VM of the
-// moon runner (the patched gopher-lua in third_party/gopher-lua, set up by
+// moon runner (the patched gopher-lua in lua/, set up by
 // runtime.NewState) and pins their outcomes. It has no API; see
 // the tests (Linux only) and testdata/README.md.
 //
