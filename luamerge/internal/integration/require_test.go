@@ -133,8 +133,8 @@ func TestCLI_IndirectRequire(t *testing.T) {
 	}{
 		{
 			// Every form that used to be dropped silently, printing what the
-			// module returns; `print((f()))` keeps the loader data Lua 5.4+
-			// returns after the module out of the output.
+			// module returns; `print((f()))` keeps any second result of the
+			// call out of the output.
 			name: "indirect forms",
 			project: modules(luatest.Project{
 				"main.lua": `local r = require; print((r("m1")))

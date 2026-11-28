@@ -14,14 +14,15 @@ import (
 // what a list attributes to a runtime, the runtime provides, and what a
 // runtime provides, a list attributes to it.
 //
-// Measured: PUC Lua 5.1 to 5.4 of Alpine 3.24 and Ubuntu 22.04 and 24.04,
-// Lua 5.5.1, LuaJIT 2.1 as released in 2017 (Ubuntu 22.04) and of 2023 and
-// 2026, OpenResty's LuaJIT of 2025 (Alpine), Tarantool 2.11.5, 3.0.2 (static
+// The runtimes are the ones luamerge supports: PUC Lua 5.1, LuaJIT and
+// Tarantool. Measured: PUC Lua 5.1 of Alpine 3.24 and Ubuntu 22.04 and 24.04,
+// LuaJIT 2.1 as released in 2017 (Ubuntu 22.04) and of 2023 and 2026,
+// OpenResty's LuaJIT of 2025 (Alpine), Tarantool 2.11.5, 3.0.2 (static
 // build), 3.8.1 (static build) and 3.9.0.
 
 // standardLibrary are the modules of the standard library that every runtime
-// has in package.loaded before the program starts: PUC Lua 5.1 to 5.5,
-// LuaJIT and Tarantool alike. require returns such a module from
+// has in package.loaded before the program starts: PUC Lua 5.1, LuaJIT and
+// Tarantool alike. require returns such a module from
 // package.loaded before it runs any searcher, so it never loads a file for
 // one of these names, whatever files the project has.
 func standardLibrary() []string {
@@ -38,12 +39,9 @@ func isStandardLibrary(name string) bool {
 type runtimes uint
 
 const (
-	// lua51 is PUC Lua 5.1, which has nothing beyond the standard library.
-	lua51 runtimes = 1 << iota
-	lua52
-	lua53
-	lua54
-	lua55
+	// lua51 is PUC Lua 5.1, which has nothing beyond the standard library: no
+	// module is listed for it, and it is a runtime the tests know.
+	lua51 runtimes = 1 << iota //nolint:unused // See above.
 	// luaJIT is LuaJIT 2.1, OpenResty's branch of it included.
 	luaJIT
 	// luaJIT2021 is LuaJIT 2.1 as of 2021 and later, which has the string
@@ -68,13 +66,13 @@ const (
 // runtimeNames names each runtime, in the order of their bits.
 func runtimeNames() []string {
 	return []string{
-		"Lua 5.1", "Lua 5.2", "Lua 5.3", "Lua 5.4", "Lua 5.5",
+		"Lua 5.1",
 		"LuaJIT", "LuaJIT since 2021", "OpenResty's LuaJIT",
 		"Tarantool", "Tarantool 3", "Tarantool's static build",
 	}
 }
 
-// String names the runtimes in r, as in "Lua 5.4, Lua 5.5 and Tarantool".
+// String names the runtimes in r, as in "LuaJIT and Tarantool".
 func (r runtimes) String() string {
 	names := r.names()
 
@@ -105,11 +103,9 @@ func (r runtimes) names() []string {
 // file, beyond the standard library, to the runtimes that do.
 func builtinModules() map[string]runtimes {
 	modules := map[string]runtimes{
-		// PUC Lua: the bitwise library of Lua 5.2, which the default build of
-		// Lua 5.3 keeps (LUA_COMPAT_5_2), and the UTF-8 library of Lua 5.3 and
-		// later. Tarantool has a utf8 module of its own.
-		"bit32": lua52 | lua53,
-		"utf8":  lua53 | lua54 | lua55 | tarantool,
+		// Tarantool has a utf8 module of its own, which PUC Lua 5.1 and LuaJIT
+		// have not, nor bit32 of Lua 5.2.
+		"utf8": tarantool,
 		// LuaJIT's extensions: bit, jit and jit.opt in package.loaded, the
 		// others in package.preload. Tarantool's LuaJIT has them too, except
 		// string.buffer, which LuaJIT has had since 2021.
@@ -182,7 +178,8 @@ func tarantoolModules() []string {
 // tarantool3Modules are the built-in modules of Tarantool 3 that 2.11 does
 // not have, found the same way. A 3.x release has only some of them: 3.0
 // lacks the 31 that later releases added, and has internal.mkversion and
-// internal.config.utils.schema, which they do not.
+// internal.config.utils.schema, which they do not; internal.ssl_certificate
+// and threads are 3.9's.
 func tarantool3Modules() []string {
 	return []string{
 		"config", "experimental.config.utils.schema", "experimental.connpool", "experimental.threads",
@@ -202,9 +199,10 @@ func tarantool3Modules() []string {
 		"internal.config.utils.snapshot", "internal.config.utils.tabulate",
 		"internal.config.utils.textutils", "internal.config.utils.units", "internal.config.validators",
 		"internal.healthcheck", "internal.healthcheck.defaults", "internal.mkversion",
-		"internal.net.replicaset", "internal.protobuf.wireformat", "metrics.cartridge.config",
-		"metrics.tarantool.config", "metrics.tarantool.schema", "protobuf", "roles.recovery-point-manager",
-		"roles.recovery-point-manager.backends.net-replicaset", "trigger", "ulid", "varbinary", "version",
+		"internal.net.replicaset", "internal.protobuf.wireformat", "internal.ssl_certificate",
+		"metrics.cartridge.config", "metrics.tarantool.config", "metrics.tarantool.schema", "protobuf",
+		"roles.recovery-point-manager", "roles.recovery-point-manager.backends.net-replicaset", "threads",
+		"trigger", "ulid", "varbinary", "version",
 	}
 }
 

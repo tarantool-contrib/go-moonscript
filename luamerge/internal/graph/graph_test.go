@@ -693,12 +693,11 @@ func TestBuild_ModuleNamedLikeABuiltin(t *testing.T) {
 			Message: `require "csv": Tarantool loads its built-in module "csv" instead of the project's`,
 		},
 		{
-			Kind:   graph.WarnShadowsBuiltin,
-			Module: "utf8",
-			File:   mainPath,
-			Line:   3,
-			Message: `require "utf8": Lua 5.3, Lua 5.4, Lua 5.5 and Tarantool load their built-in ` +
-				`module "utf8" instead of the project's`,
+			Kind:    graph.WarnShadowsBuiltin,
+			Module:  "utf8",
+			File:    mainPath,
+			Line:    3,
+			Message: `require "utf8": Tarantool loads its built-in module "utf8" instead of the project's`,
 		},
 	}, g.Warnings)
 }

@@ -129,8 +129,7 @@ func TestBundle_RuntimeBuiltinWithoutAFile(t *testing.T) {
 	t.Parallel()
 
 	for _, name := range []string{
-		"bit32",         // Lua 5.2 and 5.3.
-		"utf8",          // Lua 5.3 and later, Tarantool.
+		"utf8",          // Tarantool.
 		"bit",           // LuaJIT, Tarantool.
 		"table.new",     // LuaJIT, Tarantool.
 		"string.buffer", // LuaJIT since 2021.

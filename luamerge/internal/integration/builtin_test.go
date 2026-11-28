@@ -97,14 +97,14 @@ func TestCLI_ProjectModuleNamedLikeABuiltin(t *testing.T) {
 			},
 			tarantool: "bit is built-in\ttable.new is C\n",
 		},
-		// A utf8.lua for Lua 5.1 and 5.2.
+		// A utf8.lua for Lua 5.1 and LuaJIT.
 		"utf8": {
 			project: luatest.Project{
 				"main.lua": "print(\"utf8 is \" .. (require(\"utf8\").impl or \"built-in\"))\n",
 				"utf8.lua": "return { impl = \"project utf8.lua\" }\n",
 			},
 			warnings: []string{
-				`main\.lua:1: require "utf8": Lua 5\.3, Lua 5\.4, Lua 5\.5 and Tarantool load their`,
+				`main\.lua:1: require "utf8": Tarantool loads its built-in module "utf8" instead`,
 			},
 			tarantool: "utf8 is built-in\n",
 		},
@@ -139,10 +139,10 @@ func TestCLI_ProjectModuleNamedLikeABuiltin(t *testing.T) {
 	}
 }
 
-// TestCLI_BuiltinNamedModuleBeatsFilesOnDisk: a project's bit32.lua, for the
-// runtimes without the bit32 library, and another bit32.lua installed further
+// TestCLI_BuiltinNamedModuleBeatsFilesOnDisk: a project's utf8.lua, for the
+// runtimes without the utf8 library, and another utf8.lua installed further
 // along package.path. Natively the program, run from its directory, finds its
-// own file first on those runtimes, and Lua 5.2 and 5.3 load their built-in.
+// own file first on those runtimes, and Tarantool loads its built-in.
 // The bundle must do the same from anywhere: the embedded module loses to the
 // runtime's built-in only, never to a file on disk, under --package-prefix
 // too.
@@ -152,7 +152,7 @@ func TestCLI_BuiltinNamedModuleBeatsFilesOnDisk(t *testing.T) {
 	luatest.Interpreters(t)
 
 	installed := luatest.WriteProject(t, luatest.Project{
-		"bit32.lua": "return { impl = \"a system-installed bit32.lua\" }\n",
+		"utf8.lua": "return { impl = \"a system-installed utf8.lua\" }\n",
 	})
 
 	withPrefix := modes()
@@ -163,8 +163,8 @@ func TestCLI_BuiltinNamedModuleBeatsFilesOnDisk(t *testing.T) {
 			t.Parallel()
 
 			spec := cliCase(luatest.Project{
-				"main.lua":  "print(\"bit32 is \" .. (require(\"bit32\").impl or \"built-in\"))\n",
-				"bit32.lua": "return { impl = \"the project's bit32.lua\" }\n",
+				"main.lua": "print(\"utf8 is \" .. (require(\"utf8\").impl or \"built-in\"))\n",
+				"utf8.lua": "return { impl = \"the project's utf8.lua\" }\n",
 			}, flags...)
 			spec.Options.LuaPath = "./?.lua;./?/init.lua;" + installed + "/?.lua;;"
 			spec.Check = func(t *testing.T, orig, bundle luatest.Result) {
