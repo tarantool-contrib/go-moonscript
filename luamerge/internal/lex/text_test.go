@@ -179,6 +179,33 @@ func TestNeedsSeparator(t *testing.T) {
 	}
 }
 
+// TestNeedsSeparator_MatchesTheLexer: NeedsSeparator says what the lexer
+// reads, for tokens of every kind followed by every byte: two tokens need a
+// separator when the lexer reads the first with the byte after it as
+// another token, or fails to.
+func TestNeedsSeparator_MatchesTheLexer(t *testing.T) {
+	t.Parallel()
+
+	lefts := []string{
+		"+", "-", "*", "/", "//", "%", "^", "#", "&", "~", "|", "<<", ">>", "==", "~=", "<=", ">=", "<", ">",
+		"=", "(", ")", "{", "}", "[", "]", "::", ";", ":", ",", ".", "..", "...", "!", "?", "$", "\x00",
+		"a", "local", "_x1", "\xd0\xbf", "1", "12", "1e", "1E", "1e5", "1e+5", "0x", "0x1", "0X1p", "0x1e",
+		"0x1P-4", ".5", "5.", ".5e", "1LL", "2i", "0b1", "3then", "1e5..x", `"s"`, `'s'`, "[[s]]", "[==[s]==]",
+	}
+
+	for _, left := range lefts {
+		for next := range 256 {
+			joined := append([]byte(left), byte(next))
+
+			tok, err := lex.New(joined).Next()
+			want := err != nil || tok.Start != 0 || tok.End != len(left)
+
+			assert.Equal(t, want, lex.NeedsSeparator([]byte(left), []byte{byte(next)}),
+				"NeedsSeparator(%q, %q)", left, string(rune(next)))
+		}
+	}
+}
+
 func TestKind_String(t *testing.T) {
 	t.Parallel()
 

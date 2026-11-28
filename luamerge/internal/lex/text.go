@@ -63,22 +63,55 @@ func IsSpace(c byte) bool {
 // "localb", "-" and "-" as a comment, "1" and ".." as the malformed numeral
 // "1..", "[" and "[" as a long string. Tokens that are separate in the source
 // they were read from need no separator where that source had none.
+//
+// Where a token ends depends on the one byte after it and no further, except
+// for "[" before "=", which reads as an unfinished long bracket and so is
+// always kept apart: when the first byte of right does not extend left,
+// nothing after it can. Which bytes extend a token is the lexer's rule: an
+// identifier character a name, an identifier character, a "." and a sign
+// after an exponent letter a numeral, the second character of a symbol of
+// two ("==", "~=", "<=", ">=", "<<", ">>", "//", "::", "..", "--") or three
+// ("...") the first one, and a digit a ".". A string, a long bracket and any
+// other symbol end where they end.
 func NeedsSeparator(left, right []byte) bool {
 	if len(left) == 0 || len(right) == 0 {
 		return false
 	}
 
-	// Where a token ends depends on the one byte after it and no further,
-	// except for "[" before "=", which reads as an unfinished long bracket
-	// here and so is always kept apart: when the first byte of right does not
-	// extend left, nothing after it can.
-	joined := make([]byte, 0, len(left)+1)
-	joined = append(joined, left...)
-	joined = append(joined, right[0])
+	next := right[0]
 
-	tok, err := New(joined).Next()
+	switch first := left[0]; {
+	case isIdentStart(first):
+		return isIdent(next)
+	case isDigit(first) || first == '.' && len(left) > 1 && isDigit(left[1]):
+		hex := len(left) > 1 && first == '0' && (left[1] == 'x' || left[1] == 'X')
 
-	return err != nil || tok.Start != 0 || tok.End != len(left)
+		return isIdent(next) || next == '.' || (next == '+' || next == '-') && isExponent(left[len(left)-1], hex)
+	case len(left) == 1:
+		return extendsSymbol(first, next)
+	default:
+		return string(left) == ".." && next == '.'
+	}
+}
+
+// extendsSymbol reports whether next, after the one-character symbol first,
+// makes a longer token of them: a symbol of two characters, a comment ("--"),
+// a long bracket or an unfinished one ("[[", "[="), or a numeral (".5").
+func extendsSymbol(first, next byte) bool {
+	switch first {
+	case '=', '~':
+		return next == '='
+	case '<', '>':
+		return next == '=' || next == first
+	case '/', ':', '-':
+		return next == first
+	case '[':
+		return next == '[' || next == '='
+	case '.':
+		return next == '.' || isDigit(next)
+	default:
+		return false
+	}
 }
 
 // isLineBreakByte reports whether c is "\n" or "\r".

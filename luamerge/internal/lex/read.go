@@ -3,6 +3,7 @@ package lex
 import (
 	"bytes"
 	"errors"
+	"slices"
 
 	"github.com/tarantool-contrib/go-moonscript/lua/ast"
 	"github.com/tarantool-contrib/go-moonscript/lua/parse"
@@ -85,6 +86,8 @@ func (r *reader) emit(kind Kind, end int, notLuaJIT bool) {
 // and "//", "<<" and ">>", two tokens to it, as one (see addShift).
 func (r *reader) add(tokens ast.Tokens) {
 	base := r.pos
+	// About every other token of the fork's is trivia.
+	r.tokens = slices.Grow(r.tokens, len(tokens)/2+1)
 
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
