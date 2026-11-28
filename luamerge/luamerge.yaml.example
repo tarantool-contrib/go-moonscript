@@ -1,0 +1,109 @@
+# luamerge configuration file
+# LUAMERGE_* environment variables override these values, and CLI flags
+# override both. A list given on the command line or in the environment is
+# comma-separated (--skip cjson,socket, LUAMERGE_SKIP_PACKAGES=cjson,socket)
+# and replaces the list here; lists in this file are YAML lists.
+#
+# Relative paths (entry, output, root, search) are taken from the working
+# directory luamerge runs in, not from the directory of this file.
+
+# Entry Lua file (required)
+entry: src/main.lua
+
+# Output file, "-" for stdout
+output: dist/bundle.lua
+
+# Base directory for module resolution (defaults to entry file directory).
+# Module names are paths relative to it; it must exist.
+root: src/
+
+# Lua path templates, semicolon-separated
+# ? is replaced with the module name (dots become path separators)
+path: "?.lua;?/init.lua"
+
+# Additional search directories (searched after root), relative to the working
+# directory like every path here, not to the root
+search:
+  - lib/
+  - vendor/
+
+# Treat unresolved static requires as errors (default: false). A require in
+# pcall or xpcall, such as pcall(require, "cjson"), stays a warning: the
+# program is written to run on without that module.
+strict: false
+
+# Load each module via load(src, "@file") so runtime tracebacks report the
+# original file:line instead of an offset into the bundle (default: false).
+# Best for development builds; keep off for releases (needs load/loadstring at
+# runtime, defeats luac, and is meaningless with line-altering transforms).
+debug: false
+
+# Register modules in package.postload behind an appended searcher, so a copy
+# of a module on package.path takes precedence over the embedded one. Useful
+# for overriding a bundled module locally during development (default: false).
+fallback: false
+
+# Emit the arg line in front of each module's code. It acts on PUC Lua 5.1
+# only, where LUA_COMPAT_VARARG hides the global arg table inside the function
+# around the module; the line restores it. Set false for amalg's -a
+# (default: true).
+arg_fix: true
+
+# Shebang written as the very first line of the bundle, making it directly
+# executable (optional). Example: "#!/usr/bin/env lua"
+# shebang: "#!/usr/bin/env lua"
+
+# Prefix Lua code run before the modules are registered, in a block of its own
+# (optional)
+# prefix: |
+#   print("Bundle starting")
+#   -- initialization
+#
+# Suffix Lua code run after the entry, in a block of its own (optional)
+# suffix: |
+#   print("Bundle loaded")
+#   -- extra initialization
+#
+# Package name (optional) - convenience that sets both strip_prefix and package_prefix
+# For libraries: modules are named "mypkg.*" but files don't have "mypkg/" directory
+# Makes require("mypkg.module") work and strips "mypkg." during resolution
+# package_name: "mypkg"
+
+# Package prefix for module names (optional) - advanced
+# Registers the modules under names with this prefix only, e.g., "mypkg" makes
+# require("mypkg.module") work, and renames the project's own requires to match
+# (does not strip prefixes during resolution)
+# package_prefix: "mypkg"
+
+# Strip prefix from module names (optional) - advanced
+# Helps with projects where module names include a package prefix that doesn't match directory structure
+# e.g., "tuple_diff" makes require("tuple_diff.lib.foo") find "lib/foo.lua"
+# (does not add prefix to output names)
+# strip_prefix: "tuple_diff"
+
+# Skip packages (optional)
+# Modules matching these patterns will be excluded from amalgamation
+# Exact match or prefix with ".*" (e.g., "xlog.*" matches "xlog.core", "xlog.util")
+# skip_packages:
+#   - "xlog.*"
+#   - "yaml"
+#   - "cjson"
+
+# Include packages (optional)
+# Modules that should be included even if not required by entry point
+# Only exact module names supported (no wildcards)
+# include_packages:
+#   - "plugin.optional"
+#   - "utils.debug"
+
+# Source transformations
+transform:
+  # Remove Lua comments (-- line, --[[ block ]])
+  remove_comments: false
+
+  # Remove empty/whitespace-only lines
+  remove_empty_lines: false
+
+  # Minify Lua source (implies remove_comments and remove_empty_lines)
+  # Basic minification: reduces whitespace, removes comments and empty lines
+  minify: false

@@ -1,0 +1,109 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "luamerge configuration",
+    "type": "object",
+    "additionalProperties": false,
+    "$comment": "Boolean env overrides arrive as strings but go-config coerces them to the schema's scalar type before validation, so bool fields use a strict boolean type; a string that strconv.ParseBool rejects (e.g. \"yes\") stays a string and fails validation. Default values mirror config.Default() and are kept in sync by TestSchemaDefaultsMatchDefault; they are annotations only and are not injected by go-config.",
+    "$defs": {
+        "bool": {
+            "type": "boolean"
+        },
+        "stringList": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        }
+    },
+    "properties": {
+        "entry": {
+            "type": "string",
+            "default": ""
+        },
+        "output": {
+            "type": "string",
+            "minLength": 1,
+            "default": "-"
+        },
+        "root": {
+            "type": "string",
+            "default": ""
+        },
+        "path": {
+            "type": "string",
+            "minLength": 1,
+            "default": "?.lua;?/init.lua"
+        },
+        "search": {
+            "$ref": "#/$defs/stringList",
+            "default": []
+        },
+        "strict": {
+            "$ref": "#/$defs/bool",
+            "default": false
+        },
+        "debug": {
+            "$ref": "#/$defs/bool",
+            "default": false
+        },
+        "fallback": {
+            "$ref": "#/$defs/bool",
+            "default": false
+        },
+        "arg_fix": {
+            "$ref": "#/$defs/bool",
+            "default": true
+        },
+        "transform": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "remove_comments": {
+                    "$ref": "#/$defs/bool",
+                    "default": false
+                },
+                "remove_empty_lines": {
+                    "$ref": "#/$defs/bool",
+                    "default": false
+                },
+                "minify": {
+                    "$ref": "#/$defs/bool",
+                    "default": false
+                }
+            },
+            "default": {}
+        },
+        "prefix": {
+            "type": "string",
+            "default": ""
+        },
+        "suffix": {
+            "type": "string",
+            "default": ""
+        },
+        "shebang": {
+            "type": "string",
+            "default": ""
+        },
+        "package_prefix": {
+            "type": "string",
+            "default": ""
+        },
+        "package_name": {
+            "type": "string",
+            "default": ""
+        },
+        "strip_prefix": {
+            "type": "string",
+            "default": ""
+        },
+        "skip_packages": {
+            "$ref": "#/$defs/stringList",
+            "default": []
+        },
+        "include_packages": {
+            "$ref": "#/$defs/stringList",
+            "default": []
+        }
+    }
+}

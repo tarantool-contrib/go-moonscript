@@ -1,0 +1,397 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- Initial public release of `luamerge`, a Go library and CLI that merges a
+  multi-file Lua project into a single self-contained `.lua` file while
+  preserving exact `require()` semantics (run-once caching, circular
+  dependencies, module identity).
+- Static `require()` analysis via the gopher-lua parser: modules are discovered
+  by parsing source, without running the program.
+- Public Go API (`Bundle`, `Options`, `Result`, `LoadOptions`,
+  `DefaultOptions`, classifiable errors and warnings) with the implementation
+  kept under `internal/`.
+- CLI (`cmd/luamerge`) with YAML config, `LUAMERGE_*` environment overrides and
+  flags: entry/output/root/path/search, `--skip`/`--include`, `--strict`,
+  `--debug`, `--fallback`, `--shebang`, transform flags
+  (`--remove-comments`, `--remove-empty-lines`, `--minify`),
+  `--prefix`/`--suffix`, and package-name remapping
+  (`--package-prefix`, `--strip-prefix`, `--package-name`).
+- Configuration is assembled and merged (defaults → YAML file → `LUAMERGE_*`
+  environment) by the Tarantool ecosystem's `go-config` library and validated
+  against a JSON Schema, so an unknown key or a wrong-typed value in
+  `luamerge.yaml` is reported as an error rather than silently ignored.
+- `Result.Files` lists the absolute path of every source file embedded in the
+  bundle, the entry first, so a caller can refuse an output path that is one of
+  the inputs or record the bundle's dependencies.
+- `WarnIndirectRequire` (`indirect-require`): a warning for `require` used
+  other than by a call — aliased (`local r = require`), stored in a table or
+  passed to a function — because the modules loaded through it cannot be found
+  and are not embedded. Such uses used to be dropped without a word.
+- `WarnShadowsBuiltin` (`shadows-builtin`): a warning for a module of the
+  project required by the name of a module that some runtimes have built in,
+  such as a pure-Lua `bit.lua` or `utf8.lua`, naming the runtimes that load
+  their own module instead of the project's.
+- `WarnTokenScan` (`token-scan`): a warning for a module the parser cannot
+  read, usually for a syntax error, whose requires were found by scanning its
+  tokens instead. It names the line the parser failed on. Such a module used
+  to fail the whole build; now only a file that cannot even be split into
+  tokens does, such as one with a string without its end.
+
+### Changed
+
+- Go 1.26.5 is the minimum supported version, as required by the updated
+  dependencies. The update also makes the module build with Go 1.27, where the
+  previous `go-json-experiment/json` failed to compile.
+- The entry's code is the bundle's main chunk: a bundle no longer ends with
+  `return require("<entry>")`, and the entry is registered in
+  `package.preload` only when a module requires it by name, as a separate
+  instance, the way a `require` of the entry's file loads one natively.
+- The `--prefix` code runs in a block of its own: its locals are no longer
+  visible to the modules and to the entry, in either mode (before, they were
+  visible to them without `--debug` only), and its last statement no longer
+  runs on into the next one, which made a prefix ending in an expression
+  call it with the entry's first parenthesized expression.
+- With `--debug`, modules and the entry are loaded in the environment the
+  bundle runs in, as they inherit it without `--debug`. They were loaded in
+  the global environment, so a host that ran the bundle in an environment of
+  its own saw the two modes behave differently.
+- Two require names that find the same file are two modules, as natively:
+  the file's code runs once per name, and each run sees its own name in
+  `...`. They shared one instance before.
+- With `--package-prefix` or `--package-name` a module is registered under
+  the prefixed form of each of its names only, and the bundle renames the
+  requires of its own code to match: the prefix goes into the string
+  literal of every `require` whose module the bundle embeds, in place, so
+  `require("utils")` becomes `require("mypkg.utils")` and every line keeps
+  its number. A require the bundle leaves to the runtime keeps its name, a
+  dynamic one included, so a module loaded by a computed name must be
+  required by its prefixed name. A module now sees its prefixed name in
+  `...`, and requires of one module by the bare and by the prefixed name
+  give one instance. A module required by the name of a runtime's built-in
+  module, such as a pure-Lua `bit.lua` required as `bit`, gets a loader
+  under the prefixed name that gives the runtime's own `bit` where there is
+  one, as the renamed require does natively.
+- The root directory's name is auto-stripped as a require prefix only when
+  it contains a hyphen, read as an underscore, as `--strip-prefix` and the
+  README always documented. A root named `myapp` no longer strips `myapp.`
+  from a require name, so `require("myapp.util")` behaves like it does
+  natively; a hyphenated root such as `my-app` still auto-strips `my_app.`,
+  as before. Use `--strip-prefix` or `--package-name` for a prefix that
+  isn't hyphenated.
+- A value of `--search`, `--skip` or `--include` is a comma-separated list, as
+  in the environment: `--skip cjson,socket` skips both, and `--skip ''` clears
+  the list from the config file. The comma used to be part of one item.
+- The types of the public API are declared in package `luamerge` itself.
+  `Options`, `TransformOptions`, `Warning`, `WarningKind` and
+  `UnresolvedError` were aliases of types of internal packages, so `go doc`
+  showed none of their fields, and the methods of the internal configuration
+  (`ApplyPackageName`, `ResolveRoot`, `ShouldSkip`) could be called on
+  `Options`. The `Warn*` constants, their names and every field but
+  `Options.ArgFix` (see Fixed) stay the same, and so do `errors.As` and
+  `errors.Is(err, ErrModuleNotFound)`. `Options` has no YAML struct tags:
+  `LoadOptions` reads the configuration file.
+
+### Removed
+
+- `--strip-shebang`, the `transform.strip_shebang` setting and
+  `TransformOptions.StripShebang`. Every file's header is skipped the way
+  the interpreter skips it, so there is nothing left for them to do, and
+  they made no difference before either: the bundler stripped a shebang
+  from every file anyway. `--shebang` sets the first line of the bundle. As
+  no release had them, they are removed without a deprecation period: the
+  flag is an unknown flag now, and the setting an unknown key.
+
+### Fixed
+
+- The CLI never overwrites its inputs: an `--output` that is the same file as
+  the entry, a bundled module or the config file is refused. It used to be
+  truncated before it was read, and the build then bundled the empty file and
+  exited with success.
+- A failed build keeps the previous output: the bundle is written only once
+  the build has succeeded, so a failed build no longer leaves an empty file
+  that `make` takes for up to date, creates no directories and prints nothing
+  with `--output -`.
+- The CLI replaces the output file atomically: the bundle is written to a
+  temporary file in the same directory and renamed over the old one only once
+  complete, so a failed or interrupted write (a full disk, a file-size limit)
+  no longer leaves a truncated bundle. The file keeps its permission bits, and
+  a read-only file is still refused.
+- A `require` whose result is the receiver of a method call is found and its
+  module embedded: `require("x"):new()`, `(require "x"):upper()`,
+  `require("x").field:m()` and every require inside a method chain such as
+  `app:use(require "a"):listen()`. These modules were left out of the bundle
+  without a warning, even with `--strict`.
+- `_G.require("x")`, `_ENV.require("x")` and `xpcall(require, handler, "x")`
+  embed their module, and `pcall(require, name)` with a computed name warns
+  as a dynamic require, like `require(name)`. All of them used to be ignored
+  silently. `require("x", …)` is the require of `"x"`, as in Lua, rather
+  than a dynamic require.
+- `--remove-comments` reads the source with a lexer that knows Lua's
+  lexical grammar and changes nothing but the comments. It used to strip
+  `--` inside leveled long strings (`[=[ … ]=]`, which could then stop
+  loading), count a `[[` inside a long string as nesting, run a line
+  comment ended by a lone `\r` to the next `\n` (deleting the code in
+  between), and glue the tokens around a block comment: `local--[[c]]b`
+  became `localb`, `1--[[c]]..2` the malformed number `1..2`. A removed
+  comment now keeps its line breaks, so `--debug` tracebacks keep their
+  line numbers.
+- `--remove-empty-lines` removes only the lines that hold nothing but
+  white space between tokens. It used to delete every blank line,
+  including those inside long strings and long comments, which changed
+  string values, and it dropped the final line break of a module whose
+  last line held only white space.
+- `--minify` keeps every token byte for byte. It used to delete blank
+  lines inside long strings, take leveled long strings (`[=[ … ]=]`) for
+  code, lose track of strings after one ending in an escaped backslash
+  (`"\\"`) and collapse the white space inside the strings that followed,
+  and glue the tokens around a removed block comment. It now removes the
+  white space between tokens instead of collapsing it: a single space
+  stays where two tokens would otherwise run together (`local x`,
+  `a - -b`, `1 ..2`), and a line break where the source had one, since
+  Lua 5.1 and LuaJIT read a `(` at the start of a line differently from
+  Lua 5.2+.
+- Every file is read the way the interpreter reads a file it loads: a byte
+  order mark is dropped, and a first line starting with `#` is left empty,
+  its line break kept, so every line keeps its number. The bundler used to
+  delete a shebang line together with its line break, and every blank line
+  before the first token, so `--debug` tracebacks, warnings and strict-mode
+  errors named the wrong lines: an error on line 3 after two blank lines was
+  reported on line 1. A byte order mark, or a first line starting with `#`
+  but not `#!`, failed the build, although the interpreter runs such a file.
+- A `--debug` bundle failed to load when the code of a module or of the
+  entry ended in `]` with no line break after it, such as `return t[1]`, or
+  in `]=`, `]==`, … where the string that holds the code needed that level:
+  the end of the code and the bracket after it read as the end of the
+  string. `--remove-comments` and `--minify` could leave such an ending too.
+  In a `--debug` bundle a file whose first line break is a lone `\r` also
+  lost a line, so its errors were reported one line too early.
+- A `--debug` bundle names each file the way the interpreter names it when
+  the program runs from the root: the entry as its command line does
+  (`main.lua`), a module as `require` does through `./?.lua`
+  (`./lib/utils.lua`), a module in a search directory outside the root by
+  its path from the root (`../vendor/json.lua`), and a module only an
+  absolute `--path` template reaches, such as one installed in the system,
+  by its absolute path, as that template names it. So an error reports the
+  `file:line` the original program reports, and every checkout of a project
+  builds the same bundle. The files were named by their absolute paths on
+  the machine that built the bundle, so every checkout built a different
+  bundle, and each disclosed where it was built.
+- A control character followed by a digit, in a module name or, with
+  `--debug`, in a file name, reaches the bundle as it is. The bundle wrote
+  the character as a decimal escape without leading zeros, which took the
+  digit for its own: byte 1 followed by `2` became `\12`, a form feed, so a
+  `require` of that name found no module.
+- Release archives now include a `darwin_arm64` build for Apple Silicon
+  Macs. GoReleaser's build matrix excluded that target under a comment
+  claiming it needs CGO, although the build already sets `CGO_ENABLED=0`.
+- A module name resolves like Lua's `package.searchpath`: relative to the
+  root, then to each search directory, and never relative to the file that
+  requires it. A project with `util.lua` and `sub/util.lua` used to get
+  `sub/util.lua` embedded as `util` for every module, with no warning even
+  with `--strict`; now `util` is `util.lua`, as it is when the program runs
+  from the root. The `--strip-prefix`, `--package-name`, root-name and
+  search-directory-name prefix stripping applies only when that lookup finds
+  nothing, and one module name registered for two different files is an
+  error.
+- A module name written as a path follows Lua's rules too: every `.` in it
+  becomes a `/`, so `require("./foo")`, `require("../foo")` and
+  `require(".foo")` all embed `foo.lua` and `require("a/b.c")` embeds
+  `a/b/c.lua`, as they load natively. Such names used to be taken as they
+  were: `../foo` pulled in a file from outside the project, `.foo` embedded
+  `.foo.lua`, and `a/b.c` was not found.
+- The entry of a bundle runs like a script: its `...` holds the command-line
+  arguments, all of its return values are kept, the "am I the main script?"
+  idiom (`pcall(debug.getlocal, 4, 1)`) works, and the entry is not cached in
+  `package.loaded`, so a second bundle whose entry has the same name, or a
+  second `dofile` of the same bundle, runs its entry again.
+- A library bundled into `mylib.lua` from an entry named `mylib` can be loaded
+  with `require("mylib")` on Lua 5.1, LuaJIT and Tarantool.
+- With `--fallback`, a `main.lua` in the working directory no longer replaces
+  the bundle's entry.
+- With `--fallback`, the error for a module found nowhere has no line holding
+  only a tab on Lua 5.4 and later. The bundle's searcher started its part of
+  the message with a line break and a tab, as Lua 5.1 to 5.3, LuaJIT and
+  Tarantool expect of a searcher, while Lua 5.4 and later put them in front
+  of every searcher's part themselves. It now starts it with them only where
+  they are expected.
+- A bundle built with `--suffix` failed to load with a syntax error: the
+  suffix was emitted after the final `return`. The suffix now runs after the
+  entry, and the bundle still returns every value the entry returns.
+- A module that raised an error while loading was cached as `true`, so the
+  next `require` of it, such as a second `pcall(require, ...)` feature check,
+  reported success; and a require cycle, which fails natively on every Lua,
+  ran with the module that was still loading bound to `true`. The bundle no
+  longer sets `package.loaded` before a module runs: `require` manages it, as
+  natively.
+- The function around a module body declared locals of its own. A global
+  `name` read as the module's require name in every module, and an
+  assignment to it stayed local; a module with 199 top-level locals failed to
+  load, while 200 are allowed natively. The wrapper now declares no local the
+  module can see.
+- A module whose first statement starts with `(` was parsed as a call on the
+  wrapper's last expression (`_G.arg(...)`; "ambiguous syntax" on LuaJIT).
+- An assignment to the global `arg` in a module changed a local of that
+  module only, because every module began with `local arg = _G.arg`. The arg
+  line is now an assignment that runs on PUC Lua 5.1 only, where it fills the
+  implicit `arg` local that every vararg function has; on other interpreters
+  it touches nothing. It reads the global with `rawget`, so a strict `_G`
+  without a global `arg` does not make it raise.
+- The bundle replaced loaders already present in `package.preload`: one that
+  the embedding application registered before running the program, which
+  natively wins over the file on `package.path`, and LuaJIT's built-in
+  `table.new`. A module is now registered only under a name whose slot is
+  still empty, in `package.postload` with `--fallback` as well.
+- A bundle failed under strict mode, such as the README's own
+  `--prefix 'require("strict").on()'` on Tarantool: every module began with
+  `local _ENV = _ENV`, which reads an undeclared global on Lua 5.1, LuaJIT
+  and Tarantool, and `--debug` read the global `loadstring`, which Lua 5.2
+  and later do not have. The bundle's own code now reads no global that may
+  be missing.
+- A name generated by `--package-prefix` that was taken already made one
+  module take the place of another, depending on the order of the modules
+  in the bundle or on the runtime: the name of a module of the project
+  (`p.x` generated from `x` is the name of the project's `p/x.lua`), or of a
+  module some runtime has built in (`table.new` generated from `new` is
+  LuaJIT's). Such a name is now a build error that names the files involved
+  and asks for another prefix.
+- A library bundled with `--package-prefix` or `--package-name`, as the
+  README's "Package a library" recipe does, took modules from the program
+  that loaded it. The bundle registered every module under its bare name
+  too, `utils` next to `mypkg.utils`, in `package.preload`, where `require`
+  looks before any file, so the program's own `require("utils")` got the
+  library's module. With `--fallback` it was the other way round: the
+  library's `require("utils")` found the program's `utils.lua` first. Only
+  prefixed names are registered now (see Changed).
+- An absolute template in `--path` (`--path "$PWD/lib/?.lua"`) resolves: it
+  is tried as is, once, instead of being joined under `root` and every
+  `--search` directory into a path nothing exports. An empty entry in
+  `--path`, from a leading, trailing or doubled `;`, now stands for the
+  default templates `?.lua;?/init.lua` at that position, instead of being
+  silently dropped.
+- A config file named with `--config`, or passed to `LoadOptions`, must exist:
+  a missing one is an error. Only the default `luamerge.yaml` may be absent. A
+  typo in the name used to drop every setting in the file without a word.
+- `--config ''` is the default `luamerge.yaml` everywhere. The file was read
+  but not protected as an input, so `--config '' --output luamerge.yaml`
+  replaced the config file with the bundle.
+- An empty config file, such as `--config /dev/null`, holds no settings, like
+  a file with only comments. It used to fail to parse (`no data to process`).
+- The list settings can be given in the environment as comma-separated
+  values: `LUAMERGE_SEARCH=lib,vendor`, `LUAMERGE_SKIP_PACKAGES=cjson,socket`,
+  `LUAMERGE_INCLUDE_PACKAGES=...`; an empty value is the empty list. They
+  failed schema validation as a string where a list belongs.
+- Module names no longer depend on how the root is spelled: the entry and the
+  root are made absolute and their symbolic links resolved before any name is
+  computed. A relative root (`--root src`, or `root: src` in `luamerge.yaml`)
+  named the entry `main` instead of `app.main`, and a root reached through a
+  symbolic link, even `/var` on macOS, gave a name full of dots; with
+  `--package-prefix` that name is the bundle's public `require` name. An entry
+  outside the root is named after its file.
+- A `--root` that does not exist is an error. The build used to go on and
+  find no module under it.
+- A search directory is made absolute and its symbolic links resolved, like
+  the root and the entry, so its modules have the same paths however it is
+  spelled: through a symbolic link, or relative to a working directory
+  reached through one, as a shell keeps it in `PWD`. A `--debug` bundle named
+  such modules by a path through the link, which climbed out of the root
+  (`../../../home/me/link/vendor/json.lua`), and `Result.Files` listed them
+  so. A search directory that does not exist is an error, as a root that does
+  not exist is. Where the name of a search directory reached through a link
+  is stripped as a prefix, it is the name of the directory the link leads
+  to, as the root's name always was: `--search vlink`, a link to `vendor`,
+  strips `vendor.`, where it stripped `vlink.`.
+- `--package-name` overrides a `package_name` from `luamerge.yaml` or the
+  environment, and `Options.PackageName` set after `LoadOptions` is the one
+  `Bundle` uses. The configured name was applied to `strip_prefix` and
+  `package_prefix` while loading, so a later one was ignored.
+- `--output ''` means the output set in `luamerge.yaml` or the environment,
+  or stdout by default, as the flag's help says. The build used to fail,
+  renaming its temporary file to a file named `''`.
+- A warning shows its position once: `main.lua:4: unresolved require
+  "missing": …`, where the message used to repeat it (`… at line 4`), and a
+  warning without a file, about an `--include` package, shows none instead
+  of `:0:`. `Warning.Message` no longer contains the line.
+- `luamerge --version` of a binary built with `go install` or `go build`
+  reports the module version and, for a build in a git checkout, the commit
+  and its time, from the build information the Go toolchain records. It
+  reported `version dev (commit unknown, built on unknown)`. Release
+  binaries report what GoReleaser sets, as before.
+- A positional argument is an error, with exit status 2 like an unknown flag.
+  Positional arguments were ignored, so `--minify false` minified (a boolean
+  flag takes its value only after `=`: `--minify=false`), and
+  `luamerge main.lua` complained that `--entry` was missing.
+- A `require` of a standard library module, such as Penlight's
+  `require("debug")`, failed `--strict` as an unresolved require, and a
+  project file of that name (`debug.lua`) was embedded, although `require`
+  returns the module from `package.loaded` without searching and never loads
+  such a file. The standard library (`_G`, `coroutine`, `debug`, `io`,
+  `math`, `os`, `package`, `string`, `table`) is now never resolved, embedded
+  or reported; `--include` of one of these names is skipped with a warning.
+- The optional-dependency idiom `pcall(require, "cjson")` failed `--strict`
+  when the module was not in the project, although the program is written
+  to run on without it. A `require` called in protected mode, by `pcall` or
+  `xpcall`, that cannot be resolved is now a warning even with `--strict`,
+  and the bundle leaves it to runtime; an unprotected `require` of the same
+  module still fails the build.
+- A `require` of a module that runtimes provide built in, such as `utf8`,
+  LuaJIT's `bit` or Tarantool's `csv`, failed `--strict` as an unresolved
+  require when the project had no file for it. Such a require is now left to
+  the runtime without a warning, from a list of the modules that PUC Lua
+  5.2 to 5.5, LuaJIT, OpenResty's LuaJIT and Tarantool 2.11 to 3.9 have
+  without a file.
+- A module of the project named like a module a runtime has built in, such
+  as a `csv.lua` on Tarantool, was registered in `package.preload`, which
+  Tarantool consults before its own built-in modules: the bundle loaded the
+  project's `csv.lua` where the program natively loads Tarantool's `csv`.
+  Such a module is now served by a wrapper around the interpreter's first
+  searcher, which hands it out only where that searcher finds nothing: the
+  runtime's module wins wherever there is one, and elsewhere the embedded
+  module wins over every file on disk, as the modules in `package.preload`
+  do; a `shadows-builtin` warning names those runtimes. With `--fallback`
+  such a module goes to `package.postload` like every other one.
+- A module name is decoded the way Lua 5.2 and later, LuaJIT and Tarantool
+  decode it: `require("\x61x")` embeds the module `ax`,
+  `require("\u{62}ar")` the module `bar` and `require("c\z   z")` the module
+  `cz`. Names were decoded as Lua 5.1 decodes them, reading an escape it
+  does not know as the character after the backslash, so the bundler looked
+  for `x61x`, `u{62}ar` and `cz   z`, and the modules the program loads were
+  not embedded. A string with a `\z` escape over a line break, and a form
+  feed or a vertical tab between tokens, no longer fail the build.
+- A module written for Lua 5.2 to 5.5, LuaJIT or Tarantool bundles, and its
+  requires are found on their lines: next to the operators of Lua 5.3 (`//`,
+  `&`, `|`, `~`, `<<`, `>>`), the attributes of Lua 5.4 and 5.5
+  (`<const>`, `<close>`), the `global` declarations of Lua 5.5, hexadecimal
+  floats, the 64-bit integer, imaginary and binary numerals of LuaJIT and
+  Tarantool (`1ULL`, `0x10LL`, `2i`, `0b101`), a statement after `break`,
+  names beyond ASCII, and `goto` used as a name. Every module was parsed as
+  Lua 5.1, so any of these failed the whole build with a syntax error. So
+  does the syntax that LuaJIT 2.1 builds of 2026 add, which LuaJIT's own
+  `jit.*` modules use: `!=` and `!`, `&&` and `||`, `c ? a : b`, `??`,
+  `~>>`, compound assignments such as `x += 1`, and `continue`.
+- A local named `require` that is a function of its own — a local function,
+  a local whose value is a function, a parameter or a loop variable — hides
+  the global `require` for the rest of its scope, as in Lua, so the calls
+  through it are no longer taken for requires. With
+  `local require = function(x) … end` in front of it, `require("greeting")`
+  made `--strict` fail with `unresolved require "greeting"` on a program
+  that runs, or made the bundler read and embed an unrelated `greeting.lua`
+  and fail on it. A local of any other value, such as
+  `local require = require`, or a lazy require
+  (`local require = require("lazy")`), is still taken for the global
+  `require`, and the modules loaded through it are embedded.
+- `Options` with nothing but `Entry` set bundles like `DefaultOptions()`
+  with that entry, as the documentation says only `Entry` must be set. The
+  zero value left out the arg line, since `Options.ArgFix` was false in it:
+  the field is now `Options.NoArgFix`, like `--no-arg-fix`, so that its zero
+  value is the default. The `arg_fix` setting and `LUAMERGE_ARG_FIX` keep
+  their meaning.
+
+[Unreleased]: https://github.com/tarantool/go-luamerge/compare/HEAD
