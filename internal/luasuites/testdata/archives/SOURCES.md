@@ -16,7 +16,8 @@ source. They are test data and are not part of the program.
 `crud.tar.gz` are byte-identical copies of the archives of the same names in
 go-luascope (<https://github.com/bigbes/go-luascope>,
 `parser/testdata/corpus`). `lua5.1-tests.tar.gz` is also byte-identical to
-lua.org's download (checked on 2026-11-26).
+lua.org's download (checked on 2026-11-26). luascope's tests read their Lua
+files (`luascope/corpus_test.go`) instead of its own copies, which are gone.
 
 `luajit-tests.tar.gz` is a superset of go-luascope's archive of that name
 (which has only `COPYRIGHT` and the `*.lua` and `*.t` files): it adds what

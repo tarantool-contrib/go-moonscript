@@ -17,10 +17,13 @@ modules the code uses and checks them against allow-lists.
 
 | Package | Purpose |
 |:---|:---|
-| `parser` | Parses a chunk into an AST, with the checks of the LuaJIT compiler. |
-| `ast` | The syntax tree and `Inspect`. |
+| `luascope` | Parses and resolves a chunk: `Parse`, the dialects, the chunk names. |
 | `globals` | Global variables, their fields, and `require` calls used by a chunk. |
 | `allowlist` | Checks the globals and modules of a chunk against allow-lists. |
+
+The Lua front end is the monorepo's: the parser (`lua/parse`), the syntax
+tree (`lua/ast`) and the name resolution (`lua/scope`) of the gopher-lua
+fork in [`lua/`](../lua), which the MoonScript port and go-luamerge use too.
 
 go-luascope lives in `luascope/` of the monorepo of the Go Lua tooling of
 tarantool-contrib (it was [bigbes/go-luascope](https://github.com/bigbes/go-luascope)):
@@ -40,28 +43,27 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/tarantool-contrib/go-moonscript/luascope"
 	"github.com/tarantool-contrib/go-moonscript/luascope/allowlist"
 	"github.com/tarantool-contrib/go-moonscript/luascope/globals"
-	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
 func main() {
-	f, err := os.Open("migration.lua")
+	src, err := os.ReadFile("migration.lua")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	defer f.Close()
-
-	chunk, err := parser.Parse(f, "@migration.lua")
+	// Parse and resolve once, for every analysis.
+	chunk, info, err := luascope.Parse(src, "@migration.lua", luascope.Options{})
 	if err != nil {
 		// A LuaJIT-like message: "migration.lua:3: unexpected symbol near 'x'".
 		fmt.Println(err)
 		return
 	}
 
-	for _, require := range globals.Analyze(chunk).Requires {
+	for _, require := range globals.AnalyzeChunk(chunk, info).Requires {
 		fmt.Println(require.Pos, require.Module) // 1:14 json
 	}
 
@@ -74,18 +76,23 @@ func main() {
 		return
 	}
 
-	for _, v := range checker.Check(chunk) {
+	for _, v := range checker.CheckChunk(chunk, info) {
 		fmt.Println(v) // Nothing: the chunk uses only allowed names.
 	}
 }
 ```
 
+`globals.Analyze(src, name, opts)` and `checker.Check(src, name, opts)` do
+the same from the source, parsing it themselves.
+
 ## Dialect
 
-The lexer and the parser are ports of `lj_lex.c`, `lj_strscan.c` and
-`lj_parse.c` of [tarantool/luajit](https://github.com/tarantool/luajit),
-built the way Tarantool builds it: with FFI and without
-`LUAJIT_ENABLE_LUA52COMPAT`. Besides Lua 5.1, this means:
+The default dialect, `luascope.LuaJIT` (the zero `luascope.Options`), is
+that of [tarantool/luajit](https://github.com/tarantool/luajit), built the
+way Tarantool builds it: with FFI and without `LUAJIT_ENABLE_LUA52COMPAT`.
+The lexer and the parser of `lua/parse` are ports of `lj_lex.c`,
+`lj_strscan.c` and `lj_parse.c` in that dialect. Besides Lua 5.1, this
+means:
 
 - `goto` and `::labels::` with LuaJIT's scoping rules; `goto` is a keyword
   only before a name, so `local goto = 1` is valid;
@@ -97,15 +104,17 @@ built the way Tarantool builds it: with FFI and without
   statements (`;;`), and a call cannot start on a new line
   (`ambiguous syntax`), as in Lua 5.1.
 
-`parser.Parse` reads a chunk from any `io.Reader`, `parser.ParseBytes` takes
-the source in memory. A failure to read the reader is reported as a
-`parser.ReadError`, never as a syntax error of the chunk.
+`luascope.Lua51` is PUC Lua 5.1's dialect (`lparser.c`), in which a vararg
+function has the implicit local `arg`.
 
-The chunk name follows the convention of LuaJIT and is printed in error
-messages the way LuaJIT prints it: `"@migration.lua"` names a file and is
-printed as `migration.lua`, with the start cut off if it is long;
-`"=name"` is printed as `name`; any other name is taken for the source of
-the chunk and printed as `[string "name"]`.
+`luascope.Parse` takes the source in memory, and the tree keeps it, without
+a copy, for the lines and columns of its offsets: the source must not be
+modified while the tree is in use. The chunk name follows the convention of
+LuaJIT and is printed in error messages the way LuaJIT prints it:
+`"@migration.lua"` names a file and is printed as `migration.lua`, with the
+start cut off if it is long; `"=name"` is printed as `name`; any other name
+is taken for the source of the chunk and printed as `[string "name"]`. A
+syntax error is a `*parse.Error`, with the line, the message and the token.
 
 The parser does the compiler's checks: gotos and labels, `break` outside a
 loop, `...` outside a vararg function, assignment targets, and the limits on
@@ -114,22 +123,24 @@ are both of LuaJIT's: 200 active in a function, and 65476 locals, gotos and
 labels declared in a function and the functions enclosing it.
 
 The parser also emits the bytecode LuaJIT emits for the chunk, with the same
-registers, constants and jumps, and drops it as soon as a function ends.
-This way it rejects the code that the code generator of LuaJIT cannot
-encode: a jump over more than 32767 instructions (`control structure too
-long`), a function that needs more than 250 registers (`function or
-expression too complex`), more than 65536 constants in a function.
+registers and jumps, and drops it as soon as a function ends. This way it
+rejects the code that the code generator of LuaJIT cannot encode: a jump
+over more than 32767 instructions (`control structure too long`), a
+function that needs more than 250 registers (`function or expression too
+complex`), more than 65536 constants in a function.
 
 Error messages, lines and the tokens they are reported near are the same as
 LuaJIT's. Differences from LuaJIT:
 
-- bytecode chunks are always rejected; they cannot be analyzed;
-- `^` on two number constants is folded with a correctly rounded power,
-  while LuaJIT uses `pow` of the C library: glibc rounds a result within
-  about 0.0013 ulp of a tie either way, so the folded constant can differ
-  in the last bit, see [`parser/pow.go`](parser/pow.go). The constant only
-  decides whether it is shared with an equal one, which changes no error
-  in practice.
+- bytecode chunks are always rejected (`ErrBytecode`); they cannot be
+  analyzed;
+- a chain of 100000 fields or calls (`t.x.x...`, at least 200 KB of one
+  expression) is rejected: the name resolution stops at a tree that deep,
+  as the compiler of `lua/` does;
+- `^` on two number constants is folded with Go's `math.Pow`, while LuaJIT
+  uses `pow` of the C library, so the folded constant can differ in the
+  last bit. The constant only decides whether it is shared with an equal
+  one, which changes no error in practice.
 
 ## Globals and allow-lists
 
@@ -139,6 +150,8 @@ of constant fields after it: `box.space.users:select()` is a read of
 `t.x = 1` is a write of `t.x` when `t` is global. A string constant in
 parentheses is a constant field too: `box[("space")]` is `box.space`. The
 accesses match the `GGET` and `GSET` instructions LuaJIT emits for the chunk.
+Each has the `ast.Span` of the global name it starts with and the `ast.Pos`
+(line and column) of its start.
 
 Calls of the global `require` are reported with the module name when it is a
 string constant or a concatenation of string constants: `require("log")`,
@@ -191,27 +204,28 @@ pkgsite -http=:6060  # or: go run golang.org/x/pkgsite/cmd/pkgsite@latest
 
 - Go 1.26.5 or later (the module's), no C toolchain and no Tarantool
   installation: the library is pure Go.
-- The only dependency of the packages is `github.com/stretchr/testify`,
-  used by the tests; the module's other requirements are luamerge's.
+- The packages depend on the fork's `lua/ast`, `lua/parse` and `lua/scope`
+  of the same module and on nothing outside it; the tests use
+  `github.com/stretchr/testify`.
 - Linux, macOS and Windows are supported; CI runs the tests on Linux.
 
 ## Testing
 
-The parser is compared with LuaJIT on:
+`luascope.Parse` is compared with LuaJIT on:
 
 - the Lua 5.1 test suite, the LuaJIT, lua-Harness and Tarantool tests of
-  tarantool/luajit, and the Lua sources of Tarantool, vshard and crud, see
-  [`parser/testdata/corpus`](parser/testdata/corpus/SOURCES.md);
+  tarantool/luajit, and the Lua sources of Tarantool, vshard and crud: the
+  Lua files of the archives of
+  [`internal/luasuites`](../internal/luasuites/testdata/archives/SOURCES.md);
 - 4 random edits of every corpus file;
 - 2000 generated programs that mix scopes, closures, loops and gotos;
 - hand-written snippets for each lexer and parser rule.
 
 For each source the result must match: either the same error, or the same
 global reads and writes as the `GGET` and `GSET` instructions of the
-compiled chunk and the same bytecode: the instructions, the constants and
-the frame size of every function. The reference results are stored in
-`parser/testdata/golden`, so the tests do not need LuaJIT. To regenerate
-them, build the LuaJIT of Tarantool and run:
+compiled chunk. The reference results are stored in `testdata/golden`, so
+the tests do not need LuaJIT. To regenerate them, build the LuaJIT of
+Tarantool and run:
 
 ```sh
 git clone --depth 1 https://github.com/tarantool/luajit /tmp/luajit
@@ -221,13 +235,13 @@ make -C /tmp/luajit-build -j
 make golden LUAJIT=/tmp/luajit-build/src/luajit
 ```
 
+The bytecode the parser emits for the limits of LuaJIT's code generator is
+tested in `lua/parse` (`jitcode_test.go`), with the limit snippets.
+
 `make test` runs the tests, `make testrace` runs them a hundred times with
 the race detector, `make cover` prints the statement coverage, `make lint`
 runs golangci-lint, `make spell` runs codespell, and `make fuzz` runs the
-parser fuzzer, all in `luascope/`.
-
-The statement coverage of the library is above 98%, and every package has
-tests.
+fuzzer of `Parse` and the analyses, all in `luascope/`.
 
 ## Contributing
 
@@ -237,4 +251,4 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 ## License
 
 BSD 2-Clause, see [LICENSE](LICENSE). The test corpora keep their own
-licenses, see [SOURCES.md](parser/testdata/corpus/SOURCES.md).
+licenses, see [SOURCES.md](../internal/luasuites/testdata/archives/SOURCES.md).

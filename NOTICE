@@ -7,10 +7,11 @@ each under its license, whose text is in the tree:
 
   - luascope/ is go-luascope (https://github.com/bigbes/go-luascope),
     BSD 2-Clause License, Copyright (c) 2026, Eugene Blikh; see
-    luascope/LICENSE. Its parser is a port of LuaJIT's lexer and parser
-    (lj_lex.c, lj_parse.c; MIT License, Copyright (C) 2005-2017 Mike
-    Pall, the MIT License text is the one below), and its test corpora
-    keep their own licenses: see luascope/parser/testdata/corpus/SOURCES.md.
+    luascope/LICENSE. It analyzes Lua with the parser of lua/parse, which
+    replaced its own port of LuaJIT's lexer and parser (the code adapted
+    from that port is listed under go-luascope below), and its tests read
+    the test corpora of internal/luasuites, which keep their own licenses:
+    see internal/luasuites/testdata/archives/SOURCES.md.
   - luamerge/ is go-luamerge (https://github.com/tarantool/go-luamerge),
     BSD 2-Clause License, Copyright (c) 2026, Tarantool AUTHORS; see
     luamerge/LICENSE.

@@ -13,9 +13,72 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - go-luascope moved into the monorepo of the Go Lua tooling of
   tarantool-contrib, as `luascope/` of the module
   `github.com/tarantool-contrib/go-moonscript`: the packages are
-  `github.com/tarantool-contrib/go-moonscript/luascope/parser`, `.../luascope/ast`,
-  `.../luascope/globals` and `.../luascope/allowlist`, the versions are the
-  module's, and it needs Go 1.26.5.
+  `github.com/tarantool-contrib/go-moonscript/luascope`, `.../luascope/globals`
+  and `.../luascope/allowlist`, the versions are the module's, and it needs
+  Go 1.26.5.
+- luascope analyzes the trees of the Lua front end of the monorepo: the
+  parser `lua/parse` (a port of `lj_lex.c`, `lj_strscan.c` and
+  `lj_parse.c` with the model of LuaJIT's code generator, which started as
+  luascope's), the tree `lua/ast` and the name resolution `lua/scope` of the
+  gopher-lua fork. The globals, the requires, the allow-list verdicts, their
+  positions and the error messages are the same as before on the corpora,
+  the random edits, the generated programs and the snippets of the tests,
+  the archives of the monorepo and the parse-parity cases of the fork, 42
+  thousand sources.
+- New package `luascope`: `Parse(src, name, Options)` parses a chunk held
+  in memory and resolves its names, and returns the `*ast.Chunk` of
+  `lua/ast` and the `*scope.Info` of `lua/scope`, which a lint pipeline
+  passes to every analysis. `Options.Dialect` is `LuaJIT`, the default
+  (Tarantool's LuaJIT, as before), or `Lua51`, new. The chunk name follows
+  LuaJIT's convention and is printed in messages as before; under `Lua51`
+  as Lua 5.1 prints it.
+- `globals`: `Analyze(chunk)` is `AnalyzeChunk(chunk, info)`, which takes
+  the tree and its resolution, and `Analyze(src, name, opts)` parses the
+  source itself. `Access` and `Require` have a `Span` (`ast.Span`, the byte
+  offsets of the global name they start with) and their `Pos` is an
+  `ast.Pos` of `lua/ast`: `Line` and `Column` (it was `Col`), and the
+  `Offset`. `Usage.RequireValues` is a list of `Access` (it was of `ast.Pos`):
+  the reads of `require` with their paths, also in `Accesses`.
+- `allowlist`: `Checker.Check(chunk)` is `Checker.CheckChunk(chunk, info)`,
+  and `Checker.Check(src, name, opts)` parses the source itself and returns
+  its syntax error. `Violation` has the `Span` of the name it is at, and its
+  `Pos` is an `ast.Pos`.
+- A syntax error is a `*parse.Error` of `lua/parse` (it was a
+  `*parser.SyntaxError`): `Pos.Line`, `Message` and `Token` (`Line`, `Msg`
+  and `Near`), its `Pos.Source` is the chunk name as printed, and
+  `Error()` gives the same message. A bytecode chunk is rejected with an
+  error wrapping `luascope.ErrBytecode`, with the same message.
+- A chain of 100000 fields or calls (`t.x.x...`, an expression of at least
+  200 KB), which LuaJIT and luascope accepted, is rejected with the
+  `*scope.Error` of `lua/scope`, which does not resolve a tree that deep, as
+  the compiler of `lua/` does not compile it: it fails closed.
+- The tree keeps the source given to `Parse`, without a copy, for the lines
+  and columns of its offsets: the caller must not modify it while the tree
+  is in use. It made a copy before.
+- Speed (`BenchmarkAnalyze` and `BenchmarkAnalyzeChunk` on the 961 Lua
+  files of the archives, 6.2 MB, on an AMD EPYC 7R43): parsing, resolving
+  and analyzing them takes 327 ms (19 MB/s), 18% more than with luascope's
+  parser (278 ms): the parser of the fork is as fast as luascope's, which
+  resolved names while parsing, and the resolution of `lua/scope` is a pass
+  of its own (67 ms), which a pipeline sharing the resolution pays once.
+  The analysis of the trees parsed and resolved takes 43 ms, 23% less
+  (56 ms).
+
+### Removed
+
+- The packages `parser` and `ast`, 5 thousand lines (3.6 thousand of code
+  without the comments), and 1.4 thousand lines of their tests: the front
+  end is `lua/parse` and `lua/ast` (see above). `parser.Parse` from an
+  `io.Reader` and `parser.ReadError` are gone: read the source, then call
+  `luascope.Parse`. The `ast` types have their counterparts in `lua/ast`:
+  `Name` is `IdentExpr`, `Index` is `AttrGetExpr`, `Call` and `MethodCall`
+  are `FuncCallExpr`, `Paren` is `Expr.Parens`, `Local` is a `scope.Var`,
+  `ast.Inspect` is `ast.Inspect` of `lua/ast`.
+- The test corpora in `parser/testdata/corpus`: the tests read the same Lua
+  files from the archives of `internal/luasuites`. The comparison of the
+  bytecode with LuaJIT's (`bytecode-*.golden.gz`): the model of the code
+  generator in `lua/parse` keeps no constants to compare; its limits are
+  tested there.
 
 ### Fixed
 

@@ -36,8 +36,11 @@ Before you request a review, check the change yourself:
   `ExampleXxx` function, which is compiled and executed by the tests;
 - `CHANGELOG.md` describes the change for a user of the library.
 
-Keep the parser honest: a change of the dialect or of the checks must keep
-the comparison with LuaJIT green. If the change affects the reference
+Keep the front end honest: the parser and the name resolution are those of
+the gopher-lua fork (`lua/parse`, `lua/scope`), shared by the monorepo, and a
+change of the dialect or of the checks must keep the comparison of
+luascope with LuaJIT green, as well as the fork's own tests (see the root
+[CONTRIBUTING.md](../CONTRIBUTING.md)). If the change affects the reference
 results, regenerate them with `make golden` and say so in the pull request.
 
 ## Commit messages
@@ -54,7 +57,7 @@ Closes #1234
 ```
 
 - The title is a short prefix, a colon, a space, and a topic in the
-  imperative mood with a lowercase first letter: `parser: accept goto in
+  imperative mood with a lowercase first letter: `luascope: accept goto in
   nested scopes`, `doc: describe the dialect`.
 - Keep the title within about 50 characters and without a trailing period.
 - Reference issues in the body, in its last lines: `Part of #1234` for an
@@ -62,8 +65,8 @@ Closes #1234
 - Use your real name and email: `git config user.name` and
   `git config user.email`.
 
-Common prefixes are `parser`, `ast`, `globals`, `allowlist`, `tests`, `doc`
-and `ci`.
+Common prefixes are `luascope` (the monorepo's for this tree), `globals`,
+`allowlist`, `tests`, `doc` and `ci`.
 
 ## Style
 
