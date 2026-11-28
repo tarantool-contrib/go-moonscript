@@ -461,7 +461,7 @@ func TestEmit_NoArgFix(t *testing.T) {
 		newModule("/test/main.lua", "require(\"m\")\n"),
 		newModule("/test/m.lua", "print(\"m\")\n", "m"),
 	)
-	line := "if _VERSION == \"Lua 5.1\" and not rawget(_G, \"jit\") then arg = rawget(_G, \"arg\") end\n"
+	line := "if not rawget(_G, \"jit\") then arg = rawget(_G, \"arg\") end\n"
 
 	for name, tt := range map[string]struct {
 		suffix string
@@ -638,14 +638,12 @@ func TestEmit_KeepsLoadersRegisteredFirst(t *testing.T) {
 	}
 }
 
-// TestEmit_ModuleEnvironmentStaysItsOwn: the function around each module has
-// an _ENV of its own, so a module that replaces its environment replaces only
-// its own, as a module file does natively. Lua 5.2's module() does that: it
-// sets the first upvalue of the function that calls it, which without that
-// _ENV would be the _ENV of the bundle's chunk, so every global the entry read
-// after the require would come from the module's table. Elsewhere module()
-// sets the environment of the function (Lua 5.1, LuaJIT, Tarantool) or does
-// not exist (Lua 5.3 and later), and the program prints true either way.
+// TestEmit_ModuleEnvironmentStaysItsOwn: a module that replaces its
+// environment replaces only its own, as a module file does natively. module()
+// sets the environment of the function that calls it (Lua 5.1, LuaJIT,
+// Tarantool), which is the function around the module's code, not the bundle's
+// chunk, so every global the entry reads after the require still comes from
+// the global table.
 func TestEmit_ModuleEnvironmentStaysItsOwn(t *testing.T) {
 	t.Parallel()
 
@@ -697,9 +695,8 @@ func TestEmit_SuffixHasABlockOfItsOwn(t *testing.T) {
 // searcher finds a module under a name some runtime has built in, here a
 // loader the host put in package.preload, the bundle hands on what the
 // searcher found, the loader and its loader data, as require gets them
-// natively: the loader gets the data as its second argument on Lua 5.2 and
-// later, and require returns it on Lua 5.4 and later. The original runs next
-// to the files of the project, the bundle next to nothing.
+// natively. The original runs next to the files of the project, the bundle
+// next to nothing.
 func TestEmit_BuiltinNameKeepsTheLoaderData(t *testing.T) {
 	t.Parallel()
 

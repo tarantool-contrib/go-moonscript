@@ -155,7 +155,7 @@ func TestBundleOptionsThread(t *testing.T) {
 
 	out := buf.String()
 	assert.True(t, strings.HasPrefix(out, "#!/usr/bin/env lua\n"), "shebang threaded through")
-	assert.Contains(t, out, `(rawget(_G, "loadstring") or load)`, "debug threaded through")
+	assert.Contains(t, out, `assert(loadstring(source, chunkname))`, "debug threaded through")
 }
 
 func TestBundleWarnings(t *testing.T) {

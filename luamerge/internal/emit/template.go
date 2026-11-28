@@ -14,9 +14,8 @@ import (
 // following the lua-amalg pattern:
 //
 //	do
-//	local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
 //	local __luamerge_loader = function(...)
-//	if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
+//	if not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 //	<the module's source, verbatim>
 //	end
 //	if package.preload["name"] == nil then package.preload["name"] = __luamerge_loader end
@@ -24,23 +23,20 @@ import (
 //
 // Why each piece is there:
 //
-//   - The `_ENV` local lives in the enclosing `do` block, not in the function,
-//     so that it is the loader's first upvalue, which Lua 5.2's `module`
-//     relies on. On Lua 5.1, LuaJIT and Tarantool `_ENV` is an ordinary name,
-//     and reading it reads an undeclared global, which strict mode rejects:
-//     there the `and` stops before the read and the local is nil.
 //   - The body is the whole block of the function and sees no local of the
 //     wrapper: `local f = function` brings f into scope only after the
 //     function. A module's globals stay globals whatever their names, and
 //     every local slot of the function is the module's. (A vararg function
-//     keeps one slot for itself on PUC Lua 5.1 and Lua 5.5.)
+//     keeps one slot for itself on PUC Lua 5.1.) There is no `_ENV` local:
+//     in Lua 5.1, LuaJIT (its LUAJIT_ENABLE_LUA52COMPAT builds included) and
+//     Tarantool `_ENV` is an ordinary name.
 //   - PUC Lua 5.1 (LUA_COMPAT_VARARG) gives every vararg function an implicit
 //     local `arg`, which would hide the global `arg` from the body; the arg
 //     line fills that local with the global table. It is an assignment, not
-//     a local: on every other interpreter the condition is false and the line
-//     touches nothing, so an assignment to arg in a module stays global.
-//     rawget, not _G.arg, so that a strict _G without a global arg does not
-//     raise. NoArgFix drops the line.
+//     a local: on LuaJIT and Tarantool, which have the global jit, the
+//     condition is false and the line touches nothing, so an assignment to
+//     arg in a module stays global. rawget, not _G.arg, so that a strict _G
+//     without a global arg does not raise. NoArgFix drops the line.
 //   - The line before the body is a statement that ends with `end`, so a body
 //     whose first statement starts with `(` cannot continue it as a call.
 //   - The source is emitted verbatim, not reindented, so multi-line string
@@ -57,11 +53,9 @@ import (
 // loads it as a chunk of its own with __luamerge_load, named after its
 // file's path as the interpreter names the file when the program runs from
 // the root (see entryChunkName and moduleChunkName), so errors report the
-// file and line the original program reports. The chunk
-// gets the environment the bundle itself runs in (load's env argument on
-// Lua 5.2 and later, setfenv on Lua 5.1, LuaJIT and Tarantool): the one the
-// modules of a default-mode bundle inherit as closures of the bundle's
-// chunk. Natively require loads a module in the global environment, which
+// file and line the original program reports. The chunk gets the environment
+// the bundle itself runs in (setfenv): the one the modules of a default-mode
+// bundle inherit as closures of the bundle's chunk. Natively require loads a module in the global environment, which
 // makes a difference only for a bundle loaded in an environment of its own.
 //
 // Under a package prefix the graph has given every module the prefixed forms
@@ -77,8 +71,7 @@ import (
 //
 // The loader leaves package.loaded to require, which runs it: a module that
 // raises while loading is not cached, and a require cycle fails as it does
-// natively (Lua 5.1, LuaJIT and Tarantool report the loop; later versions
-// recurse until the C stack overflows).
+// natively (Lua 5.1, LuaJIT and Tarantool report the loop).
 //
 // The prefix runs first, in a `do` block of its own: its locals are not
 // visible to the rest of the bundle, as they are not to modules loaded as
@@ -92,11 +85,9 @@ import (
 // embedded module is used only as a fallback.
 //
 // For a module it does not have, that searcher returns a line for require's
-// "module 'x' not found:" message, as every searcher does. Lua 5.1 to 5.3,
-// LuaJIT and Tarantool join the searchers' messages as they are, so each
-// starts with "\n\t"; Lua 5.4 and later put "\n\t" in front of each message
-// themselves, and one that starts with "\n\t" too leaves a line holding only
-// a tab. The bundle picks the start once, when it loads, by _VERSION.
+// "module 'x' not found:" message, as every searcher does. Lua 5.1, LuaJIT
+// and Tarantool join the searchers' messages as they are, so each starts with
+// "\n\t".
 //
 // A name that some runtime has a built-in module of (a module's
 // BuiltinNames) is served, outside fallback mode, by a wrapper the module
@@ -130,14 +121,11 @@ import (
 //
 // The "function" and "load" templates render the code of a module or of the
 // entry (a codeData) as a function in default mode and as a loaded chunk in
-// debug mode; "env" is the `_ENV` local around a function. Like the rest of
-// the bundle's own code, they read no global that may not exist (loadstring
-// is gone from Lua 5.2 on), so the bundle works under a strict _G.
-const templateText = `{{define "env" -}}
-local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
-{{end}}{{define "function" -}}
+// debug mode. Like the rest of the bundle's own code, they read no global
+// that may not exist, so the bundle works under a strict _G.
+const templateText = `{{define "function" -}}
 function(...)
-{{if .ArgFix}}if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
+{{if .ArgFix}}if not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 {{end}}{{indent .Source 0}}end
 {{- end}}{{define "load" -}}
 __luamerge_load({{bracket .Source}}, {{q .Chunk}})
@@ -152,27 +140,23 @@ __luamerge_load({{bracket .Source}}, {{q .Chunk}})
 do
   local postload = package.postload
   local searchers = package.searchers or package.loaders
-  local sep = (_VERSION == "Lua 5.1" or _VERSION == "Lua 5.2" or _VERSION == "Lua 5.3") and "\n\t" or ""
   searchers[#searchers+1] = function(mod)
     local loader = postload[mod]
     if loader == nil then
-      return sep .. "no field package.postload['" .. mod .. "']"
+      return "\n\tno field package.postload['" .. mod .. "']"
     end
     return loader
   end
 end
 
-{{end}}{{if .Debug}}local __luamerge_load
-do
-{{template "env"}}__luamerge_load = function(source, chunkname)
-  local chunk = assert((rawget(_G, "loadstring") or load)(source, chunkname, "t", _ENV))
-  if _ENV == nil then setfenv(chunk, getfenv(1)) end
+{{end}}{{if .Debug}}local __luamerge_load = function(source, chunkname)
+  local chunk = assert(loadstring(source, chunkname))
+  setfenv(chunk, getfenv(1))
   return chunk
-end
 end
 
 {{end}}{{range .Modules}}do
-{{if not $.Debug}}{{template "env"}}{{end}}local __luamerge_loader = {{if $.Debug -}}
+local __luamerge_loader = {{if $.Debug -}}
 function(...) return {{template "load" .Code}}(...) end
 {{- else}}{{template "function" .Code}}{{end}}
 {{range .Names}}if package.{{$.RegTable}}[{{q .}}] == nil then package.{{$.RegTable}}[{{q .}}] = __luamerge_loader end
@@ -195,13 +179,11 @@ __luamerge_searchers[1] = function(name, ...)
 end
 {{end}}end
 {{end}}{{with .Entry}}{{if $.Suffix}}local __luamerge_main = {{if $.Debug -}}
-{{template "load" .}}{{else}}(function()
-{{template "env"}}return {{template "function" .}}
-end)(){{end}}
+{{template "load" .}}{{else}}{{template "function" .}}{{end}}
 local __luamerge_n, __luamerge_results = (function(...) return select("#", ...), { ... } end)(__luamerge_main(...))
 do
 {{$.Suffix}}end
-return (table.unpack or unpack)(__luamerge_results, 1, __luamerge_n)
+return unpack(__luamerge_results, 1, __luamerge_n)
 {{else if $.Debug}}return {{template "load" .}}(...)
 {{else}}{{indent .Source 0}}{{end}}{{end}}`
 

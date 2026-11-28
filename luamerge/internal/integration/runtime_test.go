@@ -304,9 +304,9 @@ func TestBundle_SuffixKeepsReturnValues(t *testing.T) {
 }
 
 // TestBundle_FailedLoadIsNotCached: after a module raised while loading, a
-// second require of it fails again, as natively (Lua 5.2 and later run the
-// module again; Lua 5.1, LuaJIT and Tarantool report the previous error), so
-// the common `pcall(require, ...)` feature check keeps its answer.
+// second require of it fails again, as natively (Lua 5.1, LuaJIT and Tarantool
+// report the previous error), so the common `pcall(require, ...)` feature
+// check keeps its answer.
 func TestBundle_FailedLoadIsNotCached(t *testing.T) {
 	t.Parallel()
 
@@ -332,12 +332,10 @@ func TestBundle_FailedLoadIsNotCached(t *testing.T) {
 // assertFailsLikeACycle asserts that the bundle fails on a require cycle the
 // way the original does. Lua 5.1, LuaJIT and Tarantool mark a module in
 // package.loaded while it loads, and a require that finds the mark reports
-// the loop: the messages must agree. Lua 5.2 and later keep no mark, so the
+// the loop: the messages must agree. Where an interpreter keeps no mark, the
 // cycle recurses until the C stack is exhausted, and where that is noticed
 // decides the message: a file searcher's loader adds "error loading module
-// ... from file", and Lua 5.2 and 5.3 may run out of C levels in the parser
-// ("too many C levels") before the stack overflows. There only the
-// exhaustion is asserted.
+// ... from file". There only the exhaustion is asserted.
 func assertFailsLikeACycle(t *testing.T, orig, bundle luatest.Result) {
 	t.Helper()
 
@@ -412,8 +410,8 @@ func localsModule(n int) string {
 // varargFunctionHolds reports whether interp compiles a vararg function that
 // declares n locals at its top level. A module body runs in one, while a
 // module file is compiled as a main chunk, and PUC Lua 5.1 (the implicit
-// `arg` of LUA_COMPAT_VARARG) and Lua 5.5 (the vararg table) keep one local
-// of their own in every vararg function but not in a main chunk.
+// `arg` of LUA_COMPAT_VARARG) keeps one local of its own in every vararg
+// function but not in a main chunk.
 func varargFunctionHolds(t *testing.T, interp luatest.Interpreter, n int) bool {
 	t.Helper()
 
@@ -430,8 +428,8 @@ func varargFunctionHolds(t *testing.T, interp luatest.Interpreter, n int) bool {
 // TestBundle_ModuleWithManyLocals: the wrapper around a module body declares
 // no local of its own, so a module holds as many top-level locals as a
 // vararg function can: 200, the limit, natively, and on the interpreters
-// whose vararg functions keep a local of their own (PUC Lua 5.1, Lua 5.5)
-// one less, which a module with 200 locals then exceeds.
+// whose vararg functions keep a local of their own (PUC Lua 5.1) one less,
+// which a module with 200 locals then exceeds.
 func TestBundle_ModuleWithManyLocals(t *testing.T) {
 	t.Parallel()
 
@@ -640,37 +638,12 @@ func TestBundle_FallbackKeepsRegisteredLoaders(t *testing.T) {
 	})
 }
 
-// loaderDataOutputs is what the program of TestBundle_LoaderData prints on
-// the interpreter of version, for the module required by name, natively and
-// from a bundle whose loader data on Lua 5.4 and later is data.
-func loaderDataOutputs(version, name, data string) (string, string) {
-	lines := func(args, results string) string {
-		return "module gets\t" + args + "\nrequire returns\t" + results + "\n"
-	}
-	file := "./" + name + ".lua"
-
-	switch {
-	case version == "Lua 5.2" || version == "Lua 5.3":
-		// The loader data is the module's second argument.
-		return lines("2\t"+name+"\t"+file, "1\tM"), lines("2\t"+name+"\tnil", "1\tM")
-	case strings.HasPrefix(version, "Lua 5.") && version != "Lua 5.1":
-		// Lua 5.4 and later return it from require too.
-		return lines("2\t"+name+"\t"+file, "2\tM\t"+file), lines("2\t"+name+"\t"+data, "2\tM\t"+data)
-	default:
-		// Lua 5.1, LuaJIT and Tarantool give a module its name only.
-		return lines("1\t"+name, "1\tM"), lines("1\t"+name, "1\tM")
-	}
-}
-
 // TestBundle_LoaderData pins the loader data of an embedded module, as the
-// README's Limitations describe it. Natively, Lua 5.2 and later pass a module
-// the path of its file as its second argument, and Lua 5.4 and later return
-// it from require as well. A bundle has no file per module: an embedded
-// module gets what package.preload gives natively, ":preload:" on Lua 5.4
-// and later and nil on Lua 5.2 and 5.3, or nil on both with --fallback,
-// whose searcher gives no loader data, and under the name of a runtime's
-// built-in module, which the bundle serves from its wrapper around the first
-// searcher. Everything else agrees.
+// README's Limitations describe it. Lua 5.1, LuaJIT and Tarantool give a
+// module nothing but its name, and require returns nothing but the module's
+// value, natively and in a bundle alike, also with --fallback and under the
+// name of a runtime's built-in module, which the bundle serves from its
+// wrapper around the first searcher.
 func TestBundle_LoaderData(t *testing.T) {
 	t.Parallel()
 
@@ -678,15 +651,13 @@ func TestBundle_LoaderData(t *testing.T) {
 		flags []string
 		// name is the name the module is required by, and of its file.
 		name string
-		// data is the bundle's loader data on Lua 5.4 and later.
-		data string
 	}{
-		"default":  {flags: nil, name: "m", data: ":preload:"},
-		"debug":    {flags: []string{"--debug"}, name: "m", data: ":preload:"},
-		"fallback": {flags: []string{"--fallback"}, name: "m", data: "nil"},
+		"default":  {flags: nil, name: "m"},
+		"debug":    {flags: []string{"--debug"}, name: "m"},
+		"fallback": {flags: []string{"--fallback"}, name: "m"},
 		// Tarantool's own csv, which require loads there instead, is not
 		// this test's business.
-		"built-in name": {flags: nil, name: "csv", data: "nil"},
+		"built-in name": {flags: nil, name: "csv"},
 	}
 
 	for variant, tt := range tests {
@@ -705,9 +676,9 @@ func TestBundle_LoaderData(t *testing.T) {
 					t.Skip("Tarantool has a csv module of its own")
 				}
 
-				native, embedded := loaderDataOutputs(orig.Interp.Version, tt.name, tt.data)
-				require.Equal(t, native, orig.Stdout, "the original\n%s", orig)
-				assert.Equal(t, embedded, bundle.Stdout, "the bundle\n%s", bundle)
+				want := "module gets\t1\t" + tt.name + "\nrequire returns\t1\tM\n"
+				require.Equal(t, want, orig.Stdout, "the original\n%s", orig)
+				assert.Equal(t, want, bundle.Stdout, "the bundle\n%s", bundle)
 				luatest.AssertSameExitCode(t, orig, bundle)
 				luatest.AssertSameStderr(t, orig, bundle)
 			}
@@ -719,10 +690,8 @@ func TestBundle_LoaderData(t *testing.T) {
 
 // TestBundle_FallbackReportsAMissingModule: with --fallback, the error for a
 // module found nowhere is the interpreter's own plus a line for the bundle's
-// searcher. Lua 5.1 to 5.3, LuaJIT and Tarantool expect a searcher to start
-// its message with "\n\t", while Lua 5.4 and later put "\n\t" in front of
-// each searcher's message themselves: the searcher started its message with
-// them everywhere, which on Lua 5.4 and later left a line holding only a tab.
+// searcher. Lua 5.1, LuaJIT and Tarantool expect a searcher to start its
+// message with "\n\t".
 //
 // The program prints the message itself: Tarantool cuts an uncaught error's
 // message short, and here it lists the files it tried in every directory up
