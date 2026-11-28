@@ -779,6 +779,18 @@ after the same rewrite of the original, so it does not show that change.
       flow/bench_test.go (BenchmarkGraphsArchives, BenchmarkAnalyzeArchives,
       BenchmarkQueriesArchives): go-moonscript
 
+  - LuaJIT's Lua 5.2 compatibility syntax (go-moonscript):
+    - parse/parser.go: parse.Options.Lua52Compat reads, under
+      DialectLuaJIT, what LuaJIT built with LUAJIT_ENABLE_LUA52COMPAT
+      reads, as its lj_parse.c does: ";" is a statement of its own (and
+      goes with a label before it), "break" need not end its block, a
+      call's "(" may start a line (no "ambiguous syntax"), goto is a
+      keyword everywhere. Under Lua51 it changes nothing; Lua 5.2's own
+      additions are still refused. Checked against such a LuaJIT build on
+      the parity sources (the 1543 it reads differently from plain
+      LuaJIT). For luamerge, which reads files written for later Lua
+      versions too. Tests: parse/lua52compat_test.go: go-moonscript
+
   Performance, numbers (go-moonscript):
     - LNumber2I builds the interface value in a local, without a scratch
       LValue (a write barrier per boxed number) or reflect.SliceHeader;
@@ -32507,9 +32519,110 @@ regenerates the diff below; this header is edited by hand.
 +	}
 +	fs.freereg = t.info + 1 // luaK_setlist
 +}
+--- a/parse/lua52compat_test.go
++++ b/parse/lua52compat_test.go
+@@ -0,0 +1,98 @@
++package parse
++
++// go-moonscript patch: tests of Options.Lua52Compat, LuaJIT's LJ_52
++// syntax. The errors are those of LuaJIT 2.1 built with
++// LUAJIT_ENABLE_LUA52COMPAT (and without it) on the same sources; on the
++// 10,811 sources of the parity corpus, 1,543 of which LJ_52 reads
++// differently, the option gives the outcome and message of such a build.
++
++import (
++	"reflect"
++	"testing"
++)
++
++func TestLua52Compat(t *testing.T) {
++	tests := []struct {
++		src string
++		// the errors without and with the option, "" for none
++		plain, lj52 string
++	}{
++		{";", `=x:1: unexpected symbol near ';'`, ""},
++		{"local a = 1;; ;", `=x:1: unexpected symbol near ';'`, ""},
++		{"do ; end if x then ; else ; end repeat ; until x", `=x:1: unexpected symbol near ';'`, ""},
++		{"function f() ; end", `=x:1: unexpected symbol near ';'`, ""},
++		{"local t = {1; 2;}", "", ""},
++		{"return;", "", ""},
++		{"return; ;", `=x:1: '<eof>' expected near ';'`, `=x:1: '<eof>' expected near ';'`},
++		{"while x do break f() end", `=x:1: 'end' expected near 'f'`, ""},
++		{"while x do break; break end", `=x:1: 'end' expected near 'break'`, ""},
++		{"break", `=x:1: no loop to break`, `=x:1: no loop to break`},
++		{"f()\n(g)()", `=x:2: ambiguous syntax (function call x new statement) near '('`, ""},
++		{"local a = b\n(f)()", `=x:2: ambiguous syntax (function call x new statement) near '('`, ""},
++		{"f\n'x'", "", ""},
++		{"goto l ::l::", "", ""},
++		{"local goto = 1", "", `=x:1: '<name>' expected near 'goto'`},
++		{"goto = 1", "", `=x:1: '<name>' expected near '='`},
++		{"x = goto", "", `=x:1: unexpected symbol near 'goto'`},
++		{"t = {goto = 1} t.goto = t:goto()", "", `=x:1: unexpected symbol near 'goto'`},
++		{"function f(goto) end", "", `=x:1: <name> or '...' expected near 'goto'`},
++		{"goto end", `=x:1: '=' expected near 'end'`, `=x:1: '<name>' expected near 'end'`},
++		{"goto", `=x:1: '=' expected near '<eof>'`, `=x:1: '<name>' expected near '<eof>'`},
++		{"::goto::", "", `=x:1: '<name>' expected near 'goto'`},
++		{"for goto = 1, 2 do end", "", `=x:1: '<name>' expected near 'goto'`},
++		{"local function goto() end", "", `=x:1: '<name>' expected near 'goto'`},
++		{"a.b\n(c)", `=x:2: ambiguous syntax (function call x new statement) near '('`, ""},
++		{"f{}\n(g)", `=x:2: ambiguous syntax (function call x new statement) near '('`, ""},
++		{"x = (a)\n(b)", `=x:2: ambiguous syntax (function call x new statement) near '('`, ""},
++		// Under LJ_52 the ";" after a label goes with it: the label is still
++		// the last statement of its block, out of the scope of its locals.
++		{"do goto l local x ::l:: ; end", `=x:1: <goto l> jumps into the scope of local 'x'`, ""},
++		{"do goto l local x ::l:: ; f() end", `=x:1: <goto l> jumps into the scope of local 'x'`,
++			`=x:1: <goto l> jumps into the scope of local 'x'`},
++		{"goto l ::l:: ; ::m:: ;", "", ""},
++	}
++	for _, tt := range tests {
++		for _, lj52 := range []bool{false, true} {
++			want := tt.plain
++			if lj52 {
++				want = tt.lj52
++			}
++			_, err := ParseChunk([]byte(tt.src), "=x", Options{Dialect: LuaJIT, Lua52Compat: lj52})
++			got := ""
++			if err != nil {
++				got = err.Error()
++			}
++			if got != want {
++				t.Errorf("%q, Lua52Compat %v: got %q, want %q", tt.src, lj52, got, want)
++			}
++		}
++		// Lua 5.1 is the same with the option.
++		_, err51 := ParseChunk([]byte(tt.src), "=x", Options{Dialect: Lua51})
++		_, err51c := ParseChunk([]byte(tt.src), "=x", Options{Dialect: Lua51, Lua52Compat: true})
++		if !reflect.DeepEqual(err51, err51c) {
++			t.Errorf("%q under Lua51: %v with the option, %v without", tt.src, err51c, err51)
++		}
++	}
++}
++
++// TestLua52CompatSameTree: a source that parses with and without the option
++// has the same tree, spans included.
++func TestLua52CompatSameTree(t *testing.T) {
++	for _, src := range []string{
++		"local a = require('a'); local t = {1; 2}\nwhile a do f(a) break end\n",
++		"goto l\n::l:: local x <const> = 1",
++		"for i = 1, 2 do if i then break end end return f\n'x'",
++	} {
++		plain, err1 := ParseChunk([]byte(src), "=x", Options{Dialect: LuaJIT})
++		lj52, err2 := ParseChunk([]byte(src), "=x", Options{Dialect: LuaJIT, Lua52Compat: true})
++		if (err1 == nil) != (err2 == nil) {
++			t.Fatalf("%q: %v, %v", src, err1, err2)
++		}
++		if err1 == nil && Dump(plain.Stmts) != Dump(lj52.Stmts) {
++			t.Errorf("%q: the trees differ:\n%s\n%s", src, Dump(plain.Stmts), Dump(lj52.Stmts))
++		}
++		if err1 == nil && !reflect.DeepEqual(plain.Stmts, lj52.Stmts) {
++			t.Errorf("%q: the trees differ in their spans or lines", src)
++		}
++	}
++}
 --- a/parse/parser.go
 +++ b/parse/parser.go
-@@ -1,1385 +1,2098 @@
+@@ -1,1385 +1,2122 @@
 -// Code generated by goyacc -o parser.go parser.go.y. DO NOT EDIT.
 -
 -//line parser.go.y:2
@@ -32953,6 +33066,14 @@ regenerates the diff below; this header is edited by hand.
 +	// 12 bytes a token (a source has about one per 4 bytes) and a tenth of
 +	// the parse time, and nothing when they are not asked for.
 +	Tokens bool
++	// Lua52Compat, under LuaJIT, reads the syntax of LuaJIT built with
++	// LUAJIT_ENABLE_LUA52COMPAT (LJ_52), as its lj_parse.c does: ";" is
++	// a statement of its own, which does nothing, "break" need not be the
++	// last statement of its block, a call's "(" may start a line (there is
++	// no "ambiguous syntax (function call x new statement)"), and goto is
++	// a keyword everywhere, never a name. A source that parses either way
++	// has the same tree both ways. Under Lua51 it changes nothing.
++	Lua52Compat bool
 +}
 +
 +// ParseChunk parses a chunk held in memory into its tree, with the
@@ -32977,6 +33098,7 @@ regenerates the diff below; this header is edited by hand.
 +func parseSource(src []byte, name string, opts Options) (chunk []ast.Stmt, block ast.Span, ls *lexer, err error) {
 +	dialect := opts.Dialect
 +	p := &parser{jit: dialect == LuaJIT}
++	p.lj52 = p.jit && opts.Lua52Compat
 +	sc := scratchPool.Get().(*scratch)
 +	p.fsCache, p.bcstack, p.lnstack = sc.fsCache, sc.bcstack, sc.lnstack
 +	p.stmtStack, p.exprStack, p.fieldStack = sc.stmtStack, sc.exprStack, sc.fieldStack
@@ -33133,6 +33255,7 @@ regenerates the diff below; this header is edited by hand.
 +	fs     *funcState
 +	jit    bool
 +	r51    bool // the model of Lua 5.1's registers runs (Lua51Overflow)
++	lj52   bool // LuaJIT's LJ_52 syntax (Options.Lua52Compat); go-moonscript patch
 +	level  int
 +	nextID int
 +	// LuaJIT's code generator: the bytecode of the functions being parsed,
@@ -33166,13 +33289,13 @@ regenerates the diff below; this header is edited by hand.
 -	Lookahead() int
 -}
 +/* helpers */
-+
-+func (p *parser) next() { p.ls.nextToken() }
  
 -type yyParserImpl struct {
 -	lval  yySymType
 -	stack [yyInitialStackSize]yySymType
 -	char  int
++func (p *parser) next() { p.ls.nextToken() }
++
 +func (p *parser) errorExpected(tok int) {
 +	p.ls.syntaxError(fmt.Sprintf("'%s' expected", p.ls.token2str(tok)))
  }
@@ -33221,9 +33344,10 @@ regenerates the diff below; this header is edited by hand.
 -		if yyStatenames[s] != "" {
 -			return yyStatenames[s]
 -		}
-+// isName: LuaJIT's goto is a name where a name is expected.
++// isName: LuaJIT's goto is a name where a name is expected (lex_str), but
++// under LJ_52.
 +func (p *parser) isName() bool {
-+	return p.ls.t.typ == tkName || p.ls.t.typ == tkGoto
++	return p.ls.t.typ == tkName || p.ls.t.typ == tkGoto && !p.lj52
 +}
 +
 +// strCheckName is str_checkname / lex_str: the name, its line and its
@@ -33245,14 +33369,14 @@ regenerates the diff below; this header is edited by hand.
 +func (p *parser) spanFrom(start int) ast.Span {
 +	return ast.Span{Start: start, End: p.ls.prevEnd}
 +}
- 
--	if !yyErrorVerbose {
--		return "syntax error"
++
 +// tokenSpan is the span of the current token.
 +func (p *parser) tokenSpan() ast.Span {
 +	return ast.Span{Start: p.ls.t.start, End: p.ls.t.end}
 +}
-+
+ 
+-	if !yyErrorVerbose {
+-		return "syntax error"
 +func (p *parser) errorLimit(fs *funcState, limit int, what string) {
 +	var msg string
 +	if fs.line == 0 {
@@ -33440,6 +33564,9 @@ regenerates the diff below; this header is edited by hand.
 -out:
 -	if token == 0 {
 -		token = int(yyTok2[1]) /* unknown char */
+-	}
+-	if yyDebug >= 3 {
+-		__yyfmt__.Printf("lex %s(%d)\n", yyTokname(token), uint(char))
 +// golaPatch makes a goto jump to a label (gola_patch).
 +func (p *parser) golaPatch(vg, vl *gola) {
 +	vg.valid = false
@@ -33448,9 +33575,6 @@ regenerates the diff below; this header is edited by hand.
 +		fs.bc[vg.pc].setA(uint32(vl.slot))
 +		fs.jmpPatch(p, vg.pc, vl.pc)
  	}
--	if yyDebug >= 3 {
--		__yyfmt__.Printf("lex %s(%d)\n", yyTokname(token), uint(char))
--	}
 -	return char, token
  }
  
@@ -33572,6 +33696,9 @@ regenerates the diff below; this header is edited by hand.
 -	yyn = int(yyPact[yystate])
 -	if yyn <= yyFlag {
 -		goto yydefault /* simple state */
+-	}
+-	if yyrcvr.char < 0 {
+-		yyrcvr.char, yytoken = yylex1(yylex, &yyrcvr.lval)
 +// adjustLocalVars activates the first n variables declared.
 +func (p *parser) adjustLocalVars(n int) {
 +	fs := p.fs
@@ -33610,8 +33737,9 @@ regenerates the diff below; this header is edited by hand.
 +			return fs.actvar[i].id, true
 +		}
  	}
--	if yyrcvr.char < 0 {
--		yyrcvr.char, yytoken = yylex1(yylex, &yyrcvr.lval)
+-	yyn += yytoken
+-	if yyn < 0 || yyn >= yyLast {
+-		goto yydefault
 +	id, ok := p.singleVar(fs.prev, name, e, false)
 +	if !ok {
 +		return 0, false
@@ -33826,11 +33954,17 @@ regenerates the diff below; this header is edited by hand.
 +		st := &ast.BreakStmt{}
 +		st.SetLine(tokLine)
 +		add(st)
-+		return true
++		return !p.lj52 // the last statement of its block, but under LJ_52
++	case ';':
++		if !p.lj52 {
++			add(p.exprStat()) // an unexpected symbol
++			break
++		}
++		p.next() // LJ_52's empty statement
 +	case tkLabel:
 +		p.labelStat()
 +	case tkGoto:
-+		if ls.lookahead() == tkName {
++		if p.lj52 || ls.lookahead() == tkName {
 +			p.next()
 +			name, _, nameSpan := p.strCheckName()
 +			if l := p.golaFindLabel(name); l >= 0 { // a backward goto in the scope is a loop
@@ -34217,9 +34351,14 @@ regenerates the diff below; this header is edited by hand.
 +	} else {
 +		e.k = vVoid
  	}
--	yyn += yytoken
--	if yyn < 0 || yyn >= yyLast {
--		goto yydefault
+-	yyn = int(yyAct[yyn])
+-	if int(yyChk[yyn]) == yytoken { /* valid shift */
+-		yyrcvr.char = -1
+-		yytoken = -1
+-		yyVAL = yyrcvr.lval
+-		yystate = yyn
+-		if Errflag > 0 {
+-			Errflag--
 +	if p.jit {
 +		p.assignAdjust(len(names), len(exprs), &e)
 +	} else if p.r51 {
@@ -34245,7 +34384,8 @@ regenerates the diff below; this header is edited by hand.
 +		fs.bc[e.info].setB(uint32(extra + 1)) // the call's results
 +		if extra > 1 {
 +			fs.regReserve(p, uint32(extra-1))
-+		}
+ 		}
+-		goto yystack
 +	} else {
 +		if e.k != vVoid {
 +			fs.toNextReg(p, e) // the last expression
@@ -34258,10 +34398,17 @@ regenerates the diff below; this header is edited by hand.
 +	}
 +	if nexps > nvars {
 +		fs.freereg -= uint32(nexps - nvars) // drops the registers left
-+	}
+ 	}
 +}
-+
-+// labelStat parses LuaJIT's '::' NAME '::' and the labels right after it.
+ 
+-yydefault:
+-	/* default state action */
+-	yyn = int(yyDef[yystate])
+-	if yyn == -2 {
+-		if yyrcvr.char < 0 {
+-			yyrcvr.char, yytoken = yylex1(yylex, &yyrcvr.lval)
++// labelStat parses LuaJIT's '::' NAME '::' and the labels right after it,
++// with the ";" between them under LJ_52.
 +func (p *parser) labelStat() {
 +	ls := p.ls
 +	line, start := ls.t.line, ls.t.start
@@ -34279,10 +34426,16 @@ regenerates the diff below; this header is edited by hand.
 +	st.SetLine(line)
 +	st.SetSpan(p.spanFrom(start))
 +	p.stmtStack = append(p.stmtStack, st)
-+	if ls.t.typ == tkLabel {
-+		p.enterLevel()
-+		p.labelStat()
-+		p.leaveLevel()
++	for { // the labels right after it, and under LJ_52 the ";"
++		if ls.t.typ == tkLabel {
++			p.enterLevel()
++			p.labelStat()
++			p.leaveLevel()
++		} else if p.lj52 && ls.t.typ == ';' {
++			p.next()
++		} else {
++			break
++		}
 +	}
 +	// a label at the end of a block is out of the scope of its locals
 +	if blockFollow(ls.t.typ) && ls.t.typ != tkUntil {
@@ -34340,15 +34493,7 @@ regenerates the diff below; this header is edited by hand.
 +			}
 +		}
 +		lhs = append(lhs, e)
- 	}
--	yyn = int(yyAct[yyn])
--	if int(yyChk[yyn]) == yytoken { /* valid shift */
--		yyrcvr.char = -1
--		yytoken = -1
--		yyVAL = yyrcvr.lval
--		yystate = yyn
--		if Errflag > 0 {
--			Errflag--
++	}
 +	p.checkNext('=')
 +	var ev expDesc
 +	rhs := p.exprList(&ev)
@@ -34380,7 +34525,6 @@ regenerates the diff below; this header is edited by hand.
 +				e.k = vNonReloc
 +			}
  		}
--		goto yystack
 +		fs.store(p, &p.lhs[last], e)
 +		stored = true
 +	} else {
@@ -34392,16 +34536,11 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		e.init(vNonReloc, fs.freereg-1)
 +		fs.store(p, &p.lhs[i], e)
- 	}
++	}
 +}
  
--yydefault:
--	/* default state action */
--	yyn = int(yyDef[yystate])
--	if yyn == -2 {
--		if yyrcvr.char < 0 {
--			yyrcvr.char, yytoken = yylex1(yylex, &yyrcvr.lval)
--		}
+-		/* look through exception table */
+-		xi := 0
 +// assignHazard renames the tables and keys of the indexed targets before
 +// the local v, which an assignment to v overwrites before they are used
 +// (assign_hazard).
@@ -34429,9 +34568,7 @@ regenerates the diff below; this header is edited by hand.
 +		fs.regReserve(p, 1)
 +	}
 +}
- 
--		/* look through exception table */
--		xi := 0
++
 +/* functions */
 +
 +// body parses a function's parameters and body; line is its linedefined.
@@ -34571,7 +34708,7 @@ regenerates the diff below; this header is edited by hand.
 +	where := ls.linenumber
 +	switch ls.t.typ {
 +	case '(':
-+		if where != ls.lastline {
++		if where != ls.lastline && !p.lj52 {
 +			ls.syntaxError("ambiguous syntax (function call x new statement)")
 +		}
 +		line = ls.t.line
@@ -34622,9 +34759,7 @@ regenerates the diff below; this header is edited by hand.
 +		} else {
 +			if a.k != vVoid {
 +				fs.toNextReg(p, &a)
- 			}
--			if yytoken == yyEofCode {
--				goto ret1
++			}
 +			ins = insABC(bcCALL, base, 2, fs.freereg-base-fr2)
 +		}
 +		e.init(vCall, fs.emit(p, ins))
@@ -34675,9 +34810,8 @@ regenerates the diff below; this header is edited by hand.
 +			if ex, ok := e.(*ast.Comma3Expr); ok {
 +				ex.AdjustRet = true
  			}
--			yyrcvr.char = -1
--			yytoken = -1
--			goto yynewstate /* try again in the same state */
+-			if yytoken == yyEofCode {
+-				goto ret1
 +			e.SetLine(parenLine)
 +		}
 +		kind = kindParen
@@ -34728,7 +34862,10 @@ regenerates the diff below; this header is edited by hand.
 +				fs.method(p, v, method)
 +			} else if p.r51 {
 +				fs.rSelf(p, v, method)
-+			}
+ 			}
+-			yyrcvr.char = -1
+-			yytoken = -1
+-			goto yynewstate /* try again in the same state */
 +			args, line, endLine := p.funcArgs(v)
 +			c := &ast.FuncCallExpr{Method: method, Receiver: e, Args: args, ArgsLine: line, ArgsEndLine: endLine}
 +			c.SetMethodSpan(methodSpan)
@@ -35900,11 +36037,11 @@ regenerates the diff below; this header is edited by hand.
  	}
 -	goto yystack /* stack new state and value */
 +	return strings.Join(buf, "\n")
-+}
+ }
 +
 +func Dump(chunk []ast.Stmt) string {
 +	return dump(chunk, 0, "   ")
- }
++}
 +
 +// }}
 --- a/parse/span_check_test.go
