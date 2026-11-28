@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/tarantool/go-luamerge/internal/graph"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/graph"
 )
 
 // templateText renders the bundle. Each module becomes a loader function,

@@ -31,6 +31,6 @@
 // from a luamerge.yaml file and LUAMERGE_* environment variables, as the CLI
 // does.
 //
-// See the [github.com/tarantool/go-luamerge/cmd/luamerge] command for the CLI
+// See the [github.com/tarantool-contrib/go-moonscript/luamerge/cmd/luamerge] command for the CLI
 // built on top of this package.
 package luamerge

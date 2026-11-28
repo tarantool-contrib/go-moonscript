@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tarantool/go-luamerge/internal/parse"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
 )
 
 // TestParse_ModuleNameEscapes: a module name is the value of its string

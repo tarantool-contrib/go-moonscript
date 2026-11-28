@@ -3,7 +3,7 @@ package parser
 import (
 	"bytes"
 
-	"github.com/bigbes/go-luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
 )
 
 const eof = -1

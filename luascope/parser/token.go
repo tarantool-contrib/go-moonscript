@@ -3,7 +3,7 @@ package parser
 import (
 	"fmt"
 
-	"github.com/bigbes/go-luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
 )
 
 // tokenType is a lexical token type. Values below tkOffset are single

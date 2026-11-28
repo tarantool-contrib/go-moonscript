@@ -15,7 +15,7 @@ import (
 )
 
 // cliPackage is the command CLIPath builds.
-const cliPackage = "github.com/tarantool/go-luamerge/cmd/luamerge"
+const cliPackage = "github.com/tarantool-contrib/go-moonscript/luamerge/cmd/luamerge"
 
 // cliTimeout bounds a CLI run; bundling a test project takes milliseconds.
 const cliTimeout = time.Minute

@@ -15,8 +15,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/bigbes/go-luascope/globals"
-	"github.com/bigbes/go-luascope/parser"
+	"github.com/tarantool-contrib/go-moonscript/luascope/globals"
+	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
 // The corpus and the LuaJIT results are shared with the parser package.

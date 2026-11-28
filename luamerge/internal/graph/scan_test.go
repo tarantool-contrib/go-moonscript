@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tarantool/go-luamerge/internal/graph"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/graph"
 )
 
 // TestBuild_TokenScanWarning: a module the parser cannot read does not fail

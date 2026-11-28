@@ -3,7 +3,7 @@ package parse
 import (
 	"strings"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 // LuaJIT 2.1 builds of 2026 read syntax of their own, which LuaJIT's own

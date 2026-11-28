@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
-	"github.com/tarantool/go-luamerge/internal/luatest"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
 )
 
 // lineProbe is the statement that prints its own line.

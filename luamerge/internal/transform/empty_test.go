@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
-	"github.com/tarantool/go-luamerge/internal/transform"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/transform"
 )
 
 // testNonSpace is src without its white space.

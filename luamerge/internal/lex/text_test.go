@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 func TestHeader(t *testing.T) {

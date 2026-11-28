@@ -13,11 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 	gopherparse "github.com/yuin/gopher-lua/parse"
 
-	"github.com/tarantool/go-luamerge/internal/emit"
-	"github.com/tarantool/go-luamerge/internal/graph"
-	"github.com/tarantool/go-luamerge/internal/lex"
-	"github.com/tarantool/go-luamerge/internal/luatest"
-	"github.com/tarantool/go-luamerge/internal/transform"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/emit"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/graph"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/transform"
 )
 
 // newModule is a module of the graph at path with source, registered under

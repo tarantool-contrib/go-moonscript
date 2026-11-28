@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/tarantool/go-luamerge/internal/luatest"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
 )
 
 // TestCLI_LocalNamedRequire: a local named require that is a function of its

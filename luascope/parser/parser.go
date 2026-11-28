@@ -31,7 +31,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/bigbes/go-luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
 )
 
 // parser is the parser state (LexState and the parser part of it).

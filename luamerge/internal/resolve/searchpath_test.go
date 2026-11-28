@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/luatest"
-	"github.com/tarantool/go-luamerge/internal/resolve"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/resolve"
 )
 
 // searchpathProbe prints, for every name in the file named by its second

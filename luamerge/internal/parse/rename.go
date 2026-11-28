@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 // ErrNotALiteral is the cause of the error PrefixNames returns for a call

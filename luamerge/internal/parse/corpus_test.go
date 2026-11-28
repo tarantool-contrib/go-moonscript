@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	gopherparse "github.com/yuin/gopher-lua/parse"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
-	"github.com/tarantool/go-luamerge/internal/parse"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
 )
 
 // testCorpus returns the Lua 5.1 files the parser is checked on: the test

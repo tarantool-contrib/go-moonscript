@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/bigbes/go-luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
 )
 
 // FuzzParse checks that the parser never panics, reports positioned

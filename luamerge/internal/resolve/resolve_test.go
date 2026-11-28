@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/resolve"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/resolve"
 )
 
 func TestResolver(t *testing.T) {

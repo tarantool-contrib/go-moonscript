@@ -3,8 +3,8 @@ package globals_test
 import (
 	"fmt"
 
-	"github.com/bigbes/go-luascope/globals"
-	"github.com/bigbes/go-luascope/parser"
+	"github.com/tarantool-contrib/go-moonscript/luascope/globals"
+	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
 func ExampleAnalyze() {

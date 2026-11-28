@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tarantool/go-luamerge/internal/config"
-	"github.com/tarantool/go-luamerge/internal/lex"
-	"github.com/tarantool/go-luamerge/internal/parse"
-	"github.com/tarantool/go-luamerge/internal/resolve"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/config"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/resolve"
 )
 
 // WarningKind classifies a non-fatal issue found while building the graph.

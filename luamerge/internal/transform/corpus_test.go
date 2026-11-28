@@ -18,9 +18,9 @@ import (
 	"github.com/yuin/gopher-lua/ast"
 	"github.com/yuin/gopher-lua/parse"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
-	"github.com/tarantool/go-luamerge/internal/luatest"
-	"github.com/tarantool/go-luamerge/internal/transform"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/transform"
 )
 
 // corpusTransform is a transform checked over the corpus.

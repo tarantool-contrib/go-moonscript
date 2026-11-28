@@ -3,7 +3,7 @@ package luamerge
 import (
 	"fmt"
 
-	"github.com/tarantool/go-luamerge/internal/config"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/config"
 )
 
 // Options configures a bundling run. Only Entry must be set: the zero value of

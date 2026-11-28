@@ -19,7 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/bigbes/go-luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
 )
 
 // The golden files hold the results of Tarantool's LuaJIT for every test

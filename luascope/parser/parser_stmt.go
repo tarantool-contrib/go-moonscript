@@ -3,7 +3,7 @@ package parser
 import (
 	"fmt"
 
-	"github.com/bigbes/go-luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
 )
 
 // chunk parses statements up to the end of a block (parse_chunk).

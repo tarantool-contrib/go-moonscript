@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/config"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/config"
 )
 
 func TestDefaultConfig(t *testing.T) {

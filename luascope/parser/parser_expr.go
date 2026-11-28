@@ -4,7 +4,7 @@ import (
 	"math"
 	"math/bits"
 
-	"github.com/bigbes/go-luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
 )
 
 // binaryOp is a binary operator with its priorities (ORDER OPR).

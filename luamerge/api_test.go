@@ -15,11 +15,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge"
+	"github.com/tarantool-contrib/go-moonscript/luamerge"
 )
 
 // testModulePath is the import path of package luamerge.
-const testModulePath = "github.com/tarantool/go-luamerge"
+const testModulePath = "github.com/tarantool-contrib/go-moonscript/luamerge"
 
 // testPublicType is a type of the public API with the methods it documents:
 // those of a pointer to it, which include the type's own.

@@ -15,7 +15,7 @@ import (
 	"github.com/yuin/gopher-lua/ast"
 	"github.com/yuin/gopher-lua/parse"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 // requireName is the name of Lua's global require function.

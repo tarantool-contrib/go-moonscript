@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/yuin/gopher-lua/ast"
 
-	"github.com/tarantool/go-luamerge/internal/parse"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
 )
 
 // testPosition is a Lua source with require("x") in one statement or

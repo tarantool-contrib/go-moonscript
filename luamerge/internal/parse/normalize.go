@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 // attribLen is the number of tokens of an attribute: "<", its name, ">".

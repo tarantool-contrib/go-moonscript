@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/luatest"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
 )
 
 func TestMain(m *testing.M) { luatest.Main(m) }

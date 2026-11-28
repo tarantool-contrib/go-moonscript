@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge"
+	"github.com/tarantool-contrib/go-moonscript/luamerge"
 )
 
 // TestLoadOptions_MissingNamedFile checks that a configuration file named

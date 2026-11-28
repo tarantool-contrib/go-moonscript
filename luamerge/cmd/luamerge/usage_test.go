@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge"
-	"github.com/tarantool/go-luamerge/internal/luatest"
+	"github.com/tarantool-contrib/go-moonscript/luamerge"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
 )
 
 // Tests for how the CLI reads its command line and reports what it did.

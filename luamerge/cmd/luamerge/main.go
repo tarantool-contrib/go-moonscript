@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	"github.com/spf13/pflag"
-	"github.com/tarantool/go-luamerge"
-	"github.com/tarantool/go-luamerge/internal/config"
+	"github.com/tarantool-contrib/go-moonscript/luamerge"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/config"
 )
 
 // version, commit, and date are injected at build time via -ldflags

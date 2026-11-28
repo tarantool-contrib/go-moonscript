@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/bigbes/go-luascope/allowlist"
-	"github.com/bigbes/go-luascope/parser"
+	"github.com/tarantool-contrib/go-moonscript/luascope/allowlist"
+	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
 // rules are typical allow-lists for Tarantool migrations.

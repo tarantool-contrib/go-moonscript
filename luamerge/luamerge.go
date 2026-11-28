@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tarantool/go-luamerge/internal/emit"
-	"github.com/tarantool/go-luamerge/internal/graph"
-	"github.com/tarantool/go-luamerge/internal/parse"
-	"github.com/tarantool/go-luamerge/internal/resolve"
-	"github.com/tarantool/go-luamerge/internal/transform"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/emit"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/graph"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/resolve"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/transform"
 )
 
 // ErrNoEntry is returned by Bundle when Options.Entry is empty.

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/tarantool/go-luamerge"
+	"github.com/tarantool-contrib/go-moonscript/luamerge"
 )
 
 // Example bundles a tiny two-file Lua project into a single self-contained

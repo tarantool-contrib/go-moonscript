@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/luatest"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/luatest"
 )
 
 // Tests of what the harness does when a test fails or is set up wrong. A

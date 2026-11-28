@@ -8,11 +8,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/config"
-	"github.com/tarantool/go-luamerge/internal/graph"
-	"github.com/tarantool/go-luamerge/internal/lex"
-	"github.com/tarantool/go-luamerge/internal/parse"
-	"github.com/tarantool/go-luamerge/internal/resolve"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/config"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/graph"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/resolve"
 )
 
 // TestBuild_FileHeader: Build reads every file, the entry, a module and an

@@ -1,6 +1,6 @@
 package transform
 
-import "github.com/tarantool/go-luamerge/internal/config"
+import "github.com/tarantool-contrib/go-moonscript/luamerge/internal/config"
 
 // Transformer applies a source-to-source transformation to Lua source code.
 type Transformer interface {

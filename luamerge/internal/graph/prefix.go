@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tarantool/go-luamerge/internal/parse"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/parse"
 )
 
 // applyPackagePrefix makes the bundle a library that shows the program which

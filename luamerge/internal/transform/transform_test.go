@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool/go-luamerge/internal/config"
-	"github.com/tarantool/go-luamerge/internal/transform"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/config"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/transform"
 )
 
 // testApply runs source through the transformers of pipeline in order, as the

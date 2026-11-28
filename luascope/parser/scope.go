@@ -3,7 +3,7 @@ package parser
 import (
 	"fmt"
 
-	"github.com/bigbes/go-luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
 )
 
 // Limits of LuaJIT (lj_def.h and lj_parse.c).

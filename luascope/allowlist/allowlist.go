@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/bigbes/go-luascope/ast"
-	"github.com/bigbes/go-luascope/globals"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/globals"
 )
 
 // ErrInvalidRule is returned for a malformed rule.

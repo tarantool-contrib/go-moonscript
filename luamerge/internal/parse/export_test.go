@@ -7,7 +7,7 @@ package parse
 import (
 	"github.com/yuin/gopher-lua/ast"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 // ErrUnsupportedNodeForTest is errUnsupportedNode, exported for tests.

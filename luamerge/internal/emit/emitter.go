@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tarantool/go-luamerge/internal/graph"
-	"github.com/tarantool/go-luamerge/internal/transform"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/graph"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/transform"
 )
 
 // errNoEntry is returned by Emit for a graph without an entry.

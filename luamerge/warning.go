@@ -1,6 +1,6 @@
 package luamerge
 
-import "github.com/tarantool/go-luamerge/internal/graph"
+import "github.com/tarantool-contrib/go-moonscript/luamerge/internal/graph"
 
 // WarningKind classifies a Warning; see the Warn* constants.
 type WarningKind int

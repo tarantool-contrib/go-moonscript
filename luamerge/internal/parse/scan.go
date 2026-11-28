@@ -1,7 +1,7 @@
 package parse
 
 import (
-	"github.com/tarantool/go-luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 // Lengths of the forms of _G.require, in tokens.

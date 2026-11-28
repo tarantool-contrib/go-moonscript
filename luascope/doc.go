@@ -17,11 +17,11 @@
 //
 // Subpackages:
 //
-//   - [github.com/bigbes/go-luascope/parser] parses a chunk into a syntax tree,
+//   - [github.com/tarantool-contrib/go-moonscript/luascope/parser] parses a chunk into a syntax tree,
 //     from an [io.Reader] or from memory.
-//   - [github.com/bigbes/go-luascope/ast] declares the syntax tree and Inspect.
-//   - [github.com/bigbes/go-luascope/globals] finds the globals and modules
+//   - [github.com/tarantool-contrib/go-moonscript/luascope/ast] declares the syntax tree and Inspect.
+//   - [github.com/tarantool-contrib/go-moonscript/luascope/globals] finds the globals and modules
 //     that code uses.
-//   - [github.com/bigbes/go-luascope/allowlist] checks them against lists of
+//   - [github.com/tarantool-contrib/go-moonscript/luascope/allowlist] checks them against lists of
 //     allowed names.
 package luascope

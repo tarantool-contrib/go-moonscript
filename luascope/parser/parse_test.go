@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/bigbes/go-luascope/ast"
-	"github.com/bigbes/go-luascope/parser"
+	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/luascope/parser"
 )
 
 // errReader fails after the bytes it returns.

@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/tarantool/go-luamerge/internal/lex"
+	"github.com/tarantool-contrib/go-moonscript/luamerge/internal/lex"
 )
 
 const (
