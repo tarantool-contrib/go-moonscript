@@ -21,7 +21,7 @@ import (
 // It puts the bundler's default templates (`?.lua;?/init.lua`) first, relative
 // to the working directory, and keeps the interpreter's built-in path after
 // them (`;;`). Without it the original and the bundle disagree for a reason
-// that has nothing to do with the bundler: Lua 5.1, 5.2 and LuaJIT have no
+// that has nothing to do with the bundler: Lua 5.1 and LuaJIT have no
 // `./?/init.lua` in their built-in path, so a project whose module lives in
 // foo/init.lua fails natively there while its bundle, built with that
 // template, works. Every interpreter reads LUA_PATH when no versioned

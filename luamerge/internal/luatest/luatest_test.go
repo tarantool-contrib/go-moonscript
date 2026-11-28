@@ -77,10 +77,10 @@ func TestDifferential_SeesMissingModule(t *testing.T) {
 func TestAssertSame_Passes(t *testing.T) {
 	t.Parallel()
 
-	orig := result("lua5.4", "hi\n",
-		"lua5.4: ./m.lua:2: boom\nstack traceback:\n\t./m.lua:2: in main chunk\n", 1)
-	bundle := result("lua5.4", "hi\n",
-		"lua5.4: bundle.lua:17: boom\nstack traceback:\n\tbundle.lua:17: in function <bundle.lua:12>\n", 1)
+	orig := result("lua5.1", "hi\n",
+		"lua5.1: ./m.lua:2: boom\nstack traceback:\n\t./m.lua:2: in main chunk\n", 1)
+	bundle := result("lua5.1", "hi\n",
+		"lua5.1: bundle.lua:17: boom\nstack traceback:\n\tbundle.lua:17: in function <bundle.lua:12>\n", 1)
 
 	rec := &recorder{messages: nil}
 	assert.True(t, luatest.AssertSame(rec, orig, bundle))
@@ -134,15 +134,15 @@ func TestNormalizeStderr(t *testing.T) {
 		name, interp, orig, bundle, want string
 	}{
 		{
-			name:   "PUC Lua 5.5",
-			interp: "lua",
-			orig: "lua: ./boom.lua:2: attempt to index a nil value (field 'x')\n" +
-				"stack traceback:\n\t./boom.lua:2: in main chunk\n\t[C]: in global 'require'\n" +
-				"\tmain.lua:2: in main chunk\n\t[C]: in ?\n",
-			bundle: "lua: bundle.lua:11: attempt to index a nil value (field 'x')\n" +
+			name:   "PUC Lua 5.1",
+			interp: "lua5.1",
+			orig: "lua5.1: ./boom.lua:2: attempt to index field 'x' (a nil value)\n" +
+				"stack traceback:\n\t./boom.lua:2: in main chunk\n\t[C]: in function 'require'\n" +
+				"\tmain.lua:2: in main chunk\n\t[C]: ?\n",
+			bundle: "lua5.1: bundle.lua:11: attempt to index field 'x' (a nil value)\n" +
 				"stack traceback:\n\tbundle.lua:11: in function <bundle.lua:6>\n" +
-				"\t[C]: in global 'require'\n\tbundle.lua:33: in main chunk\n\t[C]: in ?\n",
-			want: "attempt to index a nil value (field 'x')",
+				"\t[C]: in function 'require'\n\tbundle.lua:33: in main chunk\n\t[C]: ?\n",
+			want: "attempt to index field 'x' (a nil value)",
 		},
 		{
 			name:   "LuaJIT",
@@ -239,9 +239,9 @@ func TestNormalizeStderr(t *testing.T) {
 		},
 		{
 			name:   "stacked positions",
-			interp: "lua5.4",
-			orig:   "lua5.4: rethrow.lua:3: rethrow.lua:1: deep\nstack traceback:\n",
-			bundle: "lua5.4: bundle.lua:40: bundle.lua:38: deep\nstack traceback:\n",
+			interp: "lua5.1",
+			orig:   "lua5.1: rethrow.lua:3: rethrow.lua:1: deep\nstack traceback:\n",
+			bundle: "lua5.1: bundle.lua:40: bundle.lua:38: deep\nstack traceback:\n",
 			want:   "deep",
 		},
 		{
@@ -406,7 +406,7 @@ func TestRun_ScrubsEnvironment(t *testing.T) {
 }
 
 // TestDefaultLuaPath_FindsInitModules is why DefaultLuaPath exists: without it
-// Lua 5.1, 5.2 and LuaJIT cannot load foo/init.lua natively.
+// Lua 5.1 and LuaJIT cannot load foo/init.lua natively.
 func TestDefaultLuaPath_FindsInitModules(t *testing.T) {
 	t.Parallel()
 
@@ -528,10 +528,9 @@ var (
 func TestDiscover(t *testing.T) {
 	t.Parallel()
 
-	// A fake PATH: lua is Ubuntu's alternatives link to lua5.4.
+	// A fake PATH: lua is Ubuntu's alternatives link to lua5.1.
 	onPath := map[string]string{
 		"lua5.1": "/usr/bin/lua5.1",
-		"lua5.4": "/usr/bin/lua5.4",
 		"lua":    "/usr/bin/lua",
 		"luajit": "/usr/bin/luajit",
 	}
@@ -543,9 +542,9 @@ func TestDiscover(t *testing.T) {
 
 		return path, nil
 	}
-	// The fake links; /usr/local/bin/lua5.3 is a link whose target is gone. It
+	// The fake links; /usr/local/bin/tarantool is a link whose target is gone. It
 	// is on the PATH of one subtest only.
-	links := map[string]string{"/usr/bin/lua": "/usr/bin/lua5.4", "/usr/local/bin/lua5.3": ""}
+	links := map[string]string{"/usr/bin/lua": "/usr/bin/lua5.1", "/usr/local/bin/tarantool": ""}
 	resolve := func(path string) (string, error) {
 		target, ok := links[path]
 
@@ -558,7 +557,17 @@ func TestDiscover(t *testing.T) {
 			return target, nil
 		}
 	}
-	probe := func(interp luatest.Interpreter) (string, error) { return "version of " + interp.Name, nil }
+	versions := map[string]string{
+		"lua5.1": "Lua 5.1", "luajit": "LuaJIT 2.1.1737090214", "tarantool": "Tarantool 3.9.0", "lua": "Lua 5.4",
+		"luajit-custom": "LuaJIT 2.1.0-beta3", "lua5.3": "Lua 5.3",
+	}
+	probe := func(interp luatest.Interpreter) (string, error) {
+		if interp.Name == "" {
+			return "", errNotFound
+		}
+
+		return versions[interp.Name], nil
+	}
 	nothing := func(string) (string, error) { return "", errNotFound }
 	names := func(found luatest.DiscoveryForTest) []string {
 		out := make([]string, 0, len(found.Interps))
@@ -575,8 +584,35 @@ func TestDiscover(t *testing.T) {
 		found := luatest.DiscoverForTest("", false, lookPath, resolve, probe)
 		assert.Empty(t, found.Problems)
 		assert.Empty(t, found.Skip)
-		assert.Equal(t, []string{"lua5.1", "lua5.4", "luajit"}, names(found))
-		assert.Equal(t, "version of lua5.4", found.Interps[1].Version)
+		assert.Equal(t, []string{"lua5.1", "luajit"}, names(found))
+		assert.Equal(t, "LuaJIT 2.1.1737090214", found.Interps[1].Version)
+	})
+	t.Run("leaves out a plain lua that is not Lua 5.1", func(t *testing.T) {
+		t.Parallel()
+
+		other := func(name string) (string, error) {
+			if name == "lua" {
+				return "/usr/bin/lua", nil
+			}
+
+			return lookPath(name)
+		}
+		elsewhere := func(path string) (string, error) {
+			if path == "/usr/bin/lua" {
+				return "/usr/bin/lua5.4", nil
+			}
+
+			return resolve(path)
+		}
+
+		found := luatest.DiscoverForTest("", false, other, elsewhere, probe)
+		assert.Empty(t, found.Problems)
+		assert.Equal(t, []string{"lua5.1", "luajit"}, names(found))
+
+		found = luatest.DiscoverForTest("lua5.1,lua", true, other, elsewhere, probe)
+		assert.Equal(t, []string{
+			"lua (/usr/bin/lua) is Lua 5.4, which luamerge does not support: Lua 5.1, LuaJIT and Tarantool are",
+		}, found.Problems)
 	})
 	t.Run("looks up every candidate, the versioned names first", func(t *testing.T) {
 		t.Parallel()
@@ -585,8 +621,7 @@ func TestDiscover(t *testing.T) {
 
 		found := luatest.DiscoverForTest("", false, everywhere, resolve, probe)
 		assert.Empty(t, found.Problems)
-		assert.Equal(t, []string{"lua5.1", "lua5.2", "lua5.3", "lua5.4", "lua5.5", "luajit", "tarantool", "lua"},
-			names(found))
+		assert.Equal(t, []string{"lua5.1", "luajit", "tarantool"}, names(found), "the plain lua is Lua 5.4")
 	})
 	t.Run("nothing on PATH skips", func(t *testing.T) {
 		t.Parallel()
@@ -611,13 +646,13 @@ func TestDiscover(t *testing.T) {
 
 		found := luatest.DiscoverForTest(" lua5.1, lua ,luajit", true, lookPath, resolve, probe)
 		assert.Empty(t, found.Problems)
-		assert.Equal(t, []string{"lua5.1", "lua5.4", "luajit"}, names(found))
+		assert.Equal(t, []string{"lua5.1", "luajit"}, names(found))
 	})
 	t.Run("one required interpreter missing", func(t *testing.T) {
 		t.Parallel()
 
-		found := luatest.DiscoverForTest("lua5.1,lua5.3", true, lookPath, resolve, probe)
-		assert.Equal(t, []string{luatest.EnvInterpreters + " requires lua5.3, which is not on PATH"}, found.Problems)
+		found := luatest.DiscoverForTest("lua5.1,tarantool", true, lookPath, resolve, probe)
+		assert.Equal(t, []string{luatest.EnvInterpreters + " requires tarantool, which is not on PATH"}, found.Problems)
 	})
 	t.Run("required name outside the candidates", func(t *testing.T) {
 		t.Parallel()
@@ -663,16 +698,17 @@ func TestDiscover(t *testing.T) {
 		t.Parallel()
 
 		withDangling := func(name string) (string, error) {
-			if name == "lua5.3" {
-				return "/usr/local/bin/lua5.3", nil
+			if name == "tarantool" {
+				return "/usr/local/bin/tarantool", nil
 			}
 
 			return lookPath(name)
 		}
 
 		found := luatest.DiscoverForTest("", false, withDangling, resolve, probe)
-		assert.Equal(t, []string{"resolve lua5.3 (/usr/local/bin/lua5.3): " + errDangling.Error()}, found.Problems)
-		assert.Equal(t, []string{"lua5.1", "lua5.4", "luajit"}, names(found))
+		assert.Equal(t, []string{"resolve tarantool (/usr/local/bin/tarantool): " + errDangling.Error()},
+			found.Problems)
+		assert.Equal(t, []string{"lua5.1", "luajit"}, names(found))
 	})
 }
 

@@ -15,7 +15,7 @@ import (
 
 // EnvInterpreters names the environment variable that makes interpreters
 // mandatory: a comma-separated list of names, each of which must be on PATH,
-// e.g. "lua5.1,lua5.4,luajit". Without it a machine with no Lua at all skips
+// e.g. "lua5.1,luajit,tarantool". Without it a machine with no Lua at all skips
 // the Lua-executing tests; with it a missing interpreter fails them, so CI
 // cannot go green by running nothing. Set but naming nothing is an error too,
 // so an empty CI variable cannot turn into a silent skip.
@@ -82,12 +82,21 @@ func Interpreters(tb testing.TB) []Interpreter {
 	return slices.Clone(found.interps)
 }
 
-// candidateNames are looked up on PATH in this order. The versioned names come
-// before a plain `lua`: when `lua` is only another name for one of them
-// (Ubuntu's alternatives symlink, Homebrew's lua5.5 -> lua) the deduplicated
-// entry keeps the name that says which Lua it is.
+// candidateNames are looked up on PATH in this order. The versioned name comes
+// before a plain `lua`: when `lua` is only another name for it (Ubuntu's
+// alternatives symlink) the deduplicated entry keeps the name that says which
+// Lua it is. A `lua` that is another Lua than 5.1 is left out, see supported.
 func candidateNames() []string {
-	return []string{"lua5.1", "lua5.2", "lua5.3", "lua5.4", "lua5.5", "luajit", "tarantool", "lua"}
+	return []string{"lua5.1", "luajit", "tarantool", "lua"}
+}
+
+// supported reports whether version, what an interpreter reports about itself
+// (see probeScript), is that of a runtime luamerge supports: PUC Lua 5.1,
+// LuaJIT, whichever way it is built, or Tarantool. A bundle runs on those
+// only, so an interpreter that is another Lua, such as the `lua` of a system
+// that has Lua 5.4, is not one the tests run on.
+func supported(version string) bool {
+	return version == "Lua 5.1" || strings.HasPrefix(version, "LuaJIT ") || strings.HasPrefix(version, "Tarantool ")
 }
 
 // discovery is what discover found.
@@ -165,6 +174,16 @@ func discover(
 		if err != nil {
 			found.problems = append(found.problems,
 				fmt.Sprintf("%s (%s) cannot run a trivial script: %v", name, path, err))
+
+			continue
+		}
+
+		if !supported(version) {
+			if slices.Contains(want, name) {
+				found.problems = append(found.problems, fmt.Sprintf(
+					"%s (%s) is %s, which luamerge does not support: Lua 5.1, LuaJIT and Tarantool are",
+					name, path, version))
+			}
 
 			continue
 		}
