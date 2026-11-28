@@ -41,6 +41,11 @@ linters:
             - $gostd
             - github.com/stretchr/testify
             - github.com/tarantool-contrib/go-moonscript/luascope
+            # The Lua front end of the monorepo: the tree, the parser and
+            # the name resolution of the gopher-lua fork.
+            - github.com/tarantool-contrib/go-moonscript/lua/ast
+            - github.com/tarantool-contrib/go-moonscript/lua/parse
+            - github.com/tarantool-contrib/go-moonscript/lua/scope
 
     gocyclo:
       min-complexity: 15
