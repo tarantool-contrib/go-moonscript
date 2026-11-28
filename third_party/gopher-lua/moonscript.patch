@@ -743,6 +743,44 @@ that change.
       (FuzzFormat, FuzzPrint), format/example_test.go,
       format/bench_test.go: go-moonscript
 
+  - Control flow and data flow over the syntax tree (go-moonscript):
+    - flow/doc.go, flow/graph.go, flow/build.go, flow/dataflow.go,
+      flow/analysis.go, flow/query.go: package flow builds, from a tree of
+      package ast and its resolution by package scope, the control-flow
+      graph of every function (the main chunk and each FunctionExpr): basic
+      blocks of nodes with spans (the statements; the conditions of if,
+      elseif, while and repeat; a for's iteration; the end of an iteration
+      of a loop's body), an Entry and an Exit, and the edges of if/elseif/
+      else, while, repeat-until (its condition in the body's scope), numeric
+      and generic for, break, return and, under LuaJIT, goto (to the label
+      package scope binds it to). A literal condition is a constant, as for
+      luacheck ("while true do"); "and"/"or" are not split, calls are opaque
+      (Options.NoReturn names functions that don't return, none by
+      default). flow.Analyze(info, opts) returns a Program: the graphs and
+      the queries Graph.Unreachable (luacheck's W511, and W512 for a loop
+      whose body runs at most once), Graph.Returns (returns with values,
+      bare, the end of the body reachable: inconsistent returns),
+      Program.Empty (W541, W542, empty loop and function bodies),
+      Program.UnusedRecursive; and the data flow over the locals: every
+      value assigned (Def: used, mutated, overwritten before use) and every
+      use (Use: read or mutation, the values it may see, uninitialized), by
+      reaching definitions with luacheck's rules for upvalues (a closure may
+      run at any time after it is created, its uses and assignments taken
+      in bulk at its creation) and for circular assignments.
+    - Tests: flow/flow_test.go (graphs, unreachable code, returns, empty
+      blocks, the data flow and its rules for closures, in both dialects;
+      trees without spans, nil nodes, label problems, concurrent use),
+      flow/invariants_test.go and flow/fuzz_test.go (invariants of the
+      graphs and the data flow, the reaching definitions against a walk of
+      the nodes; TestCorpus over testdata, the luasuites archives and random
+      programs; FuzzAnalyze), flow/luacheck_test.go (luacheck 1.2 as the
+      oracle of W511, W512, W541, W542, W311, W312, W313, W321 and W341 over
+      testdata, the archives and random programs, per file, line, column
+      and code; every difference explained by one of four approximations of
+      luacheck), flow/example_test.go (a lint pass, a graph),
+      flow/bench_test.go (BenchmarkGraphsArchives, BenchmarkAnalyzeArchives,
+      BenchmarkQueriesArchives): go-moonscript
+
   Performance, numbers (go-moonscript):
     - LNumber2I builds the interface value in a local, without a scratch
       LValue (a write barrier per boxed number) or reflect.SliceHeader;
@@ -11308,6 +11346,5014 @@ regenerates the diff below; this header is edited by hand.
 +		}
 +		L.Close()
 +	}
++}
+--- a/flow/analysis.go
++++ b/flow/analysis.go
+@@ -0,0 +1,711 @@
++package flow
++
++import (
++	"math/bits"
++	"slices"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// The data flow over the locals connects each use of a variable with the
++// values it may see; the package documentation gives the rules. For a
++// function and a variable declared in it, the defs and uses in the
++// function's own nodes are the main ones; those in the functions inside
++// it, the closures, are taken in bulk per closure, at the node that
++// creates the closure (Graph.Creator, in the variable's function).
++
++// group is uses of a variable that see the same values: those in one node
++// of the variable's function, or those in one closure of it.
++type group struct {
++	node         *Node  // the node, or the closure's Creator
++	clo          *Graph // the closure, nil for a node
++	slot         int32  // for a node: the expression of the uses
++	u0, u1       int    // the uses, in the variable's VarUses
++	read, mutate bool
++	circ         bool // the node is a circular assignment of the variable
++}
++
++// cdef is a def made in a closure of the variable's function.
++type cdef struct {
++	clo *Graph
++	d   *Def
++}
++
++// varFlow is a variable of the function being analyzed.
++type varFlow struct {
++	v        *scope.Var
++	mainDefs []*Def // in node order
++	decl     *Def   // the declaration's value
++	// kills are the nodes where luacheck ends the variable's scope
++	// (Options.luacheckScopes), in node order
++	kills []*Node
++}
++
++type flowState struct {
++	p *Program
++	g *Graph
++
++	noProblems bool
++	words      int        // words of a bitset of the blocks
++	reach      [][]uint64 // by block: the blocks reachable from its successors
++
++	// luacheck's cross-resolution of closures (Options.luacheckClosures)
++	crossAll bool
++	// luacheck's reads in circular assignments (Options.luacheckCircular)
++	circularReads bool
++	// luacheck's ends of scopes (Options.luacheckScopes): by Var.ID, the
++	// nodes declaring a variable of the same name in the same scope
++	redecl map[int][]*Node
++
++	// the reaching definitions of the variable being analyzed (solve)
++	w       int      // words of a set of its main values
++	inOf    []int32  // by block: the offset of its set in sets, -1 for none
++	evNode  []int32  // by block: the node of its last value or end, -1 for none
++	evDef   []int32  // by block: the index of that value, -1 for an end
++	sets    []uint64 // the sets
++	touched []int32  // the blocks of inOf, evNode set
++	work    []int32
++	one     []uint64
++	stack   []*Block
++	// the blocks an overwriter walk has seen, by stamp
++	seen      []uint32
++	seenStamp uint32
++
++	// the variable being analyzed
++	mark   []uint32 // by Def.ID: the stamp of the group that took it
++	stamp  uint32
++	soft   []*Def // the values a group sees, which a circularity voids
++	hard   []*Def // the others
++	arena  []*Def
++	cdefs  []cdef
++	groups []group
++}
++
++func (p *Program) flow(opts *Options) {
++	// the variables of each graph: counted, then carved
++	count := make([]int32, len(p.Graphs)+1)
++	graphOf := func(v *scope.Var) *Graph {
++		if v.Kind == scope.KindLabel || v.Scope == nil || v.ID >= len(p.varDefs) {
++			return nil
++		}
++		if len(p.varDefs[v.ID]) == 0 && len(p.varUses[v.ID]) == 0 {
++			return nil
++		}
++		return p.Graph(v.Scope)
++	}
++	for _, v := range p.Info.Vars {
++		if g := graphOf(v); g != nil {
++			count[g.ID+1]++
++		}
++	}
++	for i := 1; i < len(count); i++ {
++		count[i] += count[i-1]
++	}
++	all := make([]*scope.Var, count[len(count)-1])
++	byGraph := make([][]*scope.Var, len(p.Graphs))
++	for i := range byGraph {
++		byGraph[i] = all[count[i]:count[i]:count[i+1]]
++	}
++	for _, v := range p.Info.Vars {
++		if g := graphOf(v); g != nil {
++			byGraph[g.ID] = append(byGraph[g.ID], v)
++		}
++	}
++	f := &flowState{
++		p:             p,
++		noProblems:    len(p.Info.Problems) == 0,
++		crossAll:      opts != nil && opts.luacheckClosures,
++		circularReads: opts != nil && opts.luacheckCircular,
++		mark:          make([]uint32, len(p.Defs)),
++	}
++	if opts != nil && opts.luacheckScopes {
++		f.redecl = map[int][]*Node{}
++		for _, w := range p.Info.Vars {
++			if s := w.Shadows; s != nil && sameLuacheckScope(w, s) {
++				for _, d := range p.varDefs[w.ID] {
++					if d.Init {
++						f.redecl[s.ID] = append(f.redecl[s.ID], d.Node)
++						break
++					}
++				}
++			}
++		}
++	}
++	for i, vars := range byGraph {
++		if len(vars) > 0 {
++			f.graph(p.Graphs[i], vars)
++		}
++	}
++}
++
++// sameLuacheckScope reports whether two variables are in the same scope for
++// luacheck: the same scope, or a for's variables and its body's locals.
++func sameLuacheckScope(w, s *scope.Var) bool {
++	if w.Scope == s.Scope {
++		return true
++	}
++	return (s.Kind == scope.KindForNum || s.Kind == scope.KindForIn) &&
++		w.Scope.Kind == scope.ScopeForBody && w.Scope.Parent == s.Scope
++}
++
++// child returns the closure of g that h is, or is in; nil if none.
++func child(g, h *Graph) *Graph {
++	for h != nil && h.Parent != g {
++		h = h.Parent
++	}
++	return h
++}
++
++// reachable returns the blocks reachable from the successors of a block.
++func (f *flowState) reachable(b *Block) []uint64 {
++	if f.reach == nil {
++		f.reach = make([][]uint64, len(f.g.Blocks))
++	}
++	if r := f.reach[b.ID]; r != nil {
++		return r
++	}
++	r := make([]uint64, f.words)
++	stack := append(f.stack[:0], b)
++	for len(stack) > 0 {
++		x := stack[len(stack)-1]
++		stack = stack[:len(stack)-1]
++		for _, e := range x.Succs {
++			id := e.To.ID
++			if r[id>>6]&(1<<(id&63)) == 0 {
++				r[id>>6] |= 1 << (id & 63)
++				stack = append(stack, e.To)
++			}
++		}
++	}
++	f.reach[b.ID] = r
++	f.stack = stack
++	return r
++}
++
++// reaches reports whether a path leads from a node to another: after it,
++// or from it with inclusive.
++func (f *flowState) reaches(from, to *Node, inclusive bool) bool {
++	if from.Block == to.Block && (to.Index > from.Index || inclusive && to.Index == from.Index) {
++		return true
++	}
++	r := f.reachable(from.Block)
++	return r[to.Block.ID>>6]&(1<<(to.Block.ID&63)) != 0
++}
++
++// onlyDefReaches reports whether the value of the only main def of a
++// variable reaches a node. In a parsed tree the declaration is on every
++// path from the Entry into the variable's scope (no goto jumps into it),
++// so it reaches every node of the scope that the Entry reaches.
++func (f *flowState) onlyDefReaches(d *Def, to *Node) bool {
++	if f.noProblems && d.Init && d.Node.Block.Reachable && to.Block.Reachable {
++		return true
++	}
++	return f.reaches(d.Node, to, false)
++}
++
++// graph analyzes the variables declared in a function.
++func (f *flowState) graph(g *Graph, vars []*scope.Var) {
++	f.g = g
++	f.words = (len(g.Blocks) + 63) / 64
++	f.reach = nil // made by reachable
++	var vf varFlow
++	for _, v := range vars {
++		defs := f.p.varDefs[v.ID]
++		vf = varFlow{v: v, mainDefs: defs}
++		for i, d := range defs {
++			if d.Node.Block.Graph != g { // some are in closures
++				vf.mainDefs = make([]*Def, i, len(defs))
++				copy(vf.mainDefs, defs)
++				for _, d := range defs[i:] {
++					if d.Node.Block.Graph == g {
++						vf.mainDefs = append(vf.mainDefs, d)
++					}
++				}
++				break
++			}
++		}
++		for _, d := range vf.mainDefs {
++			if d.Init {
++				vf.decl = d
++				break
++			}
++		}
++		if f.redecl != nil {
++			for _, n := range f.redecl[v.ID] {
++				if n.Block.Graph == g {
++					vf.kills = append(vf.kills, n)
++				}
++			}
++		}
++		if len(vf.mainDefs) > 1 || len(vf.kills) > 0 {
++			f.solve(&vf)
++		}
++		f.variable(&vf)
++	}
++	for _, id := range f.touched {
++		f.inOf[id], f.evNode[id] = -1, -1
++	}
++	f.touched = f.touched[:0]
++	f.inOf, f.evNode, f.evDef = nil, nil, nil
++}
++
++// solve finds the main values of a variable with several of them (or an
++// end of scope) that reach the start of each block of its scope: f.inOf,
++// offsets in f.sets of sets of indices of mainDefs. It walks the blocks
++// that the values lead to without leaving the variable's scope: a path
++// out of the scope comes back through the declaration, which kills them.
++func (f *flowState) solve(vf *varFlow) {
++	g := f.g
++	if f.inOf == nil || len(f.inOf) < len(g.Blocks) {
++		f.inOf = make([]int32, len(g.Blocks))
++		f.evNode = make([]int32, len(g.Blocks))
++		f.evDef = make([]int32, len(g.Blocks))
++		for i := range f.inOf {
++			f.inOf[i], f.evNode[i] = -1, -1
++		}
++	}
++	for _, id := range f.touched {
++		f.inOf[id], f.evNode[id] = -1, -1
++	}
++	f.touched, f.sets, f.work = f.touched[:0], f.sets[:0], f.work[:0]
++	w := (len(vf.mainDefs) + 63) / 64
++	f.w = w
++	// the last event of each block: a value (its index) or an end (-1)
++	event := func(b *Block, node, def int32) {
++		if f.evNode[b.ID] < 0 && f.inOf[b.ID] < 0 {
++			f.touched = append(f.touched, int32(b.ID))
++		}
++		if node >= f.evNode[b.ID] {
++			f.evNode[b.ID], f.evDef[b.ID] = node, def
++		}
++	}
++	for i, d := range vf.mainDefs {
++		event(d.Node.Block, int32(d.Node.Index), int32(i))
++	}
++	for _, k := range vf.kills {
++		event(k.Block, int32(k.Index), -1)
++	}
++	for _, id := range f.touched {
++		if f.evDef[id] >= 0 {
++			f.work = append(f.work, id)
++		}
++	}
++	var one []uint64 // the set of a block's last value
++	if cap(f.one) < w {
++		f.one = make([]uint64, w)
++	}
++	one = f.one[:w]
++	for len(f.work) > 0 {
++		id := f.work[len(f.work)-1]
++		f.work = f.work[:len(f.work)-1]
++		b := g.Blocks[id]
++		var out []uint64
++		if f.evNode[id] >= 0 {
++			clear(one)
++			d := f.evDef[id]
++			one[d>>6] |= 1 << (d & 63)
++			out = one
++		} else {
++			o := f.inOf[id]
++			out = f.sets[o : o+int32(w)]
++		}
++		for _, e := range b.Succs {
++			s := e.To
++			if len(s.Nodes) > 0 && !inScope(s.Nodes[0], vf.v, vf.decl) {
++				continue
++			}
++			o := f.inOf[s.ID]
++			if o < 0 {
++				if f.evNode[s.ID] < 0 {
++					f.touched = append(f.touched, int32(s.ID))
++				}
++				o = int32(len(f.sets))
++				f.inOf[s.ID] = o
++				f.sets = append(f.sets, make([]uint64, w)...)
++				if f.evNode[id] < 0 { // f.sets may have moved
++					out = f.sets[f.inOf[id] : f.inOf[id]+int32(w)]
++				}
++			}
++			in := f.sets[o : o+int32(w)]
++			changed := false
++			for i := range in {
++				if x := in[i] | out[i]; x != in[i] {
++					in[i] = x
++					changed = true
++				}
++			}
++			if changed && f.evNode[s.ID] < 0 {
++				f.work = append(f.work, int32(s.ID))
++			}
++		}
++	}
++}
++
++func setRange(s []uint64, lo, hi int) {
++	for i := lo; i < hi; i++ {
++		s[i>>6] |= 1 << (i & 63)
++	}
++}
++
++func clearRange(s []uint64, lo, hi int) {
++	for i := lo; i < hi; i++ {
++		s[i>>6] &^= 1 << (i & 63)
++	}
++}
++
++// reachingAt appends to dst the main defs of a variable that reach a node
++// (before the node's own defs).
++func (f *flowState) reachingAt(dst []*Def, vf *varFlow, n *Node) []*Def {
++	switch len(vf.mainDefs) {
++	case 0:
++		return dst
++	case 1:
++		if len(vf.kills) == 0 {
++			if d := vf.mainDefs[0]; f.onlyDefReaches(d, n) {
++				dst = append(dst, d)
++			}
++			return dst
++		}
++	}
++	// the last def before the node in its block, else the block's start
++	defs := vf.mainDefs
++	i, _ := slices.BinarySearchFunc(defs, n.Index, func(d *Def, idx int) int { return d.Node.Index - idx })
++	var last *Def
++	if i > 0 && defs[i-1].Node.Block == n.Block {
++		last = defs[i-1] // the last def of its node is the one that stays
++	}
++	if len(vf.kills) > 0 {
++		k, _ := slices.BinarySearchFunc(vf.kills, n.Index, func(m *Node, idx int) int { return m.Index - idx })
++		if k > 0 && vf.kills[k-1].Block == n.Block && (last == nil || vf.kills[k-1].Index >= last.Node.Index) {
++			return dst
++		}
++	}
++	if last != nil {
++		return append(dst, last)
++	}
++	o := f.inOf[n.Block.ID]
++	if o < 0 {
++		return dst
++	}
++	for i, x := range f.sets[o : o+int32(f.w)] {
++		for x != 0 {
++			b := bits.TrailingZeros64(x)
++			x &^= 1 << b
++			dst = append(dst, defs[i*64+b])
++		}
++	}
++	return dst
++}
++
++// variable connects the uses of a variable with its values.
++func (f *flowState) variable(vf *varFlow) {
++	v, g := vf.v, f.g
++	defs := f.p.varDefs[v.ID]
++	uses := f.p.varUses[v.ID]
++	f.cdefs = f.cdefs[:0]
++	for _, d := range defs {
++		if !lastOfNode(d) {
++			continue // overwritten in its own node
++		}
++		if h := d.Node.Block.Graph; h != g {
++			if c := child(g, h); c != nil && c.Creator != nil {
++				f.cdefs = append(f.cdefs, cdef{c, d})
++			}
++		}
++	}
++	// the groups of uses
++	f.groups = f.groups[:0]
++	for i, u := range uses {
++		var node *Node
++		var clo *Graph
++		slot := int32(0)
++		if h := u.Node.Block.Graph; h == g {
++			node, slot = u.Node, u.slot
++		} else {
++			clo = child(g, h)
++			if clo == nil || clo.Creator == nil {
++				continue
++			}
++			node = clo.Creator
++		}
++		if k := len(f.groups) - 1; k < 0 || f.groups[k].node != node || f.groups[k].clo != clo || f.groups[k].slot != slot || f.groups[k].u1 != i {
++			f.groups = append(f.groups, group{node: node, clo: clo, slot: slot, u0: i, u1: i, circ: node.circular == v})
++		}
++		gr := &f.groups[len(f.groups)-1]
++		gr.u1 = i + 1
++		if u.Kind == Mutate {
++			gr.mutate = true
++		} else {
++			gr.read = true
++		}
++	}
++	for gi := range f.groups {
++		gr := &f.groups[gi]
++		f.soft, f.hard = f.soft[:0], f.hard[:0]
++		n := gr.node
++		// the main values reaching the node (for a closure, its creation),
++		// but not the declaration's closure ("local function f"): the
++		// declaration makes a new instance of the variable, which the
++		// values before it are not of
++		if gr.clo == nil || vf.decl == nil || n != vf.decl.Node {
++			f.soft = f.reachingAt(f.soft, vf, n)
++		}
++		if gr.clo == nil {
++			// the values of closures created before the uses: in an
++			// expression before theirs in the node, or in a node before
++			for _, cd := range f.cdefs {
++				if c := cd.clo.Creator; c == n && cd.clo.slot <= gr.slot || f.reaches(c, n, false) {
++					f.hard = append(f.hard, cd.d)
++				}
++			}
++		} else {
++			// the main values assigned after the closure is created, which
++			// it may see when called later
++			for _, d := range vf.mainDefs {
++				if lastOfNode(d) && f.reaches(n, d.Node, true) {
++					f.hard = append(f.hard, d)
++				}
++			}
++			// the values of closures that may run before or after it
++			for _, cd := range f.cdefs {
++				c := cd.clo.Creator
++				if f.crossAll && g.Parent != nil || f.reaches(n, c, true) || f.reaches(c, n, true) {
++					f.hard = append(f.hard, cd.d)
++				}
++			}
++		}
++		f.connect(gr, uses[gr.u0:gr.u1])
++	}
++	f.overwritten(vf, defs)
++}
++
++// connect gives the uses of a group the values in f.soft and f.hard, and
++// marks the values used or mutated.
++func (f *flowState) connect(gr *group, uses []*Use) {
++	f.stamp++
++	if f.stamp == 0 { // wrapped: clear the marks
++		clear(f.mark)
++		f.stamp = 1
++	}
++	start := len(f.arena)
++	add := func(d *Def) {
++		if f.mark[d.ID] != f.stamp {
++			f.mark[d.ID] = f.stamp
++			f.arena = append(f.arena, d)
++		}
++	}
++	for _, d := range f.soft {
++		if gr.read && !gr.circ {
++			d.Used = true
++		}
++		if gr.mutate {
++			d.Mutated = true
++		}
++		if d.isFunc() && (gr.read && !gr.circ || gr.mutate) {
++			addUsers(d, f.g, gr, uses, gr.circ)
++		}
++		add(d)
++	}
++	for _, d := range f.hard {
++		if gr.read {
++			d.Used = true
++		}
++		if gr.mutate {
++			d.Mutated = true
++		}
++		if d.isFunc() {
++			addUsers(d, f.g, gr, uses, false)
++		}
++		add(d)
++	}
++	if len(f.arena) == start {
++		return
++	}
++	list := f.arena[start:len(f.arena):len(f.arena)]
++	slices.SortFunc(list, func(a, b *Def) int { return a.ID - b.ID })
++	reads := list
++	if f.circularReads && gr.clo != nil && gr.circ && len(f.soft) > 0 {
++		// luacheck: the reads in the closure of a circular assignment see
++		// only the values it doesn't void
++		f.stamp++
++		start := len(f.arena)
++		for _, d := range f.hard {
++			if f.mark[d.ID] != f.stamp {
++				f.mark[d.ID] = f.stamp
++				f.arena = append(f.arena, d)
++			}
++		}
++		reads = f.arena[start:len(f.arena):len(f.arena)]
++		slices.SortFunc(reads, func(a, b *Def) int { return a.ID - b.ID })
++	}
++	for _, u := range uses {
++		if u.Kind == Read {
++			u.Defs = reads
++		} else {
++			u.Defs = list
++		}
++	}
++	if cap(f.arena)-len(f.arena) < 64 {
++		f.arena = make([]*Def, 0, slabSize(cap(f.arena), 256, 4096))
++	}
++}
++
++// addUsers adds to the users of a function value the functions of the
++// uses of a group that see it: the variable's function for a node, the
++// functions from each use to the closure for a closure; only those of
++// mutations with mutOnly.
++func addUsers(d *Def, g *Graph, gr *group, uses []*Use, mutOnly bool) {
++	if gr.clo == nil {
++		d.addUser(g)
++		return
++	}
++	for _, u := range uses {
++		if mutOnly && u.Kind != Mutate {
++			continue
++		}
++		for h := u.Node.Block.Graph; h != nil; h = h.Parent {
++			d.addUser(h)
++			if h == gr.clo {
++				break
++			}
++		}
++	}
++}
++
++// overwritten finds the assignments that overwrite the values of a
++// variable that nothing uses.
++func (f *flowState) overwritten(vf *varFlow, defs []*Def) {
++	for _, d := range defs {
++		if d.Used || d.Mutated || d.Empty {
++			continue
++		}
++		// a later assignment of the variable in the same node
++		after := false
++		for _, e := range d.Node.Defs {
++			if e == d {
++				after = true
++			} else if after && e.Var == d.Var {
++				d.Overwritten = e
++				break
++			}
++		}
++		if d.Overwritten != nil || d.Node.Block.Graph != f.g {
++			continue
++		}
++		// (not by its own node, again in a loop: the value is unused)
++		if n := f.overwriter(d, vf.decl); n != nil && n != d.Node {
++			for _, e := range n.Defs {
++				if e.Var == d.Var {
++					d.Overwritten = e
++					break
++				}
++			}
++		}
++	}
++}
++
++// overwriter returns the node that every path from a def reaches before
++// any other assigning the variable and before the end of its scope, nil if
++// there is none.
++func (f *flowState) overwriter(d *Def, decl *Def) *Node {
++	v := d.Var
++	var found *Node
++	// the blocks seen, by stamp
++	if len(f.seen) < len(f.g.Blocks) {
++		f.seen = make([]uint32, len(f.g.Blocks))
++		f.seenStamp = 0
++	}
++	f.seenStamp++
++	if f.seenStamp == 0 {
++		clear(f.seen)
++		f.seenStamp = 1
++	}
++	seen, stamp := f.seen, f.seenStamp
++	type item struct {
++		b    *Block
++		from int
++	}
++	stack := []item{{d.Node.Block, d.Node.Index - d.Node.Block.Nodes[0].Index + 1}}
++	if d.Node.Kind == Iteration {
++		// a loop variable's value is for the body; out of it, the
++		// variable is out of scope
++		stack = stack[:0]
++		for _, e := range d.Node.Block.Succs {
++			if e.Kind == True {
++				seen[e.To.ID] = stamp
++				stack = append(stack, item{e.To, 0})
++			}
++		}
++	}
++	for len(stack) > 0 {
++		it := stack[len(stack)-1]
++		stack = stack[:len(stack)-1]
++		stopped := false
++		for _, n := range it.b.Nodes[it.from:] {
++			if !inScope(n, v, decl) {
++				return nil
++			}
++			if assigns(n, v) {
++				if found != nil && found != n {
++					return nil
++				}
++				found = n
++				stopped = true
++				break
++			}
++		}
++		if stopped {
++			continue
++		}
++		if it.b == f.g.Exit || len(it.b.Succs) == 0 {
++			return nil
++		}
++		for _, e := range it.b.Succs {
++			if seen[e.To.ID] != stamp {
++				seen[e.To.ID] = stamp
++				stack = append(stack, item{e.To, 0})
++			}
++		}
++	}
++	return found
++}
++
++// lastOfNode reports whether a def is the last of its variable in its node,
++// the one that stays.
++func lastOfNode(d *Def) bool {
++	defs := d.Node.Defs
++	for i := len(defs) - 1; i >= 0; i-- {
++		if defs[i].Var == d.Var {
++			return defs[i] == d
++		}
++	}
++	return true
++}
++
++func assigns(n *Node, v *scope.Var) bool {
++	for _, d := range n.Defs {
++		if d.Var == v {
++			return true
++		}
++	}
++	return false
++}
++
++// inScope reports whether a node of the variable's function is in its
++// scope, after its declaration.
++func inScope(n *Node, v *scope.Var, decl *Def) bool {
++	if decl != nil && n.Index <= decl.Node.Index {
++		return false
++	}
++	s := n.Scope
++	if s == nil {
++		return true
++	}
++	for s != nil && s != v.Scope {
++		if s.IsFunction() {
++			return false
++		}
++		s = s.Parent
++	}
++	return s == v.Scope
++}
+--- a/flow/bench_test.go
++++ b/flow/bench_test.go
+@@ -0,0 +1,82 @@
++package flow_test
++
++import (
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/flow"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// benchInfos returns the resolutions of the sources of the archives that
++// parse in the dialect.
++func benchInfos(b *testing.B, d scope.Dialect) (infos []*scope.Info, total int) {
++	b.Helper()
++	files := archiveFiles(b)
++	for _, name := range sortedKeys(files) {
++		c, err := parse.ParseChunk(files[name], name, parse.Options{Dialect: parseDialect(d)})
++		if err != nil {
++			continue
++		}
++		info, err := scope.Resolve(c, d)
++		if err != nil {
++			b.Fatal(name, err)
++		}
++		infos = append(infos, info)
++		total += len(files[name])
++	}
++	return infos, total
++}
++
++// BenchmarkGraphsArchives is what building the graphs of the archives'
++// trees costs, resolved once.
++func BenchmarkGraphsArchives(b *testing.B) {
++	benchAnalyze(b, flow.GraphsOnly())
++}
++
++// BenchmarkAnalyzeArchives is what Analyze, the graphs and the data flow,
++// costs over the archives' trees, resolved once.
++func BenchmarkAnalyzeArchives(b *testing.B) {
++	benchAnalyze(b, nil)
++}
++
++// BenchmarkQueriesArchives is what the queries of a lint pass cost over the
++// archives' Programs, built once: the unreachable code, the returns of each
++// function, the unused recursive functions.
++func BenchmarkQueriesArchives(b *testing.B) {
++	for _, d := range dialects {
++		b.Run(d.String(), func(b *testing.B) {
++			infos, total := benchInfos(b, d)
++			progs := make([]*flow.Program, len(infos))
++			for i, info := range infos {
++				progs[i] = flow.Analyze(info, nil)
++			}
++			b.SetBytes(int64(total))
++			b.ReportAllocs()
++			for b.Loop() {
++				for _, p := range progs {
++					for _, g := range p.Graphs {
++						g.Unreachable()
++						g.Returns()
++					}
++					p.UnusedRecursive()
++				}
++			}
++		})
++	}
++}
++
++func benchAnalyze(b *testing.B, opts *flow.Options) {
++	for _, d := range dialects {
++		b.Run(d.String(), func(b *testing.B) {
++			infos, total := benchInfos(b, d)
++			b.SetBytes(int64(total))
++			b.ReportAllocs()
++			for b.Loop() {
++				for _, info := range infos {
++					flow.Analyze(info, opts)
++				}
++			}
++		})
++	}
++}
+--- a/flow/build.go
++++ b/flow/build.go
+@@ -0,0 +1,1103 @@
++package flow
++
++import (
++	"strings"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// maxDepth is how deep the builder recurses into a tree: the resolver's
++// and the compiler's limit.
++const maxDepth = 100000
++
++// Options are the options of Analyze. The zero Options are the defaults.
++type Options struct {
++	// NoReturn names functions that don't return: a global ("error") or a
++	// field of a global ("os.exit"). A call statement of one ends its path
++	// as a return does (to the Exit, Node.NoReturn), so that what follows
++	// it is unreachable and a path ending with it doesn't fall off the end
++	// of its function. None by default: calls are opaque, error(...) and
++	// os.exit() are calls like any other.
++	NoReturn []string
++
++	// luacheckClosures connects, for a local of a function other than the
++	// main chunk, every value its closures assign with every use in its
++	// closures, as luacheck does (it cross-resolves the closures inside a
++	// closure at the levels above the variable's function). For the
++	// comparison with luacheck.
++	luacheckClosures bool
++	// luacheckParens takes a parenthesized function at the end of the
++	// values of an assignment as no function (UnusedRecursive), as
++	// luacheck, which keeps the parentheses there, does.
++	luacheckParens bool
++	// luacheckScopes ends the scope of a variable, for the values that
++	// reach its uses, at a declaration of the same name in the same scope,
++	// as luacheck does: a goto back to before that declaration doesn't
++	// take them back into the scope.
++	luacheckScopes bool
++	// luacheckCircular gives the reads in the functions that a circular
++	// assignment creates ("t.f = function() return t end", "function
++	// t:m()") none of the values that reach the assignment, as luacheck,
++	// which doesn't connect them, does.
++	luacheckCircular bool
++	// graphsOnly builds the graphs without the data flow (to measure).
++	graphsOnly bool
++}
++
++// Analyze builds the graphs of the functions of the chunk that info is the
++// resolution of (scope.Resolve), and the data flow over their locals. A
++// chunk of ResolveStmts is given by AnalyzeStmts.
++func Analyze(info *scope.Info, opts *Options) *Program {
++	var stmts []ast.Stmt
++	if c := info.Chunk(); c != nil {
++		stmts = c.Stmts
++	}
++	return AnalyzeStmts(stmts, info, opts)
++}
++
++// AnalyzeStmts is Analyze for the statements that info is the resolution
++// of (scope.ResolveStmts).
++func AnalyzeStmts(stmts []ast.Stmt, info *scope.Info, opts *Options) *Program {
++	p := &Program{Info: info}
++	if opts != nil {
++		p.luacheckParens = opts.luacheckParens
++	}
++	b := &builder{p: p, info: info, refs: info.Refs, alloc: &alloc{}}
++	if opts != nil && len(opts.NoReturn) > 0 {
++		b.noReturn = map[string]bool{}
++		for _, n := range opts.NoReturn {
++			b.noReturn[n] = true
++		}
++	}
++	if c := info.Chunk(); c != nil && c.Lines != nil {
++		b.src = c.Lines.Source()
++	}
++	if c := info.Chunk(); c != nil {
++		// the sizes the archives have: a node per 56 bytes of source, a
++		// use per 55, a def per 128, a block per 109
++		n := c.Span().End
++		b.hint = n
++		p.Uses = make([]*Use, 0, n/50+1)
++		p.Defs = make([]*Def, 0, n/110+1)
++		b.alloc.hint = n
++	}
++	var root ast.Element
++	if c := info.Chunk(); c != nil {
++		root = c
++	}
++	b.function(root, nil, stmts, false)
++	b.finish()
++	if opts == nil || !opts.graphsOnly {
++		p.flow(opts)
++	}
++	return p
++}
++
++// builder builds the graphs of a tree in one pass, in the order the
++// resolver resolves it, so that the scopes, variables and occurrences of
++// the resolution are met in the order of Info.Scopes, Info.Vars and
++// Info.Refs.
++type builder struct {
++	p        *Program
++	info     *scope.Info
++	refs     []scope.Ref
++	ri       int // the next Ref
++	vi       int // the next Var
++	si       int // the next Scope
++	misses   int // lookups that the order didn't find
++	src      []byte
++	noReturn map[string]bool
++
++	fn    *fstate
++	depth int
++
++	hint     int // the length of the source, for the first slabs
++	nodeSlab []Node
++	useSlab  []Use
++	defSlab  []Def
++	alloc    *alloc
++	// the nodes of the functions being built, each function's after its
++	// parent's; ptrs is what a finished function's are moved to
++	nstack []*Node
++	ptrs   []*Node
++	stack  []*Block
++}
++
++// fstate is a function being built.
++type fstate struct {
++	g    *Graph
++	cur  *Block // the block that the next node goes into; nil after a jump
++	node *Node  // the node whose expressions are being read
++	// slot is the expression of the node being read, for the nodes that
++	// evaluate a list of them one after the other (a return's, a for's)
++	slot   int32
++	scope  *scope.Scope
++	loops  []*Block // where a break goes
++	labels map[*ast.LabelStmt]*Block
++	nbase  int // where its nodes start in builder.nstack
++}
++
++/* the resolution, in its order */
++
++func (b *builder) nextRef(id *ast.IdentExpr) *scope.Ref {
++	if b.ri < len(b.refs) && b.refs[b.ri].Ident == id {
++		r := &b.refs[b.ri]
++		b.ri++
++		return r
++	}
++	b.misses++
++	return b.info.RefOf(id)
++}
++
++func (b *builder) nextJump(st *ast.GotoStmt) *scope.Ref {
++	if b.ri < len(b.refs) && b.refs[b.ri].Goto == st && b.refs[b.ri].Kind == scope.Jump {
++		r := &b.refs[b.ri]
++		b.ri++
++		return r
++	}
++	if b.info.Dialect != scope.LuaJIT {
++		return nil // no gotos in Lua51: a problem, no Ref
++	}
++	b.misses++
++	for i := range b.refs {
++		if r := &b.refs[i]; r.Goto == st && r.Kind == scope.Jump {
++			return r
++		}
++	}
++	return nil
++}
++
++func (b *builder) nextVar(decl ast.Element, index int, kind scope.VarKind) *scope.Var {
++	vars := b.info.Vars
++	if b.vi < len(vars) {
++		if v := vars[b.vi]; v.Decl == decl && v.Index == index && v.Kind == kind {
++			b.vi++
++			return v
++		}
++	}
++	b.misses++
++	for i, v := range vars {
++		if v.Decl == decl && v.Index == index && v.Kind == kind {
++			b.vi = i + 1
++			return v
++		}
++	}
++	return nil
++}
++
++func (b *builder) nextScope(kind scope.ScopeKind, node ast.Element) *scope.Scope {
++	scopes := b.info.Scopes
++	if b.si < len(scopes) {
++		if s := scopes[b.si]; s.Kind == kind && s.Node == node {
++			b.si++
++			return s
++		}
++	}
++	b.misses++
++	for i := b.si; i < len(scopes); i++ {
++		if s := scopes[i]; s.Kind == kind && s.Node == node {
++			b.si = i + 1
++			return s
++		}
++	}
++	return nil
++}
++
++// enter opens a block scope; leave closes it.
++func (b *builder) enter(kind scope.ScopeKind, node ast.Element) *scope.Scope {
++	outer := b.fn.scope
++	if s := b.nextScope(kind, node); s != nil {
++		b.fn.scope = s
++	}
++	return outer
++}
++
++func (b *builder) leave(outer *scope.Scope) { b.fn.scope = outer }
++
++/* nodes, uses and defs */
++
++func (b *builder) newNode() *Node {
++	if len(b.nodeSlab) == cap(b.nodeSlab) {
++		b.nodeSlab = make([]Node, 0, slabSize(cap(b.nodeSlab), b.hint/56+8, 1024))
++	}
++	b.nodeSlab = b.nodeSlab[:len(b.nodeSlab)+1]
++	return &b.nodeSlab[len(b.nodeSlab)-1]
++}
++
++// slabSize is the capacity of the next slab: first for the first, then
++// twice the last up to limit.
++func slabSize(last, first, limit int) int {
++	if last == 0 {
++		return first
++	}
++	return max(min(2*last, limit), last)
++}
++
++// node adds a node to the current block, or to a new unreachable block
++// after a jump.
++func (b *builder) node(kind NodeKind, stmt ast.Stmt, expr ast.Expr) *Node {
++	fs := b.fn
++	g := fs.g
++	if fs.cur == nil {
++		fs.cur = g.newBlock()
++	}
++	n := b.newNode()
++	n.Kind, n.Stmt, n.Expr, n.Block, n.Scope, n.Index = kind, stmt, expr, fs.cur, fs.scope, len(b.nstack)-fs.nbase
++	if fs.cur.first == 0 {
++		fs.cur.first = int32(n.Index) + 1
++	}
++	b.nstack = append(b.nstack, n)
++	fs.node = n
++	fs.slot = 0
++	return n
++}
++
++func (b *builder) use(id *ast.IdentExpr, kind UseKind) {
++	r := b.nextRef(id)
++	if r == nil || r.Var == nil || r.Kind == scope.Jump {
++		return
++	}
++	if len(b.useSlab) == cap(b.useSlab) {
++		b.useSlab = make([]Use, 0, slabSize(cap(b.useSlab), b.hint/55+8, 1024))
++	}
++	b.useSlab = b.useSlab[:len(b.useSlab)+1]
++	u := &b.useSlab[len(b.useSlab)-1]
++	n := b.fn.node
++	u.Var, u.Ident, u.Kind, u.Node, u.ID, u.slot = r.Var, id, kind, n, len(b.p.Uses), b.fn.slot
++	b.p.Uses = append(b.p.Uses, u)
++	n.nu++
++}
++
++func (b *builder) def(v *scope.Var, name *ast.IdentExpr, value ast.Expr, init, empty bool) {
++	if v == nil {
++		return
++	}
++	if len(b.defSlab) == cap(b.defSlab) {
++		b.defSlab = make([]Def, 0, slabSize(cap(b.defSlab), b.hint/128+8, 1024))
++	}
++	b.defSlab = b.defSlab[:len(b.defSlab)+1]
++	d := &b.defSlab[len(b.defSlab)-1]
++	n := b.fn.node
++	d.Var, d.Node, d.Name, d.Value, d.Init, d.Empty, d.ID = v, n, name, value, init, empty, len(b.p.Defs)
++	b.p.Defs = append(b.p.Defs, d)
++	n.nd++
++}
++
++/* functions */
++
++// function builds the graph of a function: the main chunk (fe nil, node
++// the chunk or nil) or a FunctionExpr; method gives it a self.
++func (b *builder) function(node ast.Element, fe *ast.FunctionExpr, stmts []ast.Stmt, method bool) {
++	parent := b.fn
++	g := &Graph{Function: fe, ID: len(b.p.Graphs)}
++	b.p.Graphs = append(b.p.Graphs, g)
++	if parent != nil {
++		g.Parent, g.Creator, g.slot = parent.g, parent.node, parent.slot
++		parent.node.Closures = append(parent.node.Closures, g)
++	}
++	g.alloc = b.alloc
++	fs := &fstate{g: g, nbase: len(b.nstack)}
++	b.fn = fs
++	if fe != nil {
++		node = fe
++	}
++	g.Func = b.nextScope(scope.ScopeFunction, node)
++	fs.scope = g.Func
++	g.Entry = g.newBlock()
++	g.Exit = g.newBlock()
++	fs.cur = g.Entry
++	b.node(Enter, nil, nil)
++	if fe != nil {
++		if method {
++			b.def(b.nextVar(fe, -1, scope.KindSelf), nil, nil, true, false)
++		}
++		if pl := fe.ParList; pl != nil {
++			for i := range pl.Names {
++				b.def(b.nextVar(fe, i, scope.KindParam), nil, nil, true, false)
++			}
++			if pl.HasVargs && b.info.Dialect == scope.Lua51 && !pl.NoArg {
++				b.def(b.nextVar(fe, -1, scope.KindArg), nil, nil, true, false)
++			}
++		}
++	}
++	body := g.newBlock()
++	link(g.Entry, body, Next)
++	fs.cur = body
++	if fe != nil && len(fe.Stmts) == 0 {
++		b.p.Empty = append(b.p.Empty, Empty{Kind: EmptyFunction, Function: fe, Span: fe.StmtsSpan})
++	}
++	b.stmts(stmts)
++	if fs.cur != nil {
++		link(fs.cur, g.Exit, Next)
++		g.fallOff = fs.cur
++	}
++	b.finishGraph(fs)
++	b.fn = parent
++}
++
++// finishGraph moves the graph's nodes off the stack, carves the blocks'
++// nodes and predecessors, and marks the reachable blocks.
++func (b *builder) finishGraph(fs *fstate) {
++	g := fs.g
++	n := len(b.nstack) - fs.nbase
++	if cap(b.ptrs)-len(b.ptrs) < n {
++		b.ptrs = make([]*Node, 0, max(n, slabSize(cap(b.ptrs), b.hint/56+16, 4096)))
++	}
++	g.Nodes = b.ptrs[len(b.ptrs) : len(b.ptrs)+n : len(b.ptrs)+n]
++	b.ptrs = b.ptrs[:len(b.ptrs)+n]
++	copy(g.Nodes, b.nstack[fs.nbase:])
++	clear(b.nstack[fs.nbase:])
++	b.nstack = b.nstack[:fs.nbase]
++	// a block's nodes are consecutive: a block takes nodes only while it
++	// is the current one, and is current once
++	np := 0
++	for _, blk := range g.Blocks {
++		if blk.first > 0 {
++			lo := int(blk.first) - 1
++			hi := lo
++			for hi < len(g.Nodes) && g.Nodes[hi].Block == blk {
++				hi++
++			}
++			blk.Nodes = g.Nodes[lo:hi:hi]
++		}
++		for _, e := range blk.Succs {
++			e.To.npred++
++			np++
++		}
++	}
++	preds := make([]*Block, np)
++	for _, blk := range g.Blocks {
++		blk.Preds = preds[:0:blk.npred]
++		preds = preds[blk.npred:]
++	}
++	for _, blk := range g.Blocks {
++		for _, e := range blk.Succs {
++			e.To.Preds = append(e.To.Preds, blk)
++		}
++	}
++	stack := append(b.stack[:0], g.Entry)
++	g.Entry.Reachable = true
++	for len(stack) > 0 {
++		blk := stack[len(stack)-1]
++		stack = stack[:len(stack)-1]
++		for _, e := range blk.Succs {
++			if !e.To.Reachable {
++				e.To.Reachable = true
++				stack = append(stack, e.To)
++			}
++		}
++	}
++	b.stack = stack
++}
++
++// finish carves the defs and uses of each node and each variable.
++func (b *builder) finish() {
++	p := b.p
++	ub := make([]*Use, len(p.Uses))
++	db := make([]*Def, len(p.Defs))
++	uo, do := 0, 0
++	for _, g := range p.Graphs {
++		for _, n := range g.Nodes {
++			nu, nd := int(n.nu), int(n.nd)
++			n.Uses = ub[uo : uo : uo+nu]
++			n.Defs = db[do : do : do+nd]
++			uo += nu
++			do += nd
++		}
++	}
++	for _, u := range p.Uses {
++		u.Node.Uses = append(u.Node.Uses, u)
++	}
++	for _, d := range p.Defs {
++		d.Node.Defs = append(d.Node.Defs, d)
++	}
++	nv := len(b.info.Vars)
++	cu := make([]int32, nv+1)
++	cd := make([]int32, nv+1)
++	for _, u := range p.Uses {
++		cu[u.Var.ID]++
++	}
++	for _, d := range p.Defs {
++		cd[d.Var.ID]++
++	}
++	p.varUses = make([][]*Use, nv)
++	p.varDefs = make([][]*Def, nv)
++	ub2 := make([]*Use, len(p.Uses))
++	db2 := make([]*Def, len(p.Defs))
++	uo, do = 0, 0
++	for i := 0; i < nv; i++ {
++		p.varUses[i] = ub2[uo : uo : uo+int(cu[i])]
++		p.varDefs[i] = db2[do : do : do+int(cd[i])]
++		uo += int(cu[i])
++		do += int(cd[i])
++	}
++	for _, u := range p.Uses {
++		p.varUses[u.Var.ID] = append(p.varUses[u.Var.ID], u)
++	}
++	for _, d := range p.Defs {
++		p.varDefs[d.Var.ID] = append(p.varDefs[d.Var.ID], d)
++	}
++	p.graphOf = make([]*Graph, len(b.info.Scopes))
++	for _, g := range p.Graphs {
++		if g.Func != nil && g.Func.ID < len(p.graphOf) {
++			p.graphOf[g.Func.ID] = g
++		}
++	}
++	p.misses = b.misses
++}
++
++/* statements */
++
++func (b *builder) stmts(list []ast.Stmt) {
++	for _, s := range list {
++		b.stmt(s)
++	}
++}
++
++func (b *builder) stmt(s ast.Stmt) {
++	if b.depth >= maxDepth {
++		return
++	}
++	b.depth++
++	b.stmt1(s)
++	b.depth--
++}
++
++// block builds a block with a scope of its own.
++func (b *builder) block(kind scope.ScopeKind, node ast.Element, list []ast.Stmt) {
++	outer := b.enter(kind, node)
++	b.stmts(list)
++	b.leave(outer)
++}
++
++func (b *builder) stmt1(s ast.Stmt) {
++	fs := b.fn
++	switch st := s.(type) {
++	case *ast.AssignStmt:
++		if st != nil {
++			b.assign(st)
++		}
++	case *ast.LocalAssignStmt:
++		if st != nil {
++			b.localAssign(st)
++		}
++	case *ast.FuncCallStmt:
++		if st == nil {
++			return
++		}
++		b.node(Statement, st, nil)
++		noReturn := b.isNoReturn(st)
++		b.expr(st.Expr)
++		if noReturn {
++			fs.node.NoReturn = true
++			link(fs.cur, fs.g.Exit, Next)
++			fs.cur = nil
++		}
++	case *ast.DoBlockStmt:
++		if st == nil {
++			return
++		}
++		b.node(Statement, st, nil)
++		if len(st.Stmts) == 0 {
++			b.empty(EmptyDo, st, st.StmtsSpan)
++		}
++		b.block(scope.ScopeDo, st, st.Stmts)
++	case *ast.WhileStmt:
++		if st != nil {
++			b.while(st)
++		}
++	case *ast.RepeatStmt:
++		if st != nil {
++			b.repeat(st)
++		}
++	case *ast.IfStmt:
++		if st != nil {
++			b.ifStmt(st)
++		}
++	case *ast.NumberForStmt:
++		if st == nil {
++			return
++		}
++		v := b.nextVar(st, 0, scope.KindForNum)
++		b.node(Statement, st, nil)
++		b.expr(st.Init)
++		fs.slot = 1
++		b.expr(st.Limit)
++		fs.slot = 2
++		b.expr(st.Step)
++		b.forLoop(st, st.Stmts, st.StmtsSpan, []*scope.Var{v})
++	case *ast.GenericForStmt:
++		if st == nil {
++			return
++		}
++		var buf [4]*scope.Var
++		vars := buf[:0]
++		for i := range st.Names {
++			vars = append(vars, b.nextVar(st, i, scope.KindForIn))
++		}
++		b.node(Statement, st, nil)
++		b.slots(st.Exprs)
++		b.forLoop(st, st.Stmts, st.StmtsSpan, vars)
++	case *ast.FuncDefStmt:
++		if st != nil {
++			b.funcDef(st)
++		}
++	case *ast.ReturnStmt:
++		if st == nil {
++			return
++		}
++		b.node(Statement, st, nil)
++		b.slots(st.Exprs)
++		link(fs.cur, fs.g.Exit, Next)
++		fs.cur = nil
++	case *ast.BreakStmt:
++		if st == nil {
++			return
++		}
++		b.node(Statement, st, nil)
++		if len(fs.loops) > 0 {
++			link(fs.cur, fs.loops[len(fs.loops)-1], Next)
++		}
++		fs.cur = nil
++	case *ast.GotoStmt:
++		if st == nil {
++			return
++		}
++		b.node(Statement, st, nil)
++		if r := b.nextJump(st); r != nil && r.Var != nil {
++			if l, ok := r.Var.Decl.(*ast.LabelStmt); ok && l != nil {
++				link(fs.cur, b.labelBlock(l), Next)
++			}
++		}
++		fs.cur = nil
++	case *ast.LabelStmt:
++		if st == nil {
++			return
++		}
++		lb := b.labelBlock(st)
++		if fs.cur != nil {
++			link(fs.cur, lb, Next)
++		}
++		fs.cur = lb
++		b.node(Statement, st, nil)
++		if b.info.Dialect == scope.LuaJIT {
++			b.nextVar(st, 0, scope.KindLabel)
++		}
++	}
++}
++
++func (b *builder) labelBlock(l *ast.LabelStmt) *Block {
++	fs := b.fn
++	if fs.labels == nil {
++		fs.labels = map[*ast.LabelStmt]*Block{}
++	}
++	lb := fs.labels[l]
++	if lb == nil {
++		lb = fs.g.newBlock()
++		fs.labels[l] = lb
++	}
++	return lb
++}
++
++// isNoReturn reports whether a call statement calls a function of
++// Options.NoReturn. The name of the called global is the next Ref.
++func (b *builder) isNoReturn(st *ast.FuncCallStmt) bool {
++	if b.noReturn == nil {
++		return false
++	}
++	call, ok := st.Expr.(*ast.FuncCallExpr)
++	if !ok || call == nil || call.Func == nil {
++		return false
++	}
++	var id *ast.IdentExpr
++	name := ""
++	switch f := call.Func.(type) {
++	case *ast.IdentExpr:
++		id, name = f, f.Value
++	case *ast.AttrGetExpr:
++		obj, ok1 := f.Object.(*ast.IdentExpr)
++		key, ok2 := f.Key.(*ast.StringExpr)
++		if !ok1 || !ok2 || obj == nil || key == nil {
++			return false
++		}
++		id, name = obj, obj.Value+"."+key.Value
++	default:
++		return false
++	}
++	if id == nil || !b.noReturn[name] {
++		return false
++	}
++	if b.ri < len(b.refs) && b.refs[b.ri].Ident == id {
++		return b.refs[b.ri].Var == nil
++	}
++	r := b.info.RefOf(id)
++	return r != nil && r.Var == nil
++}
++
++func (b *builder) assign(st *ast.AssignStmt) {
++	b.node(Statement, st, nil)
++	n := b.fn.node
++	u0 := len(b.p.Uses)
++	var buf [4]*scope.Var
++	targets := buf[:0]
++	for _, e := range st.Lhs {
++		var v *scope.Var
++		switch x := e.(type) {
++		case *ast.IdentExpr:
++			if x != nil {
++				if r := b.nextRef(x); r != nil {
++					v = r.Var
++				}
++			}
++		case *ast.AttrGetExpr:
++			if x != nil {
++				b.indexTarget(x)
++			}
++		default:
++			b.expr(e)
++		}
++		targets = append(targets, v)
++	}
++	b.exprs(st.Rhs)
++	for i, v := range targets {
++		if v != nil {
++			b.def(v, st.Lhs[i].(*ast.IdentExpr), valueAt(st.Rhs, i, len(st.Lhs)), false, false)
++		}
++	}
++	// "t.k = e", one target and one value without calls: reading t in it
++	// doesn't use t's value (luacheck's circular reference)
++	if len(st.Lhs) == 1 && len(st.Rhs) == 1 {
++		if x, ok := st.Lhs[0].(*ast.AttrGetExpr); ok && x != nil {
++			if id, ok := x.Object.(*ast.IdentExpr); ok && id != nil && !hasCall(x) && !hasCall(st.Rhs[0]) {
++				for _, u := range b.p.Uses[u0:] {
++					if u.Ident == id && u.Node == n {
++						n.circular = u.Var
++					}
++				}
++			}
++		}
++	}
++}
++
++// indexTarget reads an indexed assignment target: the name the chain of
++// indexes starts from is mutated, the keys are read.
++func (b *builder) indexTarget(x *ast.AttrGetExpr) {
++	switch o := x.Object.(type) {
++	case *ast.IdentExpr:
++		if o != nil {
++			b.use(o, Mutate)
++		}
++	case *ast.AttrGetExpr:
++		if o != nil {
++			b.indexTarget(o)
++		}
++	default:
++		b.expr(x.Object)
++	}
++	b.expr(x.Key)
++}
++
++// valueAt returns the value that the i-th of n names gets from a list of
++// expressions: its expression, the call or "..." at the end of the list
++// that it is unpacked from, or nil.
++func valueAt(list []ast.Expr, i, n int) ast.Expr {
++	if i < len(list) {
++		return list[i]
++	}
++	if len(list) > 0 && n > len(list) {
++		switch x := list[len(list)-1].(type) {
++		case *ast.FuncCallExpr:
++			if x != nil && !x.AdjustRet && x.Parens().Count == 0 {
++				return x
++			}
++		case *ast.Comma3Expr:
++			if x != nil && !x.AdjustRet && x.Parens().Count == 0 {
++				return x
++			}
++		}
++	}
++	return nil
++}
++
++func (b *builder) localAssign(st *ast.LocalAssignStmt) {
++	var buf [4]*scope.Var
++	vars := buf[:0]
++	fn := st.IsFunction && len(st.Names) == 1 && len(st.Exprs) == 1
++	if fn {
++		_, fn = st.Exprs[0].(*ast.FunctionExpr)
++	}
++	kind := scope.KindLocal
++	if fn {
++		kind = scope.KindLocalFunction
++	}
++	for i := range st.Names {
++		vars = append(vars, b.nextVar(st, i, kind))
++	}
++	b.node(Statement, st, nil)
++	b.exprs(st.Exprs)
++	for i, v := range vars {
++		val := valueAt(st.Exprs, i, len(st.Names))
++		b.def(v, nil, val, true, val == nil)
++	}
++}
++
++func (b *builder) funcDef(st *ast.FuncDefStmt) {
++	b.node(Statement, st, nil)
++	if st.Name == nil {
++		b.function(nil, st.Func, funcStmts(st.Func), false)
++		return
++	}
++	var v *scope.Var
++	var name *ast.IdentExpr
++	method := false
++	switch {
++	case st.Name.Func != nil:
++		switch x := st.Name.Func.(type) {
++		case *ast.IdentExpr:
++			if x != nil {
++				if r := b.nextRef(x); r != nil {
++					v, name = r.Var, x
++				}
++			}
++		case *ast.AttrGetExpr:
++			if x != nil {
++				b.indexTarget(x)
++			}
++		default:
++			b.expr(st.Name.Func)
++		}
++	case st.Name.Receiver != nil:
++		switch x := st.Name.Receiver.(type) {
++		case *ast.IdentExpr:
++			if x != nil {
++				b.use(x, Mutate)
++			}
++		case *ast.AttrGetExpr:
++			if x != nil {
++				b.indexTarget(x)
++			}
++		default:
++			b.expr(st.Name.Receiver)
++		}
++		method = true
++	}
++	// "function t.f()" and "function t:m()" assign t.f and t.m: circular
++	// assignments of t, as "t.f = function() end" is
++	var base *ast.IdentExpr
++	if x, ok := st.Name.Func.(*ast.AttrGetExpr); ok && x != nil {
++		base, _ = x.Object.(*ast.IdentExpr)
++	} else if st.Name.Func == nil {
++		base, _ = st.Name.Receiver.(*ast.IdentExpr)
++	}
++	if base != nil {
++		n := b.fn.node
++		for i := len(b.p.Uses) - 1; i >= 0 && b.p.Uses[i].Node == n; i-- {
++			if u := b.p.Uses[i]; u.Ident == base {
++				n.circular = u.Var
++			}
++		}
++	}
++	if st.Func != nil {
++		b.function(nil, st.Func, st.Func.Stmts, method)
++	}
++	if v != nil {
++		b.def(v, name, st.Func, false, false)
++	}
++}
++
++func funcStmts(fe *ast.FunctionExpr) []ast.Stmt {
++	if fe == nil {
++		return nil
++	}
++	return fe.Stmts
++}
++
++// constTruth returns the truth of a condition that luacheck takes as a
++// constant: a literal (nil, false, true, a number, a string) or a table
++// or function constructor.
++func constTruth(e ast.Expr) (truth, known bool) {
++	switch e.(type) {
++	case *ast.NilExpr, *ast.FalseExpr:
++		return false, true
++	case *ast.TrueExpr, *ast.NumberExpr, *ast.StringExpr, *ast.CdataNumberExpr, *ast.TableExpr, *ast.FunctionExpr:
++		return true, true
++	}
++	return false, false
++}
++
++// branch links a block ending with a condition to where it holds and to
++// where it does not; a constant condition has one of the edges.
++func branch(from *Block, cond ast.Expr, yes, no *Block) {
++	truth, known := constTruth(cond)
++	if !known || truth {
++		link(from, yes, True)
++	}
++	if !known || !truth {
++		link(from, no, False)
++	}
++}
++
++func (b *builder) while(st *ast.WhileStmt) {
++	fs := b.fn
++	b.node(Statement, st, nil)
++	head := fs.g.newBlock()
++	link(fs.cur, head, Next)
++	fs.cur = head
++	b.node(Condition, st, st.Condition)
++	b.expr(st.Condition)
++	body, after := fs.g.newBlock(), fs.g.newBlock()
++	branch(fs.cur, st.Condition, body, after)
++	if len(st.Stmts) == 0 {
++		b.empty(EmptyLoop, st, st.StmtsSpan)
++	}
++	fs.cur = body
++	fs.loops = append(fs.loops, after)
++	b.block(scope.ScopeWhile, st, st.Stmts)
++	fs.loops = fs.loops[:len(fs.loops)-1]
++	b.node(LoopEnd, st, nil)
++	link(fs.cur, head, Next)
++	fs.cur = after
++}
++
++func (b *builder) repeat(st *ast.RepeatStmt) {
++	fs := b.fn
++	b.node(Statement, st, nil)
++	body := fs.g.newBlock()
++	link(fs.cur, body, Next)
++	after := fs.g.newBlock()
++	if len(st.Stmts) == 0 {
++		b.empty(EmptyLoop, st, st.StmtsSpan)
++	}
++	fs.cur = body
++	fs.loops = append(fs.loops, after)
++	outer := b.enter(scope.ScopeRepeat, st)
++	b.stmts(st.Stmts)
++	b.node(Condition, st, st.Condition) // in the body's scope
++	b.expr(st.Condition)
++	b.leave(outer)
++	fs.loops = fs.loops[:len(fs.loops)-1]
++	branch(fs.cur, st.Condition, after, body)
++	fs.cur = after
++}
++
++// forLoop builds a for loop after its Statement node: the Iteration that
++// gives the variables their values, the body, the LoopEnd.
++func (b *builder) forLoop(st ast.Stmt, stmts []ast.Stmt, span ast.Span, vars []*scope.Var) {
++	fs := b.fn
++	head := fs.g.newBlock()
++	link(fs.cur, head, Next)
++	fs.cur = head
++	outer := b.enter(scope.ScopeFor, st)
++	b.node(Iteration, st, nil)
++	for _, v := range vars {
++		b.def(v, nil, nil, true, false)
++	}
++	body, after := fs.g.newBlock(), fs.g.newBlock()
++	link(head, body, True)
++	link(head, after, False)
++	if len(stmts) == 0 {
++		b.empty(EmptyLoop, st, span)
++	}
++	fs.cur = body
++	fs.loops = append(fs.loops, after)
++	b.block(scope.ScopeForBody, st, stmts)
++	fs.loops = fs.loops[:len(fs.loops)-1]
++	b.leave(outer)
++	b.node(LoopEnd, st, nil)
++	link(fs.cur, head, Next)
++	fs.cur = after
++}
++
++// isElseif reports whether an IfStmt alone in an else block is an
++// "elseif" rather than an "if" statement in the block ("else if"), from
++// the source; without one, it is taken as an elseif.
++func (b *builder) isElseif(ei *ast.IfStmt) bool {
++	sp := ei.Span()
++	if b.src == nil || sp.End <= sp.Start || sp.End > len(b.src) {
++		return true
++	}
++	return strings.HasPrefix(string(b.src[sp.Start:min(sp.End, sp.Start+6)]), "elseif")
++}
++
++func (b *builder) ifStmt(st *ast.IfStmt) {
++	fs := b.fn
++	b.node(Statement, st, nil)
++	join := fs.g.newBlock()
++	for clause := st; ; {
++		b.node(Condition, clause, clause.Condition)
++		b.expr(clause.Condition)
++		from := fs.cur
++		then := fs.g.newBlock()
++		var next *ast.IfStmt
++		if len(clause.Else) == 1 {
++			if ei, ok := clause.Else[0].(*ast.IfStmt); ok && ei != nil {
++				next = ei
++			}
++		}
++		no := join
++		if len(clause.Else) > 0 {
++			no = fs.g.newBlock()
++		}
++		branch(from, clause.Condition, then, no)
++		if len(clause.Then) == 0 {
++			b.empty(EmptyThen, clause, clause.ThenSpan)
++		}
++		fs.cur = then
++		b.block(scope.ScopeThen, clause, clause.Then)
++		if fs.cur != nil {
++			link(fs.cur, join, Next)
++		}
++		fs.cur = no
++		if next != nil {
++			if !b.isElseif(next) { // "else if": an if statement of its own
++				b.node(Statement, next, nil)
++			}
++			clause = next
++			continue
++		}
++		switch {
++		case len(clause.Else) > 0:
++			b.block(scope.ScopeElse, clause, clause.Else)
++			if fs.cur != nil {
++				link(fs.cur, join, Next)
++			}
++		case clause.ElseSpan != (ast.Span{}):
++			b.empty(EmptyElse, clause, clause.ElseSpan)
++		}
++		break
++	}
++	fs.cur = join
++}
++
++/* expressions */
++
++// slots reads a list of expressions that are evaluated one after the
++// other, each in a slot of its own.
++func (b *builder) slots(list []ast.Expr) {
++	for i, e := range list {
++		b.fn.slot = int32(i)
++		b.expr(e)
++	}
++}
++
++func (b *builder) exprs(list []ast.Expr) {
++	for _, e := range list {
++		b.expr(e)
++	}
++}
++
++func (b *builder) expr(e ast.Expr) {
++	if b.depth >= maxDepth {
++		return
++	}
++	b.depth++
++	b.expr1(e)
++	b.depth--
++}
++
++func (b *builder) expr1(e ast.Expr) {
++	switch x := e.(type) {
++	case *ast.IdentExpr:
++		if x != nil {
++			b.use(x, Read)
++		}
++	case *ast.AttrGetExpr:
++		if x != nil {
++			b.expr(x.Object)
++			b.expr(x.Key)
++		}
++	case *ast.FuncCallExpr:
++		if x != nil {
++			if x.Func != nil {
++				b.expr(x.Func)
++			} else {
++				b.expr(x.Receiver)
++			}
++			b.exprs(x.Args)
++		}
++	case *ast.TableExpr:
++		if x != nil {
++			for _, f := range x.Fields {
++				if f != nil {
++					b.expr(f.Key)
++					b.expr(f.Value)
++				}
++			}
++		}
++	case *ast.LogicalOpExpr:
++		if x != nil {
++			b.expr(x.Lhs)
++			b.expr(x.Rhs)
++		}
++	case *ast.RelationalOpExpr:
++		if x != nil {
++			b.expr(x.Lhs)
++			b.expr(x.Rhs)
++		}
++	case *ast.ArithmeticOpExpr:
++		if x != nil {
++			b.expr(x.Lhs)
++			b.expr(x.Rhs)
++		}
++	case *ast.StringConcatOpExpr:
++		if x != nil {
++			b.expr(x.Lhs)
++			b.expr(x.Rhs)
++		}
++	case *ast.UnaryMinusOpExpr:
++		if x != nil {
++			b.expr(x.Expr)
++		}
++	case *ast.UnaryNotOpExpr:
++		if x != nil {
++			b.expr(x.Expr)
++		}
++	case *ast.UnaryLenOpExpr:
++		if x != nil {
++			b.expr(x.Expr)
++		}
++	case *ast.FunctionExpr:
++		if x != nil {
++			b.function(nil, x, x.Stmts, false)
++		}
++	}
++}
++
++// hasCall reports whether an expression has a call, outside the functions
++// in it.
++func hasCall(e ast.Expr) bool {
++	switch x := e.(type) {
++	case *ast.FuncCallExpr:
++		return x != nil
++	case *ast.AttrGetExpr:
++		return x != nil && (hasCall(x.Object) || hasCall(x.Key))
++	case *ast.TableExpr:
++		if x != nil {
++			for _, f := range x.Fields {
++				if f != nil && (hasCall(f.Key) || hasCall(f.Value)) {
++					return true
++				}
++			}
++		}
++	case *ast.LogicalOpExpr:
++		return x != nil && (hasCall(x.Lhs) || hasCall(x.Rhs))
++	case *ast.RelationalOpExpr:
++		return x != nil && (hasCall(x.Lhs) || hasCall(x.Rhs))
++	case *ast.ArithmeticOpExpr:
++		return x != nil && (hasCall(x.Lhs) || hasCall(x.Rhs))
++	case *ast.StringConcatOpExpr:
++		return x != nil && (hasCall(x.Lhs) || hasCall(x.Rhs))
++	case *ast.UnaryMinusOpExpr:
++		return x != nil && hasCall(x.Expr)
++	case *ast.UnaryNotOpExpr:
++		return x != nil && hasCall(x.Expr)
++	case *ast.UnaryLenOpExpr:
++		return x != nil && hasCall(x.Expr)
++	}
++	return false
++}
++
++func (b *builder) empty(kind EmptyKind, st ast.Stmt, span ast.Span) {
++	b.p.Empty = append(b.p.Empty, Empty{Kind: kind, Stmt: st, Span: span})
++}
+--- a/flow/dataflow.go
++++ b/flow/dataflow.go
+@@ -0,0 +1,217 @@
++package flow
++
++import (
++	"fmt"
++	"sync"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// Program is the result of Analyze: the graphs of the functions of a tree
++// and the data flow over its local variables. It is read only and safe
++// for concurrent use.
++type Program struct {
++	// Info is the resolution the program was built from.
++	Info *scope.Info
++	// Graphs are the graphs of the functions: the main chunk first, then
++	// the FunctionExprs in source order (the order of their scopes in
++	// Info.Scopes).
++	Graphs []*Graph
++	// Defs are the values assigned to local variables, in the order they
++	// are met: a statement's after those of the functions in its
++	// expressions.
++	Defs []*Def
++	// Uses are the occurrences of local variables that read or mutate
++	// them, in source order.
++	Uses []*Use
++	// Empty are the empty blocks, in source order.
++	Empty []Empty
++
++	varDefs [][]*Def
++	varUses [][]*Use
++	graphOf []*Graph // by scope ID, for the function scopes
++	misses  int
++
++	luacheckParens bool
++
++	useOnce sync.Once
++	useIdx  map[*ast.IdentExpr]*Use
++}
++
++// Main returns the graph of the main chunk.
++func (p *Program) Main() *Graph { return p.Graphs[0] }
++
++// Graph returns the graph of the function that a scope is in, nil if the
++// scope is not of the tree.
++func (p *Program) Graph(s *scope.Scope) *Graph {
++	if s == nil || s.Func == nil || s.Func.ID >= len(p.graphOf) || p.Info.Scopes[s.Func.ID] != s.Func {
++		return nil
++	}
++	return p.graphOf[s.Func.ID]
++}
++
++// VarDefs returns the values assigned to a variable: its declaration's
++// (Init) and those of the assignments, in the order of Defs.
++func (p *Program) VarDefs(v *scope.Var) []*Def {
++	if v == nil || v.ID >= len(p.varDefs) {
++		return nil
++	}
++	return p.varDefs[v.ID]
++}
++
++// VarUses returns the uses of a variable, in source order.
++func (p *Program) VarUses(v *scope.Var) []*Use {
++	if v == nil || v.ID >= len(p.varUses) {
++		return nil
++	}
++	return p.varUses[v.ID]
++}
++
++// UseOf returns the use of the name node, nil if it is no use of a local
++// (a global, an assigned name). The first call builds an index.
++func (p *Program) UseOf(id *ast.IdentExpr) *Use {
++	p.useOnce.Do(func() {
++		p.useIdx = make(map[*ast.IdentExpr]*Use, len(p.Uses))
++		for _, u := range p.Uses {
++			p.useIdx[u.Ident] = u
++		}
++	})
++	return p.useIdx[id]
++}
++
++// Def is a value assigned to a local variable: the declaration's of a
++// local, a parameter (at Enter), a loop variable (at each Iteration), and
++// those of the assignments to the variable (also "function f()" for a
++// local f). A node that assigns a variable twice ("x, x = 1, 2") has two
++// Defs; the last is the one that stays.
++type Def struct {
++	// Var is the variable.
++	Var *scope.Var
++	// Node is the node that assigns the value.
++	Node *Node
++	// Name is the name assigned in an assignment or a function statement;
++	// nil for a declaration's value, whose name is at Var.NameSpan.
++	Name *ast.IdentExpr
++	// Value is the expression whose value is assigned; for a name after
++	// the end of the list of expressions, the call or "..." at its end
++	// that the value is unpacked from, or nil. Nil for parameters and loop
++	// variables.
++	Value ast.Expr
++	// Init is set for the value of the declaration.
++	Init bool
++	// Empty is set for the value of a local declared without one ("local
++	// x", "b" of "local a, b = 1"): nil, which the program didn't write.
++	Empty bool
++	// Used is set if a read of the variable may see the value, Mutated if
++	// an assignment to a field of it may (see Use). A read in "t.k = e",
++	// with one target and one value and no call, or in the function of
++	// "function t.f()" or "function t:m()", doesn't make t's value used
++	// through that statement, as a read in luacheck's "circular"
++	// assignments doesn't.
++	Used, Mutated bool
++	// Overwritten, for a value that is neither used nor mutated, is the
++	// assignment that every path from it reaches before the end of the
++	// variable's scope, if there is one: the value is overwritten before
++	// use. Nil otherwise.
++	Overwritten *Def
++	// ID is the index of the def in Program.Defs.
++	ID int
++
++	users []*Graph // for a function value: the functions using it
++}
++
++func (d *Def) isFunc() bool {
++	fe, ok := d.Value.(*ast.FunctionExpr)
++	return ok && fe != nil
++}
++
++// parenFunction reports whether a function value is in parentheses at the
++// end of an assignment's values.
++func parenFunction(d *Def, fe *ast.FunctionExpr) bool {
++	st, ok := d.Node.Stmt.(*ast.AssignStmt)
++	return ok && fe.Parens().Count > 0 && len(st.Rhs) > 0 && st.Rhs[len(st.Rhs)-1] == ast.Expr(fe)
++}
++
++func (d *Def) addUser(g *Graph) {
++	for _, h := range d.users {
++		if h == g {
++			return
++		}
++	}
++	d.users = append(d.users, g)
++}
++
++// Span returns the span of the name the value is assigned to: Name's,
++// else that of the declared name (the zero Span for an implicit
++// variable).
++func (d *Def) Span() ast.Span {
++	if d.Name != nil {
++		return d.Name.Span()
++	}
++	return d.Var.NameSpan
++}
++
++func (d *Def) String() string {
++	return fmt.Sprintf("def %s at %v", d.Var.Name, d.Span())
++}
++
++// UseKind says how a use uses its variable.
++type UseKind uint8
++
++const (
++	// Read reads the variable's value.
++	Read UseKind = iota
++	// Mutate reads the variable to assign a field of its value: t in
++	// "t.k = v", "t[k] = v", "t.a.b = v", "function t.f()", "function
++	// t:m()".
++	Mutate
++)
++
++func (k UseKind) String() string {
++	switch k {
++	case Read:
++		return "read"
++	case Mutate:
++		return "mutate"
++	}
++	return fmt.Sprintf("UseKind(%d)", int(k))
++}
++
++// Use is an occurrence of a local variable that reads it.
++type Use struct {
++	// Var is the variable.
++	Var *scope.Var
++	// Ident is the name.
++	Ident *ast.IdentExpr
++	// Kind is how it uses the variable.
++	Kind UseKind
++	// Node is the node the name is in, in the graph of the function the
++	// name is in.
++	Node *Node
++	// Defs are the values the use may see, in the order of Program.Defs
++	// (see the package documentation for the upvalues). The uses of a
++	// variable in one node share the slice, and so do those inside one
++	// closure of the variable's function.
++	Defs []*Def
++	// ID is the index of the use in Program.Uses.
++	ID int
++
++	slot int32 // the expression of the node it is in (Node.slot)
++}
++
++// Uninitialized reports whether the values the use may see are all those
++// of declarations without a value: the variable is used before any
++// assignment can reach it. A use that no value reaches (in unreachable
++// code) is not.
++func (u *Use) Uninitialized() bool {
++	if len(u.Defs) == 0 {
++		return false
++	}
++	for _, d := range u.Defs {
++		if !d.Empty {
++			return false
++		}
++	}
++	return true
++}
+--- a/flow/doc.go
++++ b/flow/doc.go
+@@ -0,0 +1,160 @@
++// Package flow builds the control-flow graphs of the functions of a Lua
++// syntax tree and the data flow over its local variables: the base of lint
++// rules. go-moonscript patch.
++//
++// It reads a tree of package ast with its resolution by package scope, and
++// nothing else:
++//
++//	chunk, err := parse.ParseChunk(src, "name", parse.Options{Dialect: parse.LuaJIT})
++//	info, err := scope.Resolve(chunk, scope.LuaJIT)
++//	p := flow.Analyze(info, nil)
++//	for _, g := range p.Graphs { ... g.Unreachable() ... } // per function
++//	for _, d := range p.Defs { ... d.Used ... }            // per value of a local
++//
++// # Graphs
++//
++// A Graph is the graph of a function: the main chunk, and each
++// FunctionExpr (Program.Graphs, in source order). Its basic blocks
++// (Block) hold nodes (Node) in execution order: the statements, and the
++// parts of the compound ones that do something of their own: the
++// condition of an if, elseif, while or repeat (a Condition node, whose
++// block ends with it and a True and a False edge), the iteration of a for
++// (an Iteration: its test and the values of its variables), the end of an
++// iteration of a while's or a for's body (a LoopEnd, going back to the
++// loop's head). A compound statement has a Statement node where it starts
++// (a for's evaluates its expressions); an elseif has only its Condition. A
++// function starts with an Entry block holding its Enter node (the values
++// of the parameters) and ends in an Exit block, which the returns and the
++// end of the body lead to. Every statement is in one node, in one block;
++// the nodes are in source order (Graph.Nodes).
++//
++// The edges are those of Lua: the branches of if and elseif, the loops,
++// break (to after the innermost loop), return (to the Exit), goto (to its
++// label, as package scope binds it, under LuaJIT). A repeat's condition is
++// in the body's scope and goes back to the body's start when false.
++//
++// A condition that is a literal (nil, false, true, a number, a string, a
++// table or a function constructor, in parentheses or not) is a constant:
++// its block has only the edge that it takes. So "while true do" without a
++// break doesn't end, what follows it is unreachable, as are the branch
++// "if false then" and the else of "if true then". This is luacheck's rule;
++// "not x", "1 == 1" and other expressions are not constants.
++//
++// The short-circuit evaluation of "and" and "or" is not in the graph: an
++// expression is evaluated within its node. Lua has no assignment in an
++// expression, so where in an expression a variable is read doesn't change
++// which values reach it; what an expression can do to the control flow is
++// a call, and calls are opaque. Splitting expressions would make many more
++// nodes for nothing the queries use (luacheck doesn't split them either).
++//
++// Calls are opaque: a call returns, error(...) and os.exit() too.
++// Options.NoReturn names functions that don't (globals or fields of
++// globals, "error", "os.exit"): a call statement of one ends its path as a
++// return does. None by default.
++//
++// # Queries
++//
++//   - Graph.Unreachable: the unreachable code, at the first node of each
++//     unreachable stretch (luacheck's W511); a LoopEnd among them is a loop
++//     whose body runs at most once (W512, Graph.AtMostOnce). Breaks and
++//     labels are not reported by themselves.
++//   - Graph.Returns: the reachable returns with values, without, and
++//     whether the end of the body is reachable, for a rule against
++//     functions that return values on some paths only
++//     (Returns.Inconsistent).
++//   - Program.Empty: the empty blocks: do (W541), then and else (W542),
++//     loop bodies, function bodies.
++//   - The data flow below: values never used and overwritten before use
++//     (W311, W312, W313), uses of uninitialized variables (W321, W341),
++//     unused recursive functions (Program.UnusedRecursive, W211/W311).
++//
++// # Data flow
++//
++// A Def is a value assigned to a local: the value of its declaration (a
++// local's, an empty one for "local x"; a parameter's at Enter; a loop
++// variable's at each Iteration; a local function's) and of each assignment
++// and function statement. A Use is an occurrence that reads the variable
++// (Read) or the table in it to assign a field (Mutate: t in "t.k = v",
++// "function t:m()"). Each use knows the values it may see (Use.Defs); each
++// value whether a read (Def.Used) or a mutation (Def.Mutated) may see it.
++// A value that nothing uses is overwritten (Def.Overwritten) if every path
++// from it reaches the same assignment before any use and before the end of
++// the variable's scope. A use is uninitialized (Use.Uninitialized) if all
++// the values it may see are empty declarations.
++//
++// The values a node sees are those before its assignments: in "x = x + 1"
++// the x read is the old one. A node assigning a variable twice ("x, x = 1,
++// 2") keeps its last value; the first is overwritten.
++//
++// For a local of a function, the uses and assignments in the function's
++// own nodes are its main ones; those in the functions inside it, at any
++// depth, are taken per closure: the function directly inside the
++// variable's function that has them, at the node that creates it
++// (Graph.Creator). A closure may be called at any time after it is
++// created, any number of times, and its uses and assignments of the
++// variable may happen in any order (luacheck's rule):
++//
++//  1. a main value reaches the main uses that a path from it leads to
++//     without another main assignment of the variable (the reaching
++//     definitions); assignments in closures never stop it;
++//  2. a closure's uses see the main values that reach its creation, and
++//     those assigned at the nodes that its creation leads to (it may be
++//     called after them);
++//  3. a main use sees the values a closure assigns if the closure's
++//     creation leads to the use: in a node before it, or in an expression
++//     before it in the same node (the expressions of a return or a for's
++//     header are evaluated one by one; luacheck has them as items of their
++//     own);
++//  4. a closure's uses see the values another closure, or itself, assigns
++//     if the creation of either leads to the creation of the other.
++//
++// A declaration makes a new instance of its variable: the values from
++// before it, from an earlier pass through it, are not those of the
++// closure it creates ("local function f" run again after a goto back).
++// The creation of a closure leads wherever a path goes, also through a
++// loop into the next instance of the variable, as in luacheck: that is
++// conservative (more values seen, fewer warnings).
++//
++// A read of t in "t.k = e", with one target, one value and no call in
++// them, doesn't make t's value used (luacheck's circular assignment); the
++// assignment does mutate it. "function t.f()" and "function t:m()" are
++// such assignments: a read of t in the function, through its creation
++// there, doesn't use the value either.
++//
++// # luacheck
++//
++// The queries are checked against luacheck 1.2 (TestLuacheck): its
++// warnings 511, 512, 541, 542, 311, 312, 313, 321 and 341 on the fork's
++// testdata, the luasuites archives and thousands of random programs are
++// those of a lint pass over this package, at the same lines and columns,
++// but for four approximations of luacheck that the package doesn't make
++// (its tests reproduce them to explain every difference):
++//
++//   - for a local of a function other than the main chunk, luacheck
++//     connects every value that any of the function's closures assigns
++//     with every use in any of them, also between closures that can never
++//     share an instance of the variable (created in branches that exclude
++//     each other): it resolves the closures inside a closure again at the
++//     levels above. The package applies rule 4 at the variable's function
++//     only, so it finds unused values and uninitialized uses there that
++//     luacheck misses;
++//   - luacheck keeps the parentheses of the last value of an assignment
++//     ("x = (function() end)") and doesn't see a function in it;
++//   - luacheck ends the scope of a variable at a declaration of the same
++//     name in the same scope: a value that a goto takes back to before the
++//     declaration doesn't reach the uses there;
++//   - in the functions that a circular assignment of t creates ("function
++//     t:m() ... t ... end"), luacheck connects the reads of t with no value
++//     that reaches the assignment, so it finds no uninitialized read
++//     there; the package gives them those values (they are what t holds
++//     when the function is created).
++//
++// # Limits
++//
++// The graph and the data flow are of a resolved tree: a tree that is not
++// the resolution's gives nonsense. A tree with label problems (a goto
++// without its label, from a tree that other code built) has a goto that
++// leads nowhere. Nil nodes are skipped, a tree deeper than 100000 levels is
++// cut there, as by the resolver. A Program is read only and safe for
++// concurrent use.
++package flow
+--- a/flow/example_test.go
++++ b/flow/example_test.go
+@@ -0,0 +1,165 @@
++package flow_test
++
++import (
++	"fmt"
++	"sort"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/flow"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// A lint pass over a Program: unreachable code, loops that run at most
++// once, empty blocks, functions that return values on some paths only,
++// values never used or overwritten before use, variables used
++// uninitialized; with luacheck's codes where it has one.
++func Example() {
++	src := `local function find(t, x)
++  for i, v in ipairs(t) do
++    if v == x then return i end
++  end
++end
++
++local function first(t)
++  for _, v in ipairs(t) do
++    return v
++  end
++  return nil
++end
++
++local function main(n)
++  local total = 0
++  total = n
++  local label
++  if n > 0 then
++  else
++    label = "small"
++  end
++  local unset
++  print(label, total, unset, find, first)
++  while true do
++    n = n - 1
++  end
++  print("done")
++end
++
++return main
++`
++	chunk, err := parse.ParseChunk([]byte(src), "example", parse.Options{Dialect: parse.LuaJIT})
++	if err != nil {
++		fmt.Println(err)
++		return
++	}
++	info, err := scope.Resolve(chunk, scope.LuaJIT)
++	if err != nil {
++		fmt.Println(err)
++		return
++	}
++	p := flow.Analyze(info, nil)
++
++	type finding struct {
++		offset int
++		text   string
++	}
++	var found []finding
++	report := func(offset int, format string, args ...any) {
++		found = append(found, finding{offset, fmt.Sprintf("%s: %s", chunk.Pos(offset), fmt.Sprintf(format, args...))})
++	}
++	for _, g := range p.Graphs {
++		for _, n := range g.Unreachable() {
++			if n.Kind == flow.LoopEnd {
++				report(n.Stmt.Span().Start, "W512 loop is executed at most once")
++			} else {
++				report(n.Span().Start, "W511 unreachable code")
++			}
++		}
++		if g.Function != nil && g.Returns().Inconsistent() {
++			report(g.Function.Span().Start, "function returns a value on some paths only")
++		}
++	}
++	for _, e := range p.Empty {
++		switch e.Kind {
++		case flow.EmptyDo:
++			report(e.Stmt.Span().Start, "W541 empty do..end block")
++		case flow.EmptyThen, flow.EmptyElse:
++			report(e.Stmt.Span().Start, "W542 empty %s branch", e.Kind)
++		}
++	}
++	for _, d := range p.Defs {
++		if d.Used || d.Mutated || d.Empty || d.Var.Name == "_" || len(p.VarDefs(d.Var)) < 2 {
++			continue // a variable with one value is unused, not its value
++		}
++		if o := d.Overwritten; o != nil {
++			report(d.Span().Start, "W311 value of %s is overwritten at %s before use", d.Var.Name, chunk.Pos(o.Span().Start))
++		} else {
++			report(d.Span().Start, "W311 value of %s is unused", d.Var.Name)
++		}
++	}
++	for _, u := range p.Uses {
++		if u.Uninitialized() {
++			report(u.Ident.Span().Start, "W321 %s is used uninitialized", u.Var.Name)
++		}
++	}
++	sort.SliceStable(found, func(i, j int) bool { return found[i].offset < found[j].offset })
++	for _, f := range found {
++		fmt.Println(f.text)
++	}
++	// Output:
++	// 1:20: function returns a value on some paths only
++	// 8:3: W512 loop is executed at most once
++	// 15:9: W311 value of total is overwritten at 16:3 before use
++	// 18:3: W542 empty then branch
++	// 23:23: W321 unset is used uninitialized
++	// 27:3: W511 unreachable code
++}
++
++// The graph of a function: its blocks, their nodes and edges.
++func ExampleGraph() {
++	src := `local n = 0
++while n < 3 do
++  if n == 1 then break end
++  n = n + 1
++end
++return n
++`
++	chunk, _ := parse.ParseChunk([]byte(src), "example", parse.Options{Dialect: parse.Lua51})
++	info, _ := scope.Resolve(chunk, scope.Lua51)
++	g := flow.Analyze(info, nil).Main()
++	for _, b := range g.Blocks {
++		fmt.Printf("block %d:", b.ID)
++		for _, n := range b.Nodes {
++			fmt.Printf(" [%s %s]", n.Kind, text(chunk, n))
++		}
++		for _, e := range b.Succs {
++			fmt.Printf(" -%s-> %d", e.Kind, e.To.ID)
++		}
++		fmt.Println()
++	}
++	// Output:
++	// block 0: [enter ] -next-> 2
++	// block 1:
++	// block 2: [statement local n = 0] [statement while] -next-> 3
++	// block 3: [condition n < 3] -true-> 4 -false-> 5
++	// block 4: [statement if] [condition n == 1] -true-> 7 -false-> 6
++	// block 5: [statement return n] -next-> 1
++	// block 6: [statement n = n + 1] [loop end while] -next-> 3
++	// block 7: [statement break] -next-> 5
++}
++
++// text is the source of a node, the first word of a compound statement.
++func text(chunk *ast.Chunk, n *flow.Node) string {
++	src := chunk.Lines.Source()
++	sp := n.Span()
++	switch n.Stmt.(type) {
++	case *ast.WhileStmt, *ast.IfStmt:
++		if n.Kind != flow.Condition {
++			end := sp.Start
++			for end < sp.End && src[end] != ' ' {
++				end++
++			}
++			sp.End = end
++		}
++	}
++	return string(src[sp.Start:sp.End])
++}
+--- a/flow/export_test.go
++++ b/flow/export_test.go
+@@ -0,0 +1,21 @@
++package flow
++
++import "github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++
++// LuacheckOptions are the Options with luacheck's approximations: its
++// cross-resolution of closures, parenthesized functions, ends of scopes
++// and reads in circular assignments.
++func LuacheckOptions(closures, parens, scopes, circular bool) *Options {
++	return &Options{luacheckClosures: closures, luacheckParens: parens, luacheckScopes: scopes, luacheckCircular: circular}
++}
++
++// ParenFunction reports whether a def's value is a function that luacheck
++// takes as none.
++func ParenFunction(d *Def, fe *ast.FunctionExpr) bool { return parenFunction(d, fe) }
++
++// GraphsOnly are the Options that build the graphs without the data flow.
++func GraphsOnly() *Options { return &Options{graphsOnly: true} }
++
++// Misses returns the lookups of the resolution that the builder didn't find
++// in its order.
++func (p *Program) Misses() int { return p.misses }
+--- a/flow/flow_test.go
++++ b/flow/flow_test.go
+@@ -0,0 +1,593 @@
++package flow_test
++
++import (
++	"fmt"
++	"slices"
++	"strings"
++	"sync"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/flow"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// dump writes a graph as its blocks: "id: nodes -> succs", a node as its
++// kind and the start of its source, "!" before an unreachable block.
++func dump(chunk *ast.Chunk, g *flow.Graph) string {
++	var b strings.Builder
++	for _, blk := range g.Blocks {
++		if !blk.Reachable {
++			b.WriteByte('!')
++		}
++		fmt.Fprintf(&b, "%d:", blk.ID)
++		for _, n := range blk.Nodes {
++			fmt.Fprintf(&b, " %s", nodeText(chunk, n))
++		}
++		if len(blk.Succs) > 0 {
++			b.WriteString(" ->")
++		}
++		for _, e := range blk.Succs {
++			switch e.Kind {
++			case flow.True:
++				b.WriteString(" T")
++			case flow.False:
++				b.WriteString(" F")
++			default:
++				b.WriteByte(' ')
++			}
++			fmt.Fprintf(&b, "%d", e.To.ID)
++		}
++		b.WriteByte('\n')
++	}
++	return b.String()
++}
++
++// nodeText is a node's kind and the first word of its source.
++func nodeText(chunk *ast.Chunk, n *flow.Node) string {
++	kind := map[flow.NodeKind]string{flow.Enter: "enter", flow.Statement: "s", flow.Condition: "c", flow.Iteration: "iter", flow.LoopEnd: "end"}[n.Kind]
++	if n.Kind == flow.Enter {
++		return kind
++	}
++	sp := n.Span()
++	if chunk == nil || sp == (ast.Span{}) {
++		return fmt.Sprintf("%s(%T)", kind, n.Stmt)
++	}
++	src := chunk.Lines.Source()
++	end := sp.Start
++	for end < sp.End && src[end] != ' ' && src[end] != '(' {
++		end++
++	}
++	return kind + "(" + string(src[sp.Start:end]) + ")"
++}
++
++func TestGraphs(t *testing.T) {
++	cases := []struct {
++		name    string
++		dialect []scope.Dialect
++		src     string
++		want    string
++	}{
++		{"if", dialects, "if a then x() elseif b then y() else z() end w()", `
++0: enter -> 2
++1:
++2: s(if) c(a) -> T4 F5
++3: s(w) -> 1
++4: s(x) -> 3
++5: c(b) -> T6 F7
++6: s(y) -> 3
++7: s(z) -> 3
++`},
++		{"else if", dialects, "if a then else if b then y() end end", `
++0: enter -> 2
++1:
++2: s(if) c(a) -> T4 F5
++3: -> 1
++4: -> 3
++5: s(if) c(b) -> T6 F3
++6: s(y) -> 3
++`},
++		{"while", dialects, "while a do if b then break end x() end", `
++0: enter -> 2
++1:
++2: s(while) -> 3
++3: c(a) -> T4 F5
++4: s(if) c(b) -> T7 F6
++5: -> 1
++6: s(x) end(while) -> 3
++7: s(break) -> 5
++`},
++		{"repeat", dialects, "repeat local x = f() until x", `
++0: enter -> 2
++1:
++2: s(repeat) -> 3
++3: s(local) c(x) -> T4 F3
++4: -> 1
++`},
++		{"for", dialects, "for i = 1, 3 do x() end for k, v in pairs(t) do return k end", `
++0: enter -> 2
++1:
++2: s(for) -> 3
++3: iter(for) -> T4 F5
++4: s(x) end(for) -> 3
++5: s(for) -> 6
++6: iter(for) -> T7 F8
++7: s(return) -> 1
++8: -> 1
++!9: end(for) -> 6
++`},
++		{"constants", dialects, "while true do end if false then x() end repeat until false", `
++0: enter -> 2
++!1:
++2: s(while) -> 3
++3: c(true) -> T4
++4: end(while) -> 3
++!5: s(if) c(false) -> F6
++!6: s(repeat) -> 8
++!7: s(x) -> 6
++!8: c(false) -> F8
++!9: -> 1
++`},
++		{"goto", []scope.Dialect{scope.LuaJIT}, "for i = 1, 3 do if i == 2 then goto continue end x() ::continue:: end ::top:: goto top", `
++0: enter -> 2
++!1:
++2: s(for) -> 3
++3: iter(for) -> T4 F5
++4: s(if) c(i) -> T7 F6
++5: -> 9
++6: s(x) -> 8
++7: s(goto) -> 8
++8: s(::continue::) end(for) -> 3
++9: s(::top::) s(goto) -> 9
++`},
++		{"return in do", dialects, "do return end x()", `
++0: enter -> 2
++1:
++2: s(do) s(return) -> 1
++!3: s(x) -> 1
++`},
++	}
++	for _, c := range cases {
++		for _, d := range c.dialect {
++			chunk, _, p := analyze(t, c.src, d, nil)
++			if got := "\n" + dump(chunk, p.Main()); got != c.want {
++				t.Errorf("%s (%v): got%s\nwant%s", c.name, d, got, c.want)
++			}
++		}
++	}
++}
++
++// at returns "line:col" of an offset.
++func at(chunk *ast.Chunk, off int) string {
++	p := chunk.Pos(off)
++	return fmt.Sprintf("%d:%d", p.Line, p.Column)
++}
++
++func TestUnreachable(t *testing.T) {
++	cases := []struct {
++		src  string
++		jit  bool
++		want string // "line:col kind" of each unreachable node, in order
++	}{
++		{"do return end x()", false, "1:15 statement"},
++		{"while true do end x()", false, "1:19 statement"},
++		{"while true do if a then break end end x()", false, ""},
++		{"repeat until false x()", false, "1:20 statement"},
++		{"repeat until true x()", false, ""},
++		{"if false then x() end", false, "1:15 statement"},
++		{"if nil then x() end", false, "1:13 statement"},
++		{"if true then x() else y() end", false, "1:23 statement"},
++		{"if true then elseif c then y() end", false, "1:21 condition"},
++		{"if (true) then else y() end", false, "1:21 statement"},
++		{"if not false then else y() end", false, ""},
++		{"while 1 do end", false, ""},
++		{"while {} do end x()", false, "1:17 statement"},
++		{"for i = 1, 2 do return end", false, "1:1 loop end"},
++		{"while c do break end", false, "1:1 loop end"},
++		{"while false do end", false, "1:1 loop end"},
++		{"while false do x() end", false, "1:16 statement"},
++		{"while c do do return end x() end", false, "1:26 statement"},
++		{"while c do if a then break else break end end", false, "1:1 loop end"},
++		{"repeat return until c", false, "1:21 condition"},
++		{"repeat break until c", false, "1:20 condition"},
++		{"do return end local f = function() a() end", false, "1:15 statement"},
++		{"goto l x() ::l:: y()", true, "1:8 statement"},
++		{"do ::l:: goto l end x()", true, "1:21 statement"},
++		{"goto l ::l:: x()", true, ""},
++		{"for i = 1, 2 do if i then goto c end do return end ::c:: end", true, ""},
++		{"for i = 1, 2 do do return end ::c:: end", true, "1:1 loop end"},
++	}
++	for _, c := range cases {
++		ds := dialects
++		if c.jit {
++			ds = []scope.Dialect{scope.LuaJIT}
++		}
++		for _, d := range ds {
++			chunk, _, p := analyze(t, c.src, d, nil)
++			var got []string
++			for _, n := range p.Main().Unreachable() {
++				got = append(got, at(chunk, n.Span().Start)+" "+n.Kind.String())
++			}
++			if strings.Join(got, ", ") != c.want {
++				t.Errorf("%q (%v): unreachable %q, want %q", c.src, d, strings.Join(got, ", "), c.want)
++			}
++			if n := len(p.Main().AtMostOnce()); n != strings.Count(c.want, "loop end") {
++				t.Errorf("%q (%v): %d loops at most once", c.src, d, n)
++			}
++		}
++	}
++}
++
++func TestReturns(t *testing.T) {
++	cases := []struct {
++		src          string
++		noReturn     bool
++		values, bare int
++		aborts       int
++		fallsOff     bool
++		inconsistent bool
++	}{
++		{"local f = function() end", false, 0, 0, 0, true, false},
++		{"local f = function() return 1 end", false, 1, 0, 0, false, false},
++		{"local f = function(a) if a then return 1 end end", false, 1, 0, 0, true, true},
++		{"local f = function(a) if a then return 1 else return end end", false, 1, 1, 0, false, true},
++		{"local f = function(a) if a then return 1 end return f(a) end", false, 2, 0, 0, false, false},
++		{"local f = function(a) while true do end end", false, 0, 0, 0, false, false},
++		{"local f = function(a) while true do if a then return 1 end end end", false, 1, 0, 0, false, false},
++		{"local f = function(a) if a then return 1 end error('x') end", false, 1, 0, 0, true, true},
++		{"local f = function(a) if a then return 1 end error('x') end", true, 1, 0, 1, false, false},
++		{"local f = function(a) if a then return 1 end os.exit(1) end", true, 1, 0, 1, false, false},
++		{"local error = print local f = function(a) if a then return 1 end error('x') end", true, 1, 0, 0, true, true},
++		{"local f = function(a) do return 1 end return end", false, 1, 0, 0, false, false},
++		{"local f = function(a) for i = 1, 2 do return i end end", false, 1, 0, 0, true, true},
++	}
++	for _, c := range cases {
++		for _, d := range dialects {
++			var opts *flow.Options
++			if c.noReturn {
++				opts = &flow.Options{NoReturn: []string{"error", "os.exit"}}
++			}
++			_, _, p := analyze(t, c.src, d, opts)
++			g := p.Graphs[len(p.Graphs)-1]
++			r := g.Returns()
++			if len(r.Values) != c.values || len(r.Bare) != c.bare || len(r.NoReturn) != c.aborts || r.FallsOff != c.fallsOff || r.Inconsistent() != c.inconsistent {
++				t.Errorf("%q (%v): %d values, %d bare, %d no-return, falls off %v, inconsistent %v",
++					c.src, d, len(r.Values), len(r.Bare), len(r.NoReturn), r.FallsOff, r.Inconsistent())
++			}
++		}
++	}
++	// what follows a no-return call is unreachable
++	_, _, p := analyze(t, "error('x') print(1)", scope.Lua51, &flow.Options{NoReturn: []string{"error"}})
++	if u := p.Main().Unreachable(); len(u) != 1 || u[0].Index != 2 {
++		t.Errorf("after error(): %v", u)
++	}
++	_, _, p = analyze(t, "error('x') print(1)", scope.Lua51, nil)
++	if u := p.Main().Unreachable(); len(u) != 0 {
++		t.Errorf("after error() without the option: %v", u)
++	}
++}
++
++func TestEmpty(t *testing.T) {
++	src := `do end
++if a then elseif b then x() else end
++while a do end
++repeat until a
++for i = 1, 2 do end
++local f = function() end
++if a then x() end
++`
++	for _, d := range dialects {
++		chunk, _, p := analyze(t, src, d, nil)
++		var got []string
++		for _, e := range p.Empty {
++			got = append(got, fmt.Sprintf("%s %s", e.Kind, at(chunk, e.Span.Start)))
++		}
++		want := "do 1:4, then 2:11, else 2:34, loop 3:12, loop 4:8, loop 5:17, function 6:22"
++		if strings.Join(got, ", ") != want {
++			t.Errorf("%v: %s, want %s", d, strings.Join(got, ", "), want)
++		}
++	}
++}
++
++// varUse returns the use of a name at a line and column ("2:7").
++func varUse(t *testing.T, chunk *ast.Chunk, p *flow.Program, pos string) *flow.Use {
++	t.Helper()
++	for _, u := range p.Uses {
++		if at(chunk, u.Ident.Span().Start) == pos {
++			return u
++		}
++	}
++	t.Fatalf("no use at %s", pos)
++	return nil
++}
++
++// varDef returns the value assigned at a line and column.
++func varDef(t *testing.T, chunk *ast.Chunk, p *flow.Program, pos string) *flow.Def {
++	t.Helper()
++	for _, d := range p.Defs {
++		if at(chunk, d.Span().Start) == pos {
++			return d
++		}
++	}
++	t.Fatalf("no def at %s", pos)
++	return nil
++}
++
++func defsText(chunk *ast.Chunk, defs []*flow.Def) string {
++	var s []string
++	for _, d := range defs {
++		s = append(s, at(chunk, d.Span().Start))
++	}
++	return strings.Join(s, " ")
++}
++
++func TestDataFlow(t *testing.T) {
++	cases := []struct {
++		name string
++		src  string
++		opts *flow.Options
++		// "use line:col sees line:col ..." or "def line:col used|mutated|
++		// unused|overwritten line:col" or "use line:col uninitialized"
++		checks []string
++	}{
++		{"branches", "local x = 1 if c then x = 2 end print(x)", nil,
++			[]string{"use 1:39 sees 1:7 1:23", "def 1:7 used", "def 1:23 used"}},
++		{"overwritten", "local x = 1 x = 2 print(x)", nil,
++			[]string{"use 1:25 sees 1:13", "def 1:7 overwritten 1:13"}},
++		{"old value", "local x = 1 x = x + 1 print(x)", nil,
++			[]string{"use 1:17 sees 1:7", "use 1:29 sees 1:13"}},
++		{"loop", "local x = 0 while c do x = x + 1 end print(x)", nil,
++			[]string{"use 1:28 sees 1:7 1:24", "use 1:44 sees 1:7 1:24"}},
++		{"unused in a loop", "local x while c do x = 1 end", nil,
++			[]string{"def 1:20 unused"}},
++		{"twice", "local x x, x = 1, 2 print(x)", nil,
++			[]string{"def 1:9 overwritten 1:12", "use 1:27 sees 1:12"}},
++		{"uninitialized", "local x print(x) x = 1", nil,
++			[]string{"use 1:15 uninitialized"}},
++		{"maybe initialized", "local x if c then x = 1 end print(x)", nil,
++			[]string{"use 1:35 sees 1:7 1:19"}},
++		{"empty extra name", "local a, b = 1 print(b)", nil,
++			[]string{"use 1:22 uninitialized"}},
++		{"unpacked", "local a, b = f() print(b)", nil,
++			[]string{"use 1:24 sees 1:10"}},
++		{"circular", "local t = {} t.x = t.y", nil,
++			[]string{"def 1:7 mutated", "use 1:20 sees 1:7"}},
++		{"mutated", "local t = {} t.x = 1", nil,
++			[]string{"def 1:7 mutated"}},
++		{"parameter", "local f = function(a) a = 1 return a end", nil,
++			[]string{"def 1:20 overwritten 1:23", "use 1:36 sees 1:23"}},
++		{"loop variable", "for i = 1, 2 do i = 3 print(i) end", nil,
++			[]string{"def 1:5 overwritten 1:17", "use 1:29 sees 1:17"}},
++		{"self", "local t = {} function t:m() self = 1 return self end", nil,
++			[]string{"use 1:45 sees 1:29"}},
++		// closures
++		{"closure sees values before and after its creation", "local x = 1 local f = function() return x end x = 2", nil,
++			[]string{"use 1:41 sees 1:7 1:47", "def 1:7 used", "def 1:47 used"}},
++		{"use sees a closure's values", "local x = 1 local function set() x = 2 end set() print(x)", nil,
++			[]string{"use 1:56 sees 1:7 1:34", "def 1:34 used"}},
++		{"closure created after the use", "local x print(x) local function set() x = 2 end", nil,
++			[]string{"use 1:15 uninitialized"}},
++		{"closure after the use in a return", "local d return d, function() d = 1 end", nil,
++			[]string{"use 1:16 uninitialized"}},
++		{"closure before the use in a return", "local d return function() d = 1 end, d", nil,
++			[]string{"use 1:38 sees 1:7 1:27"}},
++		{"closures", "local x local function a() x = 1 end local function b() return x end", nil,
++			[]string{"use 1:64 sees 1:7 1:28"}},
++		{"closures in exclusive branches", "local function f(c) local x if c then g = function() x = 1 end else h = function() return x end end end", nil,
++			[]string{"use 1:91 uninitialized", "def 1:54 unused"}},
++		{"closures in exclusive branches, luacheck", "local function f(c) local x if c then g = function() x = 1 end else h = function() return x end end end", flow.LuacheckOptions(true, false, false, false),
++			[]string{"use 1:91 sees 1:27 1:54", "def 1:54 used"}},
++		{"closures in exclusive branches of the main chunk", "local x if c then g = function() x = 1 end else h = function() return x end end", flow.LuacheckOptions(true, false, false, false),
++			[]string{"use 1:71 uninitialized"}},
++		{"a declaration's closure sees its instance only", "::l:: local function f() return f end do return end f = nil goto l", nil,
++			[]string{"def 1:53 unused", "use 1:33 sees 1:22"}},
++		{"recursive", "local function f() return f end", nil,
++			[]string{"def 1:16 used"}},
++	}
++	for _, c := range cases {
++		chunk, _, p := analyze(t, c.src, scope.LuaJIT, c.opts)
++		for _, check := range c.checks {
++			f := strings.Fields(check)
++			var got string
++			switch f[0] {
++			case "use":
++				u := varUse(t, chunk, p, f[1])
++				if f[2] == "uninitialized" {
++					got = fmt.Sprintf("use %s uninitialized", f[1])
++					if !u.Uninitialized() {
++						got = fmt.Sprintf("use %s sees %s", f[1], defsText(chunk, u.Defs))
++					}
++				} else {
++					got = fmt.Sprintf("use %s sees %s", f[1], defsText(chunk, u.Defs))
++				}
++			case "def":
++				d := varDef(t, chunk, p, f[1])
++				switch {
++				case d.Used:
++					got = "used"
++				case d.Mutated:
++					got = "mutated"
++				case d.Overwritten != nil:
++					got = "overwritten " + at(chunk, d.Overwritten.Span().Start)
++				default:
++					got = "unused"
++				}
++				got = fmt.Sprintf("def %s %s", f[1], got)
++			}
++			if got != check {
++				t.Errorf("%s: %q: got %q, want %q", c.name, c.src, got, check)
++			}
++		}
++	}
++}
++
++func TestUnusedRecursive(t *testing.T) {
++	cases := []struct {
++		src  string
++		want string
++	}{
++		{"local function f() return f() end", "1:16"},
++		{"local function f() return f() end f()", ""},
++		{"local a, b a = function() return b() end b = function() return a() end", "1:12 1:42"},
++		{"local a, b a = function() return b() end b = function() return a() end a()", ""},
++		{"local function f() local function g() return f() end return g() end", "1:35 1:16"},
++		{"local function f() return f() end local function g() return f() end g()", ""},
++	}
++	for _, c := range cases {
++		chunk, _, p := analyze(t, c.src, scope.Lua51, nil)
++		if got := defsText(chunk, p.UnusedRecursive()); got != c.want {
++			t.Errorf("%q: %q, want %q", c.src, got, c.want)
++		}
++	}
++}
++
++// clearSpans removes the positions of a tree.
++func clearSpans(chunk *ast.Chunk) {
++	ast.Inspect(chunk, func(n ast.Element) bool {
++		n.SetSpan(ast.Span{})
++		switch x := n.(type) {
++		case *ast.LocalAssignStmt:
++			x.NameSpans = nil
++		case *ast.IfStmt:
++			x.ThenSpan, x.ElseSpan = ast.Span{}, ast.Span{}
++		case *ast.ParList:
++			x.NameSpans = nil
++		}
++		if e, ok := n.(ast.Expr); ok {
++			e.SetParens(ast.Parens{})
++		}
++		return true
++	})
++}
++
++// A tree without positions, from other code, has the same graphs and data
++// flow, without spans.
++func TestNoSpans(t *testing.T) {
++	for i := range 200 {
++		src := genProgram(uint64(i), true)
++		chunk, err := parse.ParseChunk([]byte(src), "gen", parse.Options{Dialect: parse.LuaJIT})
++		if err != nil {
++			continue
++		}
++		info, err := scope.Resolve(chunk, scope.LuaJIT)
++		if err != nil {
++			t.Fatal(err)
++		}
++		p := flow.Analyze(info, nil)
++		clearSpans(chunk)
++		info2, err := scope.ResolveStmts(chunk.Stmts, scope.LuaJIT)
++		if err != nil {
++			t.Fatal(err)
++		}
++		p2 := flow.AnalyzeStmts(chunk.Stmts, info2, nil)
++		if p2.Misses() != 0 {
++			t.Errorf("gen %d: %d misses", i, p2.Misses())
++		}
++		if len(p.Graphs) != len(p2.Graphs) || len(p.Defs) != len(p2.Defs) || len(p.Uses) != len(p2.Uses) {
++			t.Fatalf("gen %d: %d/%d graphs, %d/%d defs, %d/%d uses", i, len(p.Graphs), len(p2.Graphs), len(p.Defs), len(p2.Defs), len(p.Uses), len(p2.Uses))
++		}
++		for j := range p.Graphs {
++			// "else if" is an elseif without the source
++			if a, b := dump(nil, p.Graphs[j]), dump(nil, p2.Graphs[j]); a != b && !strings.Contains(src, "else\n") {
++				t.Errorf("gen %d, graph %d:\n%s\nwithout spans:\n%s", i, j, a, b)
++			}
++		}
++		for j, d := range p.Defs {
++			if e := p2.Defs[j]; d.Used != e.Used || d.Mutated != e.Mutated || (d.Overwritten == nil) != (e.Overwritten == nil) {
++				t.Errorf("gen %d: def %d differs without spans", i, j)
++			}
++		}
++	}
++}
++
++// Nil nodes are skipped, by the resolver and the builder.
++func TestNilNodes(t *testing.T) {
++	var nilIdent *ast.IdentExpr
++	stmts := []ast.Stmt{
++		nil,
++		&ast.LocalAssignStmt{Names: []string{"x"}, Exprs: []ast.Expr{nil}},
++		&ast.AssignStmt{Lhs: []ast.Expr{nilIdent, &ast.IdentExpr{Value: "x"}}, Rhs: []ast.Expr{nil}},
++		&ast.IfStmt{Condition: nil, Then: []ast.Stmt{nil, (*ast.BreakStmt)(nil)}, Else: []ast.Stmt{(*ast.IfStmt)(nil)}},
++		&ast.WhileStmt{Condition: nil},
++		&ast.FuncCallStmt{Expr: &ast.FuncCallExpr{Func: nil, Args: []ast.Expr{nil, &ast.FunctionExpr{}}}},
++		&ast.FuncDefStmt{Name: &ast.FuncName{Func: &ast.IdentExpr{Value: "x"}}, Func: nil},
++		&ast.FuncDefStmt{Name: nil, Func: &ast.FunctionExpr{ParList: &ast.ParList{Names: []string{"a"}}}},
++		&ast.ReturnStmt{Exprs: []ast.Expr{&ast.IdentExpr{Value: "x"}, nil}},
++	}
++	for _, d := range dialects {
++		info, _ := scope.ResolveStmts(stmts, d)
++		p := flow.AnalyzeStmts(stmts, info, nil)
++		for _, g := range p.Graphs {
++			g.Unreachable()
++			g.Returns()
++		}
++		if len(p.Graphs) != 3 {
++			t.Errorf("%v: %d graphs", d, len(p.Graphs))
++		}
++	}
++}
++
++// A built tree whose goto has no label: the goto leads nowhere.
++func TestLabelProblems(t *testing.T) {
++	stmts := []ast.Stmt{
++		&ast.GotoStmt{Label: "nowhere"},
++		&ast.FuncCallStmt{Expr: &ast.FuncCallExpr{Func: &ast.IdentExpr{Value: "f"}}},
++	}
++	info, err := scope.ResolveStmts(stmts, scope.LuaJIT)
++	if err == nil {
++		t.Fatal("no problem")
++	}
++	p := flow.AnalyzeStmts(stmts, info, nil)
++	g := p.Main()
++	if u := g.Unreachable(); len(u) != 1 || u[0].Stmt != stmts[1] {
++		t.Errorf("unreachable %v", u)
++	}
++	if r := g.Returns(); r.FallsOff {
++		t.Errorf("returns %+v", r)
++	}
++	// labels under Lua51: problems, and no edges
++	info, _ = scope.ResolveStmts(stmts, scope.Lua51)
++	flow.AnalyzeStmts(stmts, info, nil)
++}
++
++// A Program is safe for concurrent use.
++func TestConcurrent(t *testing.T) {
++	chunk, _, p := analyze(t, genProgram(7, true), scope.LuaJIT, nil)
++	want := fmt.Sprint(len(p.UnusedRecursive()))
++	var wg sync.WaitGroup
++	for range 8 {
++		wg.Go(func() {
++			for _, g := range p.Graphs {
++				g.Unreachable()
++				g.Returns()
++			}
++			for _, u := range p.Uses {
++				if p.UseOf(u.Ident) != u {
++					t.Error("UseOf")
++				}
++			}
++			if got := fmt.Sprint(len(p.UnusedRecursive())); got != want {
++				t.Error("UnusedRecursive", got, want)
++			}
++		})
++	}
++	wg.Wait()
++	_ = chunk
++}
++
++func TestGraphOf(t *testing.T) {
++	_, info, p := analyze(t, "local function f() do local x end end", scope.Lua51, nil)
++	for _, s := range info.Scopes {
++		g := p.Graph(s)
++		if g == nil || g.Func != s.Func {
++			t.Errorf("scope %d: graph %v", s.ID, g)
++		}
++	}
++	if p.Graph(nil) != nil || p.VarDefs(nil) != nil || p.VarUses(nil) != nil || p.UseOf(nil) != nil {
++		t.Error("nil lookups")
++	}
++	if !slices.Equal(p.Graphs[1].Nodes[1:2], p.Graphs[1].Blocks[2].Nodes[:1]) {
++		t.Error("nodes")
++	}
++}
+--- a/flow/fuzz_test.go
++++ b/flow/fuzz_test.go
+@@ -0,0 +1,103 @@
++package flow_test
++
++import (
++	"fmt"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/flow"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// checkSource analyzes a source in a dialect, with the default options and
++// with luacheck's quirks and a no-return function, and checks the
++// invariants (checkProgram). It returns false if the source doesn't parse.
++func checkSource(t testing.TB, name string, src []byte, d scope.Dialect, maxPairs int) bool {
++	t.Helper()
++	chunk, err := parse.ParseChunk(src, name, parse.Options{Dialect: parseDialect(d)})
++	if err != nil {
++		return false
++	}
++	info, err := scope.Resolve(chunk, d)
++	if err != nil {
++		t.Errorf("%s (%v): resolve: %v", name, d, err)
++		return true
++	}
++	luacheckOpts := flow.LuacheckOptions(true, true, true, true)
++	for _, opts := range []*flow.Options{nil, luacheckOpts, {NoReturn: []string{"error", "os.exit"}}} {
++		p := flow.Analyze(info, opts)
++		pairs := maxPairs
++		if opts == luacheckOpts {
++			pairs = 0 // luacheck's ends of scopes are no reaching definitions
++		}
++		for _, e := range checkProgram(chunk, info, p, pairs) {
++			t.Errorf("%s (%v, %v): %s", name, d, opts != nil, e)
++		}
++		// the queries don't panic
++		for _, g := range p.Graphs {
++			g.Returns()
++			g.AtMostOnce()
++		}
++		p.UnusedRecursive()
++		luacheckLint(chunk, info, p, false)
++	}
++	return true
++}
++
++// TestCorpus checks the invariants of the Programs of the corpus (the
++// fork's testdata and the luasuites archives) and of random programs, in
++// both dialects.
++func TestCorpus(t *testing.T) {
++	files := map[string][]byte{}
++	if testing.Short() {
++		for name, b := range luaFiles(t, "../testdata") {
++			files[name] = b
++		}
++	} else {
++		files = corpus(t)
++	}
++	n := 2000
++	if testing.Short() {
++		n = 200
++	}
++	for i := range n {
++		files[fmt.Sprintf("gen/%04d.lua", i)] = []byte(genProgram(uint64(i), i%2 == 0))
++	}
++	parsed := 0
++	for _, name := range sortedKeys(files) {
++		for _, d := range dialects {
++			if checkSource(t, name, files[name], d, 20000) {
++				parsed++
++			}
++		}
++	}
++	t.Logf("%d sources, %d parses checked", len(files), parsed)
++}
++
++// FuzzAnalyze analyzes mutated sources: nothing panics and the invariants
++// hold, with the reaching definitions checked against a walk.
++func FuzzAnalyze(f *testing.F) {
++	for i := range 64 {
++		f.Add([]byte(genProgram(uint64(i), i%2 == 0)))
++	}
++	for _, src := range []string{
++		"local x = 1 x = 2 return x",
++		"while true do end print(1)",
++		"for i = 1, 2 do return i end",
++		"local f f = function() return f end",
++		"::a:: local x = 1 goto a",
++		"repeat local x until x",
++		"if a then elseif b then else end",
++		"local t = {} t.x = t.y",
++	} {
++		f.Add([]byte(src))
++	}
++	f.Fuzz(func(t *testing.T, src []byte) {
++		if len(src) > 1<<14 {
++			return
++		}
++		for _, d := range dialects {
++			checkSource(t, "fuzz", src, d, 5000)
++		}
++	})
++}
+--- a/flow/gen_test.go
++++ b/flow/gen_test.go
+@@ -0,0 +1,322 @@
++package flow_test
++
++import (
++	"fmt"
++	"math/rand/v2"
++	"strings"
++)
++
++// gen writes random Lua programs that exercise the control flow and the
++// data flow: locals with and without values, assignments of one and more
++// names (also the same one twice), fields, circular assignments, closures
++// reading and writing upvalues, parameters, self, loops with constant and
++// other conditions, break, return, and under LuaJIT goto and labels. They
++// feed the comparison with luacheck and the fuzz target's seeds.
++type gen struct {
++	r      *rand.Rand
++	b      strings.Builder
++	indent int
++	jit    bool
++	// the locals visible, innermost last
++	vars   []string
++	nvar   int
++	depth  int
++	loops  int // enclosing loops of the current function
++	vararg bool
++	labels [][]string // the labels of the enclosing blocks of the function
++	// the labels each enclosing block puts at its end, for gotos forward
++	pending [][]string
++	nlabel  int
++	budget  int
++}
++
++func genProgram(seed uint64, jit bool) string {
++	g := &gen{r: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)), jit: jit, budget: 40 + int(seed%60)}
++	g.vararg = true
++	g.block(true)
++	return g.b.String()
++}
++
++func (g *gen) line(format string, args ...any) {
++	g.b.WriteString(strings.Repeat("  ", g.indent))
++	fmt.Fprintf(&g.b, format, args...)
++	g.b.WriteByte('\n')
++}
++
++func (g *gen) chance(n int) bool { return g.r.IntN(100) < n }
++
++func (g *gen) newVar() string {
++	g.nvar++
++	// few names, so that they shadow and are reused
++	names := []string{"a", "b", "c", "d", "e", "x", "y", "t"}
++	return names[g.r.IntN(len(names))]
++}
++
++func (g *gen) someVar() string {
++	if len(g.vars) == 0 || g.chance(10) {
++		return []string{"G", "H"}[g.r.IntN(2)]
++	}
++	return g.vars[len(g.vars)-1-g.r.IntN(min(len(g.vars), 6))]
++}
++
++func (g *gen) cond() string {
++	if g.chance(25) {
++		return []string{"true", "false", "nil", "1", `"s"`, "{}", "(true)", "not x"}[g.r.IntN(8)]
++	}
++	return g.expr(1)
++}
++
++func (g *gen) expr(d int) string {
++	if d > 2 {
++		return g.atom()
++	}
++	switch g.r.IntN(12) {
++	case 0:
++		return g.expr(d+1) + " + " + g.expr(d+1)
++	case 1:
++		return g.expr(d+1) + " and " + g.expr(d+1)
++	case 2:
++		return g.expr(d+1) + " or " + g.expr(d+1)
++	case 3:
++		return "f(" + g.expr(d+1) + ")"
++	case 4:
++		if g.depth < 3 {
++			return g.function("", false)
++		}
++	case 5:
++		return "{" + g.expr(d+1) + ", k = " + g.expr(d+1) + "}"
++	case 6:
++		return g.someVar() + ".k"
++	case 7:
++		return "(" + g.expr(d+1) + ")"
++	case 8:
++		if g.vararg {
++			return "..."
++		}
++	}
++	return g.atom()
++}
++
++func (g *gen) atom() string {
++	switch g.r.IntN(6) {
++	case 0:
++		return fmt.Sprint(g.r.IntN(10))
++	case 1:
++		return "nil"
++	}
++	return g.someVar()
++}
++
++// function writes a function expression ("function (...) ... end") or,
++// with name, the rest of a function statement.
++func (g *gen) function(name string, method bool) string {
++	saved := g.b
++	g.b = strings.Builder{}
++	var params []string
++	for i := g.r.IntN(3); i > 0; i-- {
++		params = append(params, g.newVar())
++	}
++	va := g.chance(30)
++	plist := strings.Join(params, ", ")
++	if va {
++		if plist != "" {
++			plist += ", "
++		}
++		plist += "..."
++	}
++	head := "function(" + plist + ")"
++	if name != "" {
++		head = "function " + name + "(" + plist + ")"
++	}
++	nv, loops, vararg, labels, pending := len(g.vars), g.loops, g.vararg, g.labels, g.pending
++	if method {
++		g.vars = append(g.vars, "self")
++	}
++	g.vars = append(g.vars, params...)
++	g.loops, g.vararg, g.labels, g.pending = 0, va, nil, nil
++	g.depth++
++	g.b.WriteString(head + "\n")
++	g.indent++
++	g.block(false)
++	g.indent--
++	g.b.WriteString(strings.Repeat("  ", g.indent) + "end")
++	g.depth--
++	g.vars, g.loops, g.vararg, g.labels, g.pending = g.vars[:nv], loops, vararg, labels, pending
++	body := g.b.String()
++	g.b = saved
++	return body
++}
++
++// block writes the statements of a block; the last may be a return or a
++// break.
++func (g *gen) block(top bool) {
++	nv := len(g.vars)
++	g.labels = append(g.labels, nil)
++	g.pending = append(g.pending, nil)
++	n := g.r.IntN(5)
++	if top {
++		n = 8 + g.r.IntN(8)
++	}
++	for i := 0; i < n && g.budget > 0; i++ {
++		g.budget--
++		g.stmt()
++	}
++	switch {
++	case len(g.pending[len(g.pending)-1]) > 0: // the labels come last
++	case g.chance(15):
++		var vals []string
++		for i := g.r.IntN(3); i > 0; i-- {
++			vals = append(vals, g.expr(1))
++		}
++		g.line("return %s", strings.Join(vals, ", "))
++	case g.loops > 0 && g.chance(15):
++		g.line("break")
++	case g.jit && g.chance(10):
++		g.gotoStmt()
++	}
++	for _, l := range g.pending[len(g.pending)-1] {
++		g.line("::%s::", l)
++	}
++	g.labels = g.labels[:len(g.labels)-1]
++	g.pending = g.pending[:len(g.pending)-1]
++	g.vars = g.vars[:nv]
++}
++
++func (g *gen) gotoStmt() {
++	var all []string
++	for _, ls := range g.labels {
++		all = append(all, ls...)
++	}
++	if len(all) > 0 && g.chance(70) {
++		g.line("goto %s", all[g.r.IntN(len(all))])
++		return
++	}
++	// a label at the end of this block, which the block adds
++	g.nlabel++
++	l := fmt.Sprintf("e%d", g.nlabel)
++	g.pending[len(g.pending)-1] = append(g.pending[len(g.pending)-1], l)
++	g.line("goto %s", l)
++}
++
++func (g *gen) nested(head string, body func()) {
++	g.line("%s", head)
++	g.indent++
++	body()
++	g.indent--
++}
++
++func (g *gen) stmt() {
++	if g.depth > 3 {
++		g.line("%s = %s", g.someVar(), g.atom())
++		return
++	}
++	switch g.r.IntN(22) {
++	case 0, 1, 2:
++		name := g.newVar()
++		switch g.r.IntN(4) {
++		case 0:
++			g.line("local %s", name)
++		case 1:
++			g.line("local %s = %s", name, g.expr(0))
++		case 2:
++			other := g.newVar()
++			g.line("local %s, %s = %s", name, other, g.expr(0))
++			g.vars = append(g.vars, other)
++		case 3:
++			g.line("local %s, %s = f()", name, name)
++		}
++		g.vars = append(g.vars, name)
++	case 3:
++		name := g.newVar()
++		g.vars = append(g.vars, name)
++		g.line("local %s", g.function(name, false))
++	case 4, 5, 6:
++		g.line("%s = %s", g.someVar(), g.expr(0))
++	case 7:
++		a, b := g.someVar(), g.someVar()
++		g.line("%s, %s = %s, %s", a, b, g.expr(1), g.expr(1))
++	case 8:
++		v := g.someVar()
++		switch g.r.IntN(3) {
++		case 0:
++			g.line("%s.k = %s.j", v, v)
++		case 1:
++			g.line("%s[%s] = %s", v, g.atom(), g.expr(1))
++		case 2:
++			g.line("%s.k = f(%s)", v, v)
++		}
++	case 9:
++		g.line("%s(%s)", []string{"print", g.someVar()}[g.r.IntN(2)], g.expr(1))
++	case 10, 11:
++		g.nested("if "+g.cond()+" then", func() { g.block(false) })
++		for g.chance(30) {
++			g.nested("elseif "+g.cond()+" then", func() { g.block(false) })
++		}
++		if g.chance(40) {
++			g.nested("else", func() { g.block(false) })
++		}
++		g.line("end")
++	case 12:
++		g.loops++
++		g.nested("while "+g.cond()+" do", func() { g.block(false) })
++		g.loops--
++		g.line("end")
++	case 13:
++		g.loops++
++		g.nested("repeat", func() { g.block(false) })
++		g.loops--
++		g.line("until %s", g.cond())
++	case 14:
++		v := g.newVar()
++		head := fmt.Sprintf("for %s = %s, %s do", v, g.atom(), g.atom())
++		g.loops++
++		g.line("%s", head)
++		g.indent++
++		g.vars = append(g.vars, v)
++		g.block(false)
++		g.vars = g.vars[:len(g.vars)-1]
++		g.indent--
++		g.loops--
++		g.line("end")
++	case 15:
++		k, v := g.newVar(), g.newVar()
++		g.loops++
++		g.line("for %s, %s in pairs(%s) do", k, v, g.someVar())
++		g.indent++
++		g.vars = append(g.vars, k, v)
++		g.block(false)
++		g.vars = g.vars[:len(g.vars)-2]
++		g.indent--
++		g.loops--
++		g.line("end")
++	case 16:
++		g.nested("do", func() { g.block(false) })
++		g.line("end")
++	case 17:
++		switch g.r.IntN(3) {
++		case 0:
++			g.line("%s", g.function(g.someVar(), false))
++		case 1:
++			g.line("%s", g.function(g.someVar()+".f", false))
++		case 2:
++			g.line("%s", g.function(g.someVar()+":m", true))
++		}
++	case 18:
++		g.line("f(%s)", g.function("", false))
++	case 19, 20:
++		if g.jit {
++			g.nlabel++
++			l := fmt.Sprintf("l%d", g.nlabel)
++			g.labels[len(g.labels)-1] = append(g.labels[len(g.labels)-1], l)
++			g.line("::%s::", l)
++			if g.chance(50) {
++				g.gotoStmt()
++			}
++			return
++		}
++		g.line("%s = %s", g.someVar(), g.expr(0))
++	case 21:
++		v := g.someVar()
++		g.line("%s = %s + 1", v, v)
++	}
++}
+--- a/flow/graph.go
++++ b/flow/graph.go
+@@ -0,0 +1,219 @@
++package flow
++
++import (
++	"fmt"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// NodeKind says what a node of a graph does.
++type NodeKind uint8
++
++const (
++	// Enter is the start of a function, the only node of its Entry block:
++	// the parameters (and the implicit self and arg) get their values.
++	Enter NodeKind = iota
++	// Statement is a statement: a simple one (an assignment, a local, a
++	// call, a function statement, return, break, goto, a label), or the
++	// start of a compound one (do, if, while, repeat, and a for, whose
++	// node evaluates the loop's expressions). An elseif has no Statement
++	// node, only its Condition.
++	Statement
++	// Condition is the evaluation of a condition: of an if or elseif (Stmt
++	// is that IfStmt), of a while, of a repeat's until. Its block ends with
++	// it, a True edge to where the condition holds and a False edge to
++	// where it does not.
++	Condition
++	// Iteration is the start of an iteration of a for loop: the test of
++	// the loop's end and the values of the loop's variables. Its block ends
++	// with it, a True edge into the body and a False edge out of the loop.
++	Iteration
++	// LoopEnd is the end of an iteration of the body of a while or a for
++	// loop, from which it goes back to the loop's Condition or Iteration.
++	// It is unreachable when no iteration ends: the body runs at most once.
++	LoopEnd
++)
++
++var nodeKindNames = [...]string{"enter", "statement", "condition", "iteration", "loop end"}
++
++func (k NodeKind) String() string {
++	if int(k) < len(nodeKindNames) {
++		return nodeKindNames[k]
++	}
++	return fmt.Sprintf("NodeKind(%d)", int(k))
++}
++
++// Node is a step of a function: a statement or a part of a compound one.
++// The nodes of a graph are in Graph.Nodes in source order.
++type Node struct {
++	Kind NodeKind
++	// Stmt is the statement: the statement of a Statement node, the IfStmt
++	// (of the if or the elseif), WhileStmt or RepeatStmt of a Condition,
++	// the loop of an Iteration or a LoopEnd; nil for Enter.
++	Stmt ast.Stmt
++	// Expr is the condition of a Condition node, nil for the others.
++	Expr ast.Expr
++	// Block is the block the node is in.
++	Block *Block
++	// Scope is the innermost scope the node is in (that of the loop's
++	// variables for an Iteration, the one around the loop for a LoopEnd),
++	// nil if the resolution didn't give it (a tree too deep).
++	Scope *scope.Scope
++	// Index is the index of the node in Graph.Nodes.
++	Index int
++	// NoReturn is set for a call statement that Options.NoReturn names:
++	// its block goes to the Exit, not on.
++	NoReturn bool
++
++	// Defs are the values the node assigns to variables, in the order of
++	// the names (see Def); Uses the occurrences of variables it reads or
++	// mutates, in source order. Those in the functions it creates are
++	// theirs, not the node's.
++	Defs []*Def
++	Uses []*Use
++	// Closures are the functions whose expressions the node evaluates, the
++	// FunctionExprs directly in its expressions, in source order.
++	Closures []*Graph
++
++	nd, nu   int32
++	circular *scope.Var // the variable of a circular assignment "t.k = e"
++}
++
++// Span returns the span of what the node is in the source: the statement,
++// the condition (with its parentheses), the zero Span for an Enter node or
++// a node of a tree without positions.
++func (n *Node) Span() ast.Span {
++	switch {
++	case n.Kind == Condition && n.Expr != nil:
++		return n.Expr.OuterSpan()
++	case n.Stmt != nil && n.Kind != Enter:
++		return n.Stmt.Span()
++	}
++	return ast.Span{}
++}
++
++func (n *Node) String() string {
++	return fmt.Sprintf("%s %T at %v", n.Kind, n.Stmt, n.Span())
++}
++
++// EdgeKind says when an edge is taken.
++type EdgeKind uint8
++
++const (
++	// Next is an unconditional edge: to the next statement, a jump (break,
++	// goto, return to the Exit), or back to a loop's head.
++	Next EdgeKind = iota
++	// True is taken when the last node's condition holds (a Condition), or
++	// to run the body of a for loop (an Iteration).
++	True
++	// False is taken when the condition does not hold, or to leave a for
++	// loop.
++	False
++)
++
++func (k EdgeKind) String() string {
++	switch k {
++	case Next:
++		return "next"
++	case True:
++		return "true"
++	case False:
++		return "false"
++	}
++	return fmt.Sprintf("EdgeKind(%d)", int(k))
++}
++
++// Edge is an edge of the graph.
++type Edge struct {
++	To   *Block
++	Kind EdgeKind
++}
++
++// Block is a basic block: nodes run in order, entered at the first and
++// left after the last.
++type Block struct {
++	// ID is the index of the block in Graph.Blocks.
++	ID int
++	// Nodes are the block's nodes, in order; none for the Exit, and maybe
++	// none for a block that only joins or passes on.
++	Nodes []*Node
++	// Succs are the edges out of the block: one Next edge, or the True and
++	// False edges of a block ending with a Condition or an Iteration (one
++	// of them for a condition that is a constant), or none (the Exit, a
++	// block ending with a goto without its label).
++	Succs []Edge
++	// Preds are the blocks with an edge to this one, one per edge.
++	Preds []*Block
++	// Reachable reports whether a path from the Entry leads to the block.
++	Reachable bool
++	// Graph is the graph of the block.
++	Graph *Graph
++
++	first int32 // the index of its first node, plus one; 0 for none
++	npred int32
++}
++
++// Graph is the control-flow graph of a function: the main chunk or a
++// FunctionExpr.
++type Graph struct {
++	// Func is the function's scope.
++	Func *scope.Scope
++	// Function is the function: nil for the main chunk.
++	Function *ast.FunctionExpr
++	// Parent is the graph of the function the function is in, nil for the
++	// main chunk; Creator the node of Parent that evaluates the
++	// FunctionExpr.
++	Parent  *Graph
++	Creator *Node
++	// Entry is the first block, with the Enter node and no predecessors;
++	// Exit the last one, which the returns and the end of the body go to.
++	Entry, Exit *Block
++	// Blocks are the blocks: Entry first, Exit second, then in the order
++	// they are made (a loop's head before its body, the block after an if
++	// before its branches' ends, a label's block when a goto first jumps
++	// to it). A block's nodes are consecutive in Nodes.
++	Blocks []*Block
++	// Nodes are the nodes in source order (Node.Index).
++	Nodes []*Node
++	// ID is the index of the graph in Program.Graphs.
++	ID int
++
++	fallOff *Block // the block that reaches the end of the body
++	alloc   *alloc
++	slot    int32 // the expression of Creator it is created in
++	slab    []Node
++}
++
++// alloc hands out the blocks and edges of a Program's graphs from slabs.
++type alloc struct {
++	blocks []Block
++	edges  []Edge
++	hint   int // the length of the source
++}
++
++func (g *Graph) newBlock() *Block {
++	a := g.alloc
++	if len(a.blocks) == cap(a.blocks) {
++		a.blocks = make([]Block, 0, slabSize(cap(a.blocks), a.hint/109+8, 512))
++	}
++	a.blocks = a.blocks[:len(a.blocks)+1]
++	b := &a.blocks[len(a.blocks)-1]
++	b.ID, b.Graph = len(g.Blocks), g
++	g.Blocks = append(g.Blocks, b)
++	return b
++}
++
++// link adds an edge; the predecessors are made when the graph is done. A
++// block has at most two successors.
++func link(from, to *Block, kind EdgeKind) {
++	if from.Succs == nil {
++		a := from.Graph.alloc
++		if cap(a.edges)-len(a.edges) < 2 {
++			a.edges = make([]Edge, 0, slabSize(cap(a.edges), a.hint/50+8, 1024))
++		}
++		from.Succs = a.edges[len(a.edges) : len(a.edges) : len(a.edges)+2]
++		a.edges = a.edges[:len(a.edges)+2]
++	}
++	from.Succs = append(from.Succs, Edge{To: to, Kind: kind})
++}
+--- a/flow/helpers_test.go
++++ b/flow/helpers_test.go
+@@ -0,0 +1,155 @@
++package flow_test
++
++import (
++	"archive/tar"
++	"compress/gzip"
++	"errors"
++	"io"
++	"os"
++	"path/filepath"
++	"sort"
++	"strings"
++	"testing"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/flow"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/parse"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++var dialects = []scope.Dialect{scope.Lua51, scope.LuaJIT}
++
++func parseDialect(d scope.Dialect) parse.Dialect {
++	if d == scope.LuaJIT {
++		return parse.LuaJIT
++	}
++	return parse.Lua51
++}
++
++// analyze parses, resolves and analyzes src.
++func analyze(tb testing.TB, src string, d scope.Dialect, opts *flow.Options) (*ast.Chunk, *scope.Info, *flow.Program) {
++	tb.Helper()
++	chunk, err := parse.ParseChunk([]byte(src), "test", parse.Options{Dialect: parseDialect(d)})
++	if err != nil {
++		tb.Fatalf("%v: parse %q: %v", d, src, err)
++	}
++	info, err := scope.Resolve(chunk, d)
++	if err != nil {
++		tb.Fatalf("%v: resolve %q: %v", d, src, err)
++	}
++	return chunk, info, flow.Analyze(info, opts)
++}
++
++// parseAny parses src as LuaJIT, else as Lua 5.1; ok is false if neither
++// parses it.
++func parseAny(src []byte, name string) (chunk *ast.Chunk, info *scope.Info, d scope.Dialect, ok bool) {
++	for _, d := range []scope.Dialect{scope.LuaJIT, scope.Lua51} {
++		c, err := parse.ParseChunk(src, name, parse.Options{Dialect: parseDialect(d)})
++		if err != nil {
++			continue
++		}
++		in, err := scope.Resolve(c, d)
++		if err != nil {
++			continue
++		}
++		return c, in, d, true
++	}
++	return nil, nil, 0, false
++}
++
++// luaFiles returns the Lua files under dir (and its subdirectories), by
++// path.
++func luaFiles(tb testing.TB, dir string) map[string][]byte {
++	tb.Helper()
++	files := map[string][]byte{}
++	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
++		if err != nil {
++			return err
++		}
++		if !d.IsDir() && strings.HasSuffix(path, ".lua") {
++			b, err := os.ReadFile(path)
++			if err != nil {
++				return err
++			}
++			files[path] = b
++		}
++		return nil
++	})
++	if err != nil {
++		tb.Fatal(err)
++	}
++	return files
++}
++
++// archivesDir holds go-moonscript's archives of Lua test suites and
++// projects (internal/luasuites).
++var archivesDir = filepath.Join("..", "..", "..", "internal", "luasuites", "testdata", "archives")
++
++// archiveFiles returns the Lua files of the luasuites archives.
++func archiveFiles(tb testing.TB) map[string][]byte {
++	tb.Helper()
++	paths, _ := filepath.Glob(filepath.Join(archivesDir, "*.tar.gz"))
++	if len(paths) == 0 {
++		tb.Skip("no archives in", archivesDir)
++	}
++	files := map[string][]byte{}
++	for _, p := range paths {
++		if err := readTarGz(p, files); err != nil {
++			tb.Fatal(err)
++		}
++	}
++	return files
++}
++
++func readTarGz(path string, files map[string][]byte) error {
++	f, err := os.Open(path)
++	if err != nil {
++		return err
++	}
++	defer func() { _ = f.Close() }()
++	zr, err := gzip.NewReader(f)
++	if err != nil {
++		return err
++	}
++	tr := tar.NewReader(zr)
++	for {
++		hdr, err := tr.Next()
++		if errors.Is(err, io.EOF) {
++			return nil
++		}
++		if err != nil {
++			return err
++		}
++		if hdr.Typeflag != tar.TypeReg || !strings.HasSuffix(hdr.Name, ".lua") && !strings.HasSuffix(hdr.Name, ".t") {
++			continue
++		}
++		b, err := io.ReadAll(tr)
++		if err != nil {
++			return err
++		}
++		files[filepath.Base(path)+"/"+hdr.Name] = b
++	}
++}
++
++// corpus returns the sources of the fork's testdata (the compatibility
++// scripts among them) and of the archives.
++func corpus(tb testing.TB) map[string][]byte {
++	tb.Helper()
++	files := map[string][]byte{}
++	for name, b := range luaFiles(tb, filepath.Join("..", "testdata")) {
++		files["testdata/"+strings.TrimPrefix(filepath.ToSlash(name), "../testdata/")] = b
++	}
++	for name, b := range archiveFiles(tb) {
++		files[name] = b
++	}
++	return files
++}
++
++func sortedKeys[V any](m map[string]V) []string {
++	keys := make([]string, 0, len(m))
++	for k := range m {
++		keys = append(keys, k)
++	}
++	sort.Strings(keys)
++	return keys
++}
+--- a/flow/invariants_test.go
++++ b/flow/invariants_test.go
+@@ -0,0 +1,340 @@
++package flow_test
++
++import (
++	"fmt"
++	"slices"
++	"strings"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/flow"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// checkProgram checks the invariants of a Program of a parsed tree and
++// returns what is wrong:
++//
++//   - the graphs: one per function, Entry and Exit, the blocks' nodes
++//     consecutive and in one block each, the edges and their predecessors,
++//     the reachable blocks those that a walk from the Entry finds;
++//   - every statement in one node (an elseif in its Condition);
++//   - the unreachable nodes in unreachable blocks;
++//   - a use for every read of a local, a def for every write and
++//     declaration, in their nodes;
++//   - the values each use sees: of its variable, in order, once; a used or
++//     mutated value seen by a read or a mutation; and for the uses in the
++//     variable's own function, the values of that function that reach
++//     them, as a walk of the nodes finds them (the reaching definitions,
++//     brute force), up to maxPairs pairs.
++func checkProgram(chunk *ast.Chunk, info *scope.Info, p *flow.Program, maxPairs int) []string {
++	var errs []string
++	fail := func(format string, args ...any) {
++		if len(errs) < 20 {
++			errs = append(errs, fmt.Sprintf(format, args...))
++		}
++	}
++	if p.Misses() != 0 {
++		fail("%d lookups out of the resolution's order", p.Misses())
++	}
++	// functions
++	funcs := map[*ast.FunctionExpr]int{}
++	ast.Inspect(chunk, func(n ast.Element) bool {
++		if fe, ok := n.(*ast.FunctionExpr); ok {
++			funcs[fe]++
++		}
++		return true
++	})
++	if len(p.Graphs) != len(funcs)+1 {
++		fail("%d graphs for %d functions", len(p.Graphs), len(funcs))
++	}
++	stmtNodes := map[ast.Stmt][]*flow.Node{}
++	for i, g := range p.Graphs {
++		checkGraph(g, i, fail)
++		if i > 0 && funcs[g.Function] != 1 {
++			fail("graph %d: function not in the tree", i)
++		}
++		for _, n := range g.Nodes {
++			if n.Stmt != nil {
++				stmtNodes[n.Stmt] = append(stmtNodes[n.Stmt], n)
++			}
++		}
++		for _, n := range g.Unreachable() {
++			if n.Block.Reachable {
++				fail("graph %d: unreachable %v in a reachable block", i, n)
++			}
++		}
++	}
++	// statements
++	src := chunk.Lines.Source()
++	elseifs := map[*ast.IfStmt]bool{}
++	ast.Inspect(chunk, func(n ast.Element) bool {
++		if st, ok := n.(*ast.IfStmt); ok && len(st.Else) == 1 {
++			if ei, ok := st.Else[0].(*ast.IfStmt); ok && strings.HasPrefix(string(src[ei.Span().Start:]), "elseif") {
++				elseifs[ei] = true
++			}
++		}
++		return true
++	})
++	ast.Inspect(chunk, func(n ast.Element) bool {
++		st, ok := n.(ast.Stmt)
++		if !ok {
++			return true
++		}
++		var heads, conds int
++		for _, nd := range stmtNodes[st] {
++			switch nd.Kind {
++			case flow.Statement:
++				heads++
++			case flow.Condition:
++				conds++
++			}
++		}
++		ei, _ := st.(*ast.IfStmt)
++		switch {
++		case elseifs[ei]:
++			if heads != 0 || conds != 1 {
++				fail("elseif at %v: %d statement nodes, %d conditions", st.Span(), heads, conds)
++			}
++		case heads != 1:
++			fail("%T at %v: %d statement nodes", st, st.Span(), heads)
++		}
++		return true
++	})
++	checkData(info, p, maxPairs, fail)
++	return errs
++}
++
++func checkGraph(g *flow.Graph, id int, fail func(string, ...any)) {
++	if g.ID != id || (id == 0) != (g.Function == nil) || (id == 0) != (g.Parent == nil) {
++		fail("graph %d: id %d, function %v, parent %v", id, g.ID, g.Function != nil, g.Parent != nil)
++	}
++	if g.Parent != nil && (g.Creator == nil || g.Creator.Block.Graph != g.Parent || !slices.Contains(g.Creator.Closures, g)) {
++		fail("graph %d: creator", id)
++	}
++	if g.Blocks[0] != g.Entry || g.Blocks[1] != g.Exit || len(g.Entry.Preds) != 0 || len(g.Exit.Succs) != 0 || len(g.Exit.Nodes) != 0 {
++		fail("graph %d: entry or exit", id)
++	}
++	if len(g.Entry.Nodes) != 1 || g.Entry.Nodes[0].Kind != flow.Enter {
++		fail("graph %d: entry nodes", id)
++	}
++	total := 0
++	preds := map[[2]*flow.Block]int{}
++	for i, b := range g.Blocks {
++		if b.ID != i || b.Graph != g {
++			fail("graph %d: block %d id %d", id, i, b.ID)
++		}
++		total += len(b.Nodes)
++		for j, n := range b.Nodes {
++			if n.Block != b || j > 0 && n.Index != b.Nodes[j-1].Index+1 {
++				fail("graph %d: block %d nodes", id, i)
++			}
++			last := j == len(b.Nodes)-1
++			if (n.Kind == flow.Condition || n.Kind == flow.Iteration) && !last {
++				fail("graph %d: %v not last in its block", id, n)
++			}
++		}
++		for _, e := range b.Succs {
++			preds[[2]*flow.Block{b, e.To}]++
++			if e.Kind != flow.Next {
++				if len(b.Nodes) == 0 || k(b) != flow.Condition && k(b) != flow.Iteration {
++					fail("graph %d: block %d: %s edge without a condition", id, i, e.Kind)
++				}
++			}
++		}
++		for _, p := range b.Preds {
++			preds[[2]*flow.Block{p, b}]--
++		}
++	}
++	for e, n := range preds {
++		if n != 0 {
++			fail("graph %d: edge %d->%d and its preds differ by %d", id, e[0].ID, e[1].ID, n)
++		}
++	}
++	if total != len(g.Nodes) {
++		fail("graph %d: %d nodes in blocks, %d in the graph", id, total, len(g.Nodes))
++	}
++	for i, n := range g.Nodes {
++		if n.Index != i {
++			fail("graph %d: node %d has index %d", id, i, n.Index)
++		}
++	}
++	seen := map[*flow.Block]bool{g.Entry: true}
++	stack := []*flow.Block{g.Entry}
++	for len(stack) > 0 {
++		b := stack[len(stack)-1]
++		stack = stack[:len(stack)-1]
++		for _, e := range b.Succs {
++			if !seen[e.To] {
++				seen[e.To] = true
++				stack = append(stack, e.To)
++			}
++		}
++	}
++	for _, b := range g.Blocks {
++		if b.Reachable != seen[b] {
++			fail("graph %d: block %d reachable %v", id, b.ID, b.Reachable)
++		}
++	}
++}
++
++func k(b *flow.Block) flow.NodeKind { return b.Nodes[len(b.Nodes)-1].Kind }
++
++func checkData(info *scope.Info, p *flow.Program, maxPairs int, fail func(string, ...any)) {
++	uses := map[*ast.IdentExpr]*flow.Use{}
++	for _, u := range p.Uses {
++		if uses[u.Ident] != nil {
++			fail("two uses of %s at %v", u.Var.Name, u.Ident.Span())
++		}
++		uses[u.Ident] = u
++		if !slices.Contains(u.Node.Uses, u) {
++			fail("use of %s at %v not in its node", u.Var.Name, u.Ident.Span())
++		}
++		for i, d := range u.Defs {
++			if d.Var != u.Var || i > 0 && u.Defs[i-1].ID >= d.ID {
++				fail("use of %s at %v: values %v", u.Var.Name, u.Ident.Span(), u.Defs)
++			}
++		}
++	}
++	names := map[*ast.IdentExpr]*flow.Def{}
++	inits := map[*scope.Var]int{}
++	for _, d := range p.Defs {
++		if !slices.Contains(d.Node.Defs, d) {
++			fail("%v not in its node", d)
++		}
++		if d.Name != nil {
++			names[d.Name] = d
++		}
++		if d.Init {
++			inits[d.Var]++
++		}
++		if d.Overwritten != nil && (d.Used || d.Mutated || d.Overwritten.Var != d.Var || d.Overwritten == d) {
++			fail("%v overwritten by %v", d, d.Overwritten)
++		}
++	}
++	for i := range info.Refs {
++		r := &info.Refs[i]
++		if r.Var == nil || r.Kind == scope.Jump {
++			continue
++		}
++		switch r.Kind {
++		case scope.Read:
++			if u := uses[r.Ident]; u == nil || u.Var != r.Var {
++				fail("read of %s at %v: no use", r.Name(), r.Span())
++			}
++		case scope.Write:
++			if d := names[r.Ident]; d == nil || d.Var != r.Var {
++				fail("write of %s at %v: no def", r.Name(), r.Span())
++			}
++		}
++	}
++	for _, v := range info.Vars {
++		if v.Kind != scope.KindLabel && inits[v] != 1 {
++			fail("%s at %v: %d declarations' values", v.Name, v.NameSpan, inits[v])
++		}
++	}
++	// a used or mutated value is seen by a read or a mutation
++	seenBy := map[*flow.Def][2]bool{}
++	for _, u := range p.Uses {
++		for _, d := range u.Defs {
++			s := seenBy[d]
++			s[u.Kind] = true
++			seenBy[d] = s
++		}
++	}
++	for _, d := range p.Defs {
++		if s := seenBy[d]; d.Used && !s[flow.Read] || d.Mutated && !s[flow.Mutate] {
++			fail("%v used %v mutated %v, seen by %v", d, d.Used, d.Mutated, s)
++		}
++	}
++	// the reaching definitions of the main uses, brute force
++	pairs := 0
++	for _, u := range p.Uses {
++		g := p.Graph(u.Var.Scope)
++		if u.Node.Block.Graph != g {
++			continue
++		}
++		var want []*flow.Def
++		for _, d := range p.VarDefs(u.Var) {
++			if d.Node.Block.Graph != g || !lastOfNode(d) {
++				continue
++			}
++			if pairs++; pairs > maxPairs {
++				return
++			}
++			if reachesWithout(d, u.Node) {
++				want = append(want, d)
++			}
++		}
++		var got []*flow.Def
++		for _, d := range u.Defs {
++			if d.Node.Block.Graph == g {
++				got = append(got, d)
++			}
++		}
++		if !slices.Equal(got, want) {
++			fail("use of %s at %v: main values %v, a walk finds %v", u.Var.Name, u.Ident.Span(), got, want)
++		}
++	}
++}
++
++func lastOfNode(d *flow.Def) bool {
++	for i := len(d.Node.Defs) - 1; i >= 0; i-- {
++		if e := d.Node.Defs[i]; e.Var == d.Var {
++			return e == d
++		}
++	}
++	return false
++}
++
++// successors returns the nodes that may run right after a node.
++func successors(n *flow.Node) []*flow.Node {
++	b := n.Block
++	if i := n.Index - b.Nodes[0].Index; i+1 < len(b.Nodes) {
++		return []*flow.Node{b.Nodes[i+1]}
++	}
++	var out []*flow.Node
++	seen := map[*flow.Block]bool{}
++	var walk func(b *flow.Block)
++	walk = func(b *flow.Block) {
++		for _, e := range b.Succs {
++			if seen[e.To] {
++				continue
++			}
++			seen[e.To] = true
++			if len(e.To.Nodes) > 0 {
++				out = append(out, e.To.Nodes[0])
++			} else {
++				walk(e.To)
++			}
++		}
++	}
++	walk(b)
++	return out
++}
++
++// reachesWithout reports whether a path leads from the node of a def to a
++// node without passing another node that assigns the def's variable.
++func reachesWithout(d *flow.Def, to *flow.Node) bool {
++	seen := map[*flow.Node]bool{}
++	stack := successors(d.Node)
++	for len(stack) > 0 {
++		n := stack[len(stack)-1]
++		stack = stack[:len(stack)-1]
++		if seen[n] {
++			continue
++		}
++		seen[n] = true
++		if n == to {
++			return true
++		}
++		assigns := false
++		for _, e := range n.Defs {
++			if e.Var == d.Var {
++				assigns = true
++			}
++		}
++		if !assigns {
++			stack = append(stack, successors(n)...)
++		}
++	}
++	return false
++}
+--- a/flow/lint_test.go
++++ b/flow/lint_test.go
+@@ -0,0 +1,218 @@
++package flow_test
++
++import (
++	"fmt"
++	"sort"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/flow"
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/scope"
++)
++
++// warning is a finding of a lint pass, with luacheck's code.
++type warning struct {
++	pos  ast.Pos
++	code string
++	msg  string
++}
++
++func (w warning) String() string { return fmt.Sprintf("%s: W%s %s", w.pos, w.code, w.msg) }
++
++// luacheckLint is a lint pass over a Program with luacheck's rules for the
++// codes the package has queries for: unreachable code (511), loops
++// executed at most once (512), empty blocks (541, 542), unused values (311,
++// 312, 313), uninitialized variables (321, 341), at luacheck's positions.
++// With parens, a parenthesized function at the end of an assignment's
++// values is no function, as for luacheck (flow.LuacheckOptions).
++func luacheckLint(chunk *ast.Chunk, info *scope.Info, p *flow.Program, parens bool) []warning {
++	src := chunk.Lines.Source()
++	var out []warning
++	add := func(offset int, code, format string, args ...any) {
++		out = append(out, warning{chunk.Pos(offset), code, fmt.Sprintf(format, args...)})
++	}
++	for _, g := range p.Graphs {
++		for _, n := range g.Unreachable() {
++			if n.Kind == flow.LoopEnd {
++				add(n.Stmt.Span().Start, "512", "loop is executed at most once")
++			} else {
++				add(nodeStart(n), "511", "unreachable code")
++			}
++		}
++	}
++	for _, e := range p.Empty {
++		switch e.Kind {
++		case flow.EmptyDo:
++			add(e.Stmt.Span().Start, "541", "empty do..end block")
++		case flow.EmptyThen: // at the "then"
++			add(nextToken(src, e.Stmt.(*ast.IfStmt).Condition.OuterSpan().End), "542", "empty if branch")
++		case flow.EmptyElse: // at the "else"
++			add(nextToken(src, e.Stmt.(*ast.IfStmt).ThenSpan.End), "542", "empty if branch")
++		}
++	}
++	for _, v := range info.Vars {
++		// luacheck knows no implicit arg: it is a global; "_" is a
++		// placeholder, whose values don't matter
++		if v.Kind == scope.KindLabel || v.Kind == scope.KindArg || v.Name == "_" {
++			continue
++		}
++		defs := p.VarDefs(v)
++		accessed, mutated := false, false
++		for _, u := range p.VarUses(v) {
++			if u.Kind == flow.Read {
++				accessed = true
++			} else {
++				mutated = true
++			}
++		}
++		onlyEmpty := len(defs) == 1 && defs[0].Empty // "never set" (221), not 321
++		for _, u := range p.VarUses(v) {
++			if !onlyEmpty && u.Uninitialized() {
++				if u.Kind == flow.Read {
++					add(u.Ident.Span().Start, "321", "accessing uninitialized variable %s", v.Name)
++				} else {
++					add(u.Ident.Span().Start, "341", "mutating uninitialized variable %s", v.Name)
++				}
++			}
++		}
++		// luacheck reports a variable with one value, or only set, or a
++		// function, as an unused variable (21x, 23x), not its values
++		if len(defs) < 2 || !accessed && !mutated || isFunctionVar(defs, parens) {
++			continue
++		}
++		for _, d := range defs {
++			if d.Empty || d.Used || d.Mutated {
++				continue
++			}
++			code, what := "311", "value assigned to variable"
++			if d.Init && (v.Kind == scope.KindParam || v.Kind == scope.KindSelf) {
++				code, what = "312", "value of argument"
++			} else if d.Init && (v.Kind == scope.KindForNum || v.Kind == scope.KindForIn) {
++				code, what = "313", "value of loop variable"
++			}
++			how := "is unused"
++			if o := d.Overwritten; o != nil {
++				how = fmt.Sprintf("is overwritten on line %d before use", chunk.Pos(o.Span().Start).Line)
++			}
++			add(defStart(src, d), code, "%s %s %s", what, v.Name, how)
++		}
++	}
++	// functions only used by themselves: an unused function (211) for a
++	// function variable, else an unused value
++	for _, d := range p.UnusedRecursive() {
++		if d.Var.Name != "_" && !isFunctionVar(p.VarDefs(d.Var), parens) {
++			add(defStart(src, d), "311", "value assigned to variable %s is unused", d.Var.Name)
++		}
++	}
++	sort.SliceStable(out, func(i, j int) bool { return out[i].pos.Offset < out[j].pos.Offset })
++	return out
++}
++
++// isFunctionVar is luacheck's "function variable": one value that is a
++// function, or a declaration without a value and then a function.
++func isFunctionVar(defs []*flow.Def, parens bool) bool {
++	isFunc := func(d *flow.Def) bool {
++		fe, ok := d.Value.(*ast.FunctionExpr)
++		return ok && !(parens && flow.ParenFunction(d, fe))
++	}
++	switch len(defs) {
++	case 1:
++		return isFunc(defs[0])
++	case 2:
++		same := defs[0].Node.Block.Graph == defs[1].Node.Block.Graph
++		return same && defs[0].Empty && isFunc(defs[1])
++	}
++	return false
++}
++
++// nodeStart is where luacheck puts a node: a condition without its
++// parentheses, unless it is a call or "...".
++func nodeStart(n *flow.Node) int {
++	if n.Kind != flow.Condition {
++		return n.Stmt.Span().Start
++	}
++	switch n.Expr.(type) {
++	case *ast.FuncCallExpr, *ast.Comma3Expr:
++		return n.Expr.OuterSpan().Start
++	}
++	return n.Expr.Span().Start
++}
++
++// defStart is where luacheck puts a value: at its name; for the implicit
++// self of a method, at the ":" before the method's name.
++func defStart(src []byte, d *flow.Def) int {
++	if d.Var.Kind != scope.KindSelf || d.Name != nil {
++		return d.Span().Start
++	}
++	fe := d.Var.Decl.(*ast.FunctionExpr)
++	i := fe.Span().Start - 1 // before the "(": the name, then the ":"
++	for i >= 0 && isSpace(src[i]) {
++		i--
++	}
++	for i >= 0 && (src[i] == '_' || src[i] >= 'a' && src[i] <= 'z' || src[i] >= 'A' && src[i] <= 'Z' || src[i] >= '0' && src[i] <= '9') {
++		i--
++	}
++	for i >= 0 && isSpace(src[i]) {
++		i--
++	}
++	return max(i, 0)
++}
++
++func isSpace(c byte) bool {
++	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'
++}
++
++// nextToken returns the offset of the first token at or after off,
++// skipping spaces and comments.
++func nextToken(src []byte, off int) int {
++	for off < len(src) {
++		switch {
++		case isSpace(src[off]):
++			off++
++		case off+1 < len(src) && src[off] == '-' && src[off+1] == '-':
++			off += 2
++			if lvl, ok := longBracket(src, off); ok {
++				off = skipLong(src, off, lvl)
++				continue
++			}
++			for off < len(src) && src[off] != '\n' && src[off] != '\r' {
++				off++
++			}
++		default:
++			return off
++		}
++	}
++	return off
++}
++
++// longBracket reports whether src[off:] opens a long bracket, and its level.
++func longBracket(src []byte, off int) (int, bool) {
++	if off >= len(src) || src[off] != '[' {
++		return 0, false
++	}
++	i := off + 1
++	for i < len(src) && src[i] == '=' {
++		i++
++	}
++	if i < len(src) && src[i] == '[' {
++		return i - off - 1, true
++	}
++	return 0, false
++}
++
++// skipLong returns the offset after the long bracket of the level opened at
++// off.
++func skipLong(src []byte, off, lvl int) int {
++	for i := off + lvl + 2; i < len(src); i++ {
++		if src[i] != ']' {
++			continue
++		}
++		j := i + 1
++		for j < len(src) && src[j] == '=' {
++			j++
++		}
++		if j < len(src) && src[j] == ']' && j-i-1 == lvl {
++			return j + 1
++		}
++	}
++	return len(src)
++}
+--- a/flow/luacheck_test.go
++++ b/flow/luacheck_test.go
+@@ -0,0 +1,265 @@
++package flow_test
++
++// luacheck is the oracle of the lint rules that it has: TestLuacheck runs
++// it over the fork's testdata (the compatibility scripts among them), the
++// luasuites archives and random programs (genProgram), and compares its
++// warnings with those of luacheckLint over the Programs, per file, line,
++// column and code. It needs docker and an image whose entry point is
++// luacheck; dir is where the sources are written for it:
++//
++//	FLOW_LUACHECK_IMAGE=image FLOW_LUACHECK_DIR=dir go test -run TestLuacheck ./third_party/gopher-lua/flow
++//
++// A Debian image with lua-check will do:
++//
++//	FROM debian:stable-slim
++//	RUN apt-get update && apt-get install -y --no-install-recommends lua-check
++//	ENTRYPOINT ["luacheck"]
++//
++// A difference must be one of luacheck's approximations that quirks
++// reproduces (knownDifference); any other fails the test.
++
++import (
++	"bufio"
++	"bytes"
++	"context"
++	"fmt"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"regexp"
++	"sort"
++	"strconv"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/flow"
++)
++
++// genCount is the number of random programs (genProgram) compared, unless
++// FLOW_LUACHECK_GEN gives another.
++const genCount = 4000
++
++var luacheckCodes = []string{"511", "512", "541", "542", "311", "312", "313", "321", "341"}
++
++type finding struct {
++	file      string
++	line, col int
++	code      string
++}
++
++func (f finding) String() string { return fmt.Sprintf("%s:%d:%d: W%s", f.file, f.line, f.col, f.code) }
++
++var luacheckLine = regexp.MustCompile(`^(.*):(\d+):(\d+)-(\d+): \(([EW])(\d+)\) (.*)$`)
++
++func TestLuacheck(t *testing.T) {
++	image, dir := os.Getenv("FLOW_LUACHECK_IMAGE"), os.Getenv("FLOW_LUACHECK_DIR")
++	if image == "" || dir == "" {
++		t.Skip("FLOW_LUACHECK_IMAGE and FLOW_LUACHECK_DIR are not set")
++	}
++	files := corpus(t)
++	n := genCount
++	if s := os.Getenv("FLOW_LUACHECK_GEN"); s != "" {
++		var err error
++		if n, err = strconv.Atoi(s); err != nil {
++			t.Fatal("FLOW_LUACHECK_GEN:", err)
++		}
++	}
++	for i := range n {
++		files[fmt.Sprintf("gen/%05d.lua", i)] = []byte(genProgram(uint64(i), i%2 == 0))
++	}
++	// luacheck has no option to ignore the sources' inline options ("--
++	// luacheck: ignore"): they are disabled in the copies, keeping the
++	// offsets
++	for name, b := range files {
++		files[name] = bytes.ReplaceAll(b, []byte("luacheck:"), []byte("luacheck_"))
++	}
++	srcDir := filepath.Join(dir, "src")
++	if err := os.RemoveAll(srcDir); err != nil {
++		t.Fatal(err)
++	}
++	// the path of each source under srcDir: luacheck takes the .lua files
++	paths := map[string]string{}
++	for name, b := range files {
++		p := name
++		if !strings.HasSuffix(p, ".lua") {
++			p += ".lua"
++		}
++		paths[p] = name
++		full := filepath.Join(srcDir, filepath.FromSlash(p))
++		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
++			t.Fatal(err)
++		}
++		if err := os.WriteFile(full, b, 0o644); err != nil {
++			t.Fatal(err)
++		}
++	}
++	abs, err := filepath.Abs(srcDir)
++	if err != nil {
++		t.Fatal(err)
++	}
++	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
++	defer cancel()
++	args := []string{"run", "--rm", "-v", abs + ":/src:ro", "-w", "/src", image,
++		"--codes", "--ranges", "--formatter", "plain", "--no-config", "--std", "max", "--only"}
++	args = append(args, luacheckCodes...)
++	args = append(args, "--", ".")
++	cmd := exec.CommandContext(ctx, "docker", args...)
++	var stderr bytes.Buffer
++	cmd.Stderr = &stderr
++	out, err := cmd.Output()
++	if err != nil && len(out) == 0 {
++		t.Fatalf("luacheck: %v: %s", err, stderr.String())
++	}
++	theirs := map[finding]bool{}
++	bad := map[string]bool{} // files luacheck can't parse
++	sc := bufio.NewScanner(bytes.NewReader(out))
++	sc.Buffer(nil, 1<<20)
++	for sc.Scan() {
++		m := luacheckLine.FindStringSubmatch(sc.Text())
++		if m == nil {
++			continue
++		}
++		file := paths[strings.TrimPrefix(m[1], "./")]
++		if m[5] == "E" {
++			bad[file] = true
++			continue
++		}
++		line, _ := strconv.Atoi(m[2])
++		col, _ := strconv.Atoi(m[3])
++		theirs[finding{file, line, col, m[6]}] = true
++	}
++	ours := map[finding]bool{}
++	// the findings with luacheck's quirks
++	compat := make([]map[finding]bool, len(quirks))
++	for i := range compat {
++		compat[i] = map[finding]bool{}
++	}
++	skipped := 0
++	for _, name := range sortedKeys(files) {
++		if bad[name] {
++			skipped++
++			continue
++		}
++		chunk, info, _, ok := parseAny(files[name], name)
++		if !ok {
++			skipped++
++			for f := range theirs {
++				if f.file == name {
++					delete(theirs, f)
++				}
++			}
++			continue
++		}
++		for _, w := range luacheckLint(chunk, info, flow.Analyze(info, nil), false) {
++			ours[finding{name, w.pos.Line, w.pos.Column, w.code}] = true
++		}
++		for i, q := range quirks {
++			opts := flow.LuacheckOptions(q.closures, q.parens, q.scopes, q.circular)
++			for _, w := range luacheckLint(chunk, info, flow.Analyze(info, opts), q.parens) {
++				compat[i][finding{name, w.pos.Line, w.pos.Column, w.code}] = true
++			}
++		}
++	}
++	for f := range theirs {
++		if bad[f.file] {
++			delete(theirs, f)
++		}
++	}
++	// the counts per part of the corpus and code
++	type count struct{ both, onlyTheirs, onlyOurs, explained int }
++	parts := []string{"testdata and archives", "random programs"}
++	part := func(f finding) int {
++		if strings.HasPrefix(f.file, "gen/") {
++			return 1
++		}
++		return 0
++	}
++	counts := map[[2]string]*count{}
++	for _, p := range parts {
++		for _, c := range luacheckCodes {
++			counts[[2]string{p, c}] = &count{}
++		}
++	}
++	at := func(f finding) *count { return counts[[2]string{parts[part(f)], f.code}] }
++	var unexplained []string
++	check := func(f finding, side string) {
++		c := at(f)
++		if why := knownDifference(f, side, compat); why != "" {
++			c.explained++
++			t.Logf("explained: %s only in %s: %s", f, side, why)
++			return
++		}
++		unexplained = append(unexplained, fmt.Sprintf("%s only in %s", f, side))
++	}
++	for f := range theirs {
++		if ours[f] {
++			at(f).both++
++		} else {
++			at(f).onlyTheirs++
++			check(f, "luacheck")
++		}
++	}
++	for f := range ours {
++		if !theirs[f] {
++			at(f).onlyOurs++
++			check(f, "flow")
++		}
++	}
++	t.Logf("%d files, %d skipped (no parse)", len(files), skipped)
++	for _, p := range parts {
++		for _, c := range luacheckCodes {
++			n := counts[[2]string{p, c}]
++			t.Logf("%s: W%s: %d agree, %d only luacheck, %d only flow, %d of them explained", p, c, n.both, n.onlyTheirs, n.onlyOurs, n.explained)
++		}
++	}
++	sort.Strings(unexplained)
++	for i, u := range unexplained {
++		if i == 200 {
++			t.Errorf("... and %d more", len(unexplained)-i)
++			break
++		}
++		t.Error(u)
++	}
++}
++
++// quirks are the approximations of luacheck that the package can reproduce
++// (flow.LuacheckOptions), to explain the differences with it.
++var quirks = []struct {
++	closures, parens, scopes, circular bool
++	why                                string
++}{
++	// luacheck cross-resolves the closures inside a closure at each level
++	// above it: for a local of a function other than the main chunk, every
++	// value a closure assigns is seen by every closure, also by those that
++	// never share an instance of the variable (in branches that exclude
++	// each other, or created after the function returned)
++	{true, false, false, false, "luacheck connects all the closures of a local"},
++	// luacheck keeps the parentheses of the last value of an assignment
++	// ("x = (function() end)"): to it the value is no function, so the
++	// function counts as used by the function it is in (W311 of unused
++	// recursive functions)
++	{false, true, false, false, "luacheck takes a parenthesized function value as no function"},
++	// luacheck ends the scope of a variable at a declaration of the same
++	// name in the same scope ("local x = 1 ... local x"): a goto back to
++	// before the declaration doesn't take the values back to the uses
++	// there
++	{false, false, true, false, "luacheck ends a scope at a redeclaration"},
++	// luacheck doesn't connect the reads of t in the functions that a
++	// circular assignment of t creates ("t.f = function() return t end",
++	// "function t:m()") with the values reaching the assignment: it sees
++	// no uninitialized read there, or only the values of other closures
++	{false, false, false, true, "luacheck ignores the values reaching a circular assignment's closures"},
++	{true, true, true, true, "luacheck's four quirks"},
++}
++
++// knownDifference explains a difference with luacheck, or returns "": a
++// difference that one of luacheck's quirks, reproduced, makes go away.
++func knownDifference(f finding, side string, compat []map[finding]bool) string {
++	for i, q := range quirks {
++		if compat[i][f] == (side == "luacheck") {
++			return q.why
++		}
++	}
++	return ""
++}
+--- a/flow/query.go
++++ b/flow/query.go
+@@ -0,0 +1,286 @@
++package flow
++
++import (
++	"fmt"
++	"slices"
++
++	"github.com/tarantool-contrib/go-moonscript/third_party/gopher-lua/ast"
++)
++
++// Unreachable returns the unreachable code of the function, as luacheck
++// reports it (W511, W512): the first node of each unreachable stretch,
++// in source order. Going through the nodes in order, a node that no path
++// from the Entry reaches is reported, unless a node reported before
++// reaches it; only Statement, Condition and LoopEnd nodes are reported
++// (not a break nor a label, which do nothing by themselves, nor an
++// Iteration, which its for's Statement node comes before).
++//
++// A LoopEnd in the result is a loop whose body runs at most once: no
++// iteration gets to the end of the body (W512). Any other node is
++// unreachable code (W511): after a return, a break, a goto, a loop that
++// doesn't end ("while true do" without a break), or in the branch of a
++// constant condition that is never taken.
++func (g *Graph) Unreachable() []*Node {
++	var out []*Node
++	var covered []bool // by node index, for the nodes of unreachable blocks
++	for _, n := range g.Nodes {
++		if n.Block.Reachable || covered != nil && covered[n.Index] {
++			continue
++		}
++		if !reportable(n) {
++			continue
++		}
++		out = append(out, n)
++		if covered == nil {
++			covered = make([]bool, len(g.Nodes))
++		}
++		g.cover(covered, n)
++	}
++	return out
++}
++
++func reportable(n *Node) bool {
++	switch n.Kind {
++	case Condition, LoopEnd:
++		return true
++	case Statement:
++		switch n.Stmt.(type) {
++		case *ast.BreakStmt, *ast.LabelStmt:
++			return false
++		}
++		return true
++	}
++	return false
++}
++
++// cover marks the nodes reachable from n, n included.
++func (g *Graph) cover(covered []bool, n *Node) {
++	seen := map[*Block]bool{}
++	var stack []*Block
++	for _, m := range n.Block.Nodes[n.Index-n.Block.Nodes[0].Index:] {
++		covered[m.Index] = true
++	}
++	for _, e := range n.Block.Succs {
++		if !seen[e.To] {
++			seen[e.To] = true
++			stack = append(stack, e.To)
++		}
++	}
++	for len(stack) > 0 {
++		b := stack[len(stack)-1]
++		stack = stack[:len(stack)-1]
++		if b.Reachable {
++			continue
++		}
++		for _, m := range b.Nodes {
++			covered[m.Index] = true
++		}
++		for _, e := range b.Succs {
++			if !seen[e.To] {
++				seen[e.To] = true
++				stack = append(stack, e.To)
++			}
++		}
++	}
++}
++
++// AtMostOnce returns the loops (while, numeric and generic for) of the
++// function whose body runs at most once, as luacheck reports them (W512):
++// the LoopEnd nodes of Unreachable.
++func (g *Graph) AtMostOnce() []*Node {
++	var out []*Node
++	for _, n := range g.Unreachable() {
++		if n.Kind == LoopEnd {
++			out = append(out, n)
++		}
++	}
++	return out
++}
++
++// Returns is how a function ends: the reachable return statements and
++// whether its end is reachable.
++type Returns struct {
++	// Values are the reachable returns with values, Bare those without,
++	// in source order.
++	Values, Bare []*ast.ReturnStmt
++	// NoReturn are the reachable calls of Options.NoReturn.
++	NoReturn []*ast.FuncCallStmt
++	// FallsOff is set if the end of the body is reachable: the function
++	// may return no value without a return statement.
++	FallsOff bool
++}
++
++// Inconsistent reports whether the function returns values on a path and
++// none on another (a bare return or the end of the body).
++func (r Returns) Inconsistent() bool {
++	return len(r.Values) > 0 && (len(r.Bare) > 0 || r.FallsOff)
++}
++
++// Returns returns how the function ends.
++func (g *Graph) Returns() Returns {
++	var r Returns
++	for _, b := range g.Exit.Preds {
++		if !b.Reachable {
++			continue
++		}
++		if len(b.Nodes) == 0 {
++			r.FallsOff = true
++			continue
++		}
++		last := b.Nodes[len(b.Nodes)-1]
++		switch st := last.Stmt.(type) {
++		case *ast.ReturnStmt:
++			if last.Kind == Statement {
++				if len(st.Exprs) > 0 {
++					r.Values = append(r.Values, st)
++				} else {
++					r.Bare = append(r.Bare, st)
++				}
++				continue
++			}
++		case *ast.FuncCallStmt:
++			if last.NoReturn {
++				r.NoReturn = append(r.NoReturn, st)
++				continue
++			}
++		}
++		r.FallsOff = true
++	}
++	return r
++}
++
++// EmptyKind says what an empty block is.
++type EmptyKind uint8
++
++const (
++	// EmptyDo is the body of "do end" (W541).
++	EmptyDo EmptyKind = iota
++	// EmptyThen is the block of an if or elseif (W542).
++	EmptyThen
++	// EmptyElse is the block of an else (W542).
++	EmptyElse
++	// EmptyLoop is the body of a while, repeat or for loop.
++	EmptyLoop
++	// EmptyFunction is the body of a function.
++	EmptyFunction
++)
++
++var emptyKindNames = [...]string{"do", "then", "else", "loop", "function"}
++
++func (k EmptyKind) String() string {
++	if int(k) < len(emptyKindNames) {
++		return emptyKindNames[k]
++	}
++	return fmt.Sprintf("EmptyKind(%d)", int(k))
++}
++
++// Empty is a block without statements.
++type Empty struct {
++	Kind EmptyKind
++	// Stmt is the statement of the block: the DoBlockStmt, the IfStmt of
++	// the then block (an elseif's own) or of the else block, the loop; nil
++	// for a function.
++	Stmt ast.Stmt
++	// Function is the function of an EmptyFunction.
++	Function *ast.FunctionExpr
++	// Span is the block's span: empty, at the token after the block (the
++	// "end", "else", "elseif" or "until"). An else block is known only by
++	// its span: a tree without spans has no EmptyElse.
++	Span ast.Span
++}
++
++// UnusedRecursive returns the function values that are used only by
++// functions that are themselves unused: an unused recursive function
++// ("local function f() return f() end" and no other use of f) and groups
++// of mutually recursive ones, as luacheck finds them (W211, or W311 for a
++// variable with other values). A function is used if the main chunk leads
++// to it: a function uses another if a use in it may see the other as the
++// value of a local (Def.Value), or if the other, assigned to no local, is
++// in it. The values that no use sees (Used is false) are not in the
++// result: they are plainly unused. In the order of Defs.
++func (p *Program) UnusedRecursive() []*Def {
++	n := len(p.Graphs)
++	value := make([]*Def, n) // by graph: the def whose value is its function
++	found := false
++	for _, d := range p.Defs {
++		if !d.isFunc() || p.luacheckParens && parenFunction(d, d.Value.(*ast.FunctionExpr)) {
++			continue
++		}
++		for _, c := range d.Node.Closures {
++			if c.Function == d.Value {
++				value[c.ID] = d
++				found = true
++			}
++		}
++	}
++	if !found {
++		return nil
++	}
++	fwd := make([][]*Graph, n)
++	bwd := make([][]*Graph, n)
++	edge := func(from, to *Graph) {
++		fwd[from.ID] = append(fwd[from.ID], to)
++		bwd[to.ID] = append(bwd[to.ID], from)
++	}
++	for _, g := range p.Graphs[1:] {
++		if d := value[g.ID]; d != nil {
++			for _, u := range d.users {
++				edge(u, g)
++			}
++		} else if g.Parent != nil {
++			edge(g.Parent, g)
++		}
++	}
++	marked := make([]bool, n)
++	var mark func(edges [][]*Graph, set []bool, g *Graph)
++	mark = func(edges [][]*Graph, set []bool, g *Graph) {
++		for _, h := range edges[g.ID] {
++			if !marked[h.ID] && !set[h.ID] {
++				set[h.ID] = true
++				mark(edges, set, h)
++			}
++		}
++	}
++	marked[0] = true
++	mark(fwd, marked, p.Graphs[0])
++	// in luacheck's order: a function after those inside it
++	order := make([]*Graph, 0, n)
++	var post func(g *Graph)
++	post = func(g *Graph) {
++		for _, nd := range g.Nodes {
++			for _, c := range nd.Closures {
++				post(c)
++			}
++		}
++		order = append(order, g)
++	}
++	post(p.Graphs[0])
++	order = order[:len(order)-1] // without the main chunk
++	for _, g := range order {
++		if d := value[g.ID]; d != nil && !d.Used && !marked[g.ID] {
++			marked[g.ID] = true
++			mark(fwd, marked, g)
++		}
++	}
++	var out []*Def
++	fs, bs := make([]bool, n), make([]bool, n)
++	for _, g := range order {
++		if d := value[g.ID]; d == nil || !d.Used || marked[g.ID] {
++			continue
++		}
++		clear(fs)
++		clear(bs)
++		mark(fwd, fs, g)
++		mark(bwd, bs, g)
++		for id := range fs {
++			if fs[id] && bs[id] {
++				marked[id] = true
++				if d := value[id]; d != nil {
++					out = append(out, d)
++				}
++			}
++		}
++	}
++	slices.SortFunc(out, func(a, b *Def) int { return a.ID - b.ID })
++	return out
 +}
 --- a/format/bench_test.go
 +++ b/format/bench_test.go
