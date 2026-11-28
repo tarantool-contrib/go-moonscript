@@ -1,4 +1,10 @@
-package parser
+package luascope_test
+
+// The oracle compares luascope.Parse with Tarantool's LuaJIT: for every
+// test source, the same error, or the same global reads and writes as the
+// GGET and GSET instructions of the compiled chunk. The sources are the Lua
+// files of the archives of internal/luasuites (the corpus), random edits of
+// them (the mutations), generated programs and hand-written snippets.
 
 import (
 	"bufio"
@@ -19,14 +25,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tarantool-contrib/go-moonscript/luascope/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/ast"
+	"github.com/tarantool-contrib/go-moonscript/lua/parse"
+	"github.com/tarantool-contrib/go-moonscript/lua/scope"
+	"github.com/tarantool-contrib/go-moonscript/luascope"
 )
 
 // The golden files hold the results of Tarantool's LuaJIT for every test
 // source. To regenerate them, build the LuaJIT fork used by Tarantool
 // (https://github.com/tarantool/luajit) and run:
 //
-//	go test ./parser -update -luajit=/path/to/build/src/luajit
+//	go test . -update -luajit=/path/to/build/src/luajit
 var (
 	update = flag.Bool("update", false, "regenerate golden files with -luajit")
 	luajit = flag.String("luajit", "", "path to Tarantool's LuaJIT binary")
@@ -113,7 +122,7 @@ func render(err string, ops []globalOp, hashed bool) string {
 	return body
 }
 
-// sameResult compares a result of LuaJIT with a result of the parser. The
+// sameResult compares a result of LuaJIT with a result of luascope. The
 // counts of global reads and writes must be equal. LuaJIT reports a read
 // at the line where the compiler emits it, which can be after the name, so
 // a read may be reported at the line of the name or later.
@@ -164,84 +173,65 @@ func sameOp(want, got string) bool {
 
 // globalOps returns the global reads and writes the way LuaJIT compiles
 // them: a GSET for an assignment to a global name and a GGET for every
-// other use of a global name.
-func globalOps(chunk *ast.Chunk) []globalOp {
-	var (
-		ops   []globalOp
-		visit func(ast.Node) bool
-	)
+// other use of a global name, at the line of the name.
+func globalOps(chunk *ast.Chunk, info *scope.Info) []globalOp {
+	ops := make([]globalOp, 0, len(info.Refs))
 
-	target := func(e ast.Expr) {
-		if n, ok := e.(*ast.Name); ok {
-			if n.Local == nil {
-				ops = append(ops, globalOp{op: "GSET", name: escape(n.Name)})
-			}
-
-			return
+	for i := range info.Refs {
+		r := &info.Refs[i]
+		if !r.IsGlobal() {
+			continue
 		}
 
-		ast.Inspect(e, visit)
-	}
-
-	visit = func(node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.Name:
-			if n.Local == nil {
-				ops = append(ops, globalOp{op: "GGET", name: escape(n.Name), line: n.At.Line})
-			}
-		case *ast.Assign:
-			for _, t := range n.Targets {
-				target(t)
-			}
-
-			for _, v := range n.Values {
-				ast.Inspect(v, visit)
-			}
-
-			return false
-		case *ast.FunctionStmt:
-			target(n.Target)
-			ast.Inspect(n.Func, visit)
-
-			return false
+		op := globalOp{op: "GGET", name: escape(r.Name())}
+		if r.Kind == scope.Write {
+			op.op = "GSET"
+		} else {
+			op.line = chunk.Pos(r.Span().Start).Line
 		}
 
-		return true
+		ops = append(ops, op)
 	}
-
-	ast.Inspect(chunk.Block, visit)
 
 	return ops
 }
 
-// parseResult renders the result of Parse for a source.
-func parseResult(src []byte, hashed bool) string {
-	chunk, err := ParseBytes(src, "m")
-	if err != nil {
-		var se *SyntaxError
-		if !errors.As(err, &se) {
-			return "error " + escape(err.Error())
-		}
-
-		return "error " + escape(se.Detail())
+// errorDetail returns the message of an error of luascope.Parse without
+// the chunk name, as the oracle prints them: "line: msg near 'tok'".
+func errorDetail(err error) string {
+	var pe *parse.Error
+	if !errors.As(err, &pe) {
+		return err.Error()
 	}
 
-	return render("", globalOps(chunk), hashed)
+	if pe.Pos.Line == parse.NoLine {
+		return pe.Message
+	}
+
+	return strings.TrimPrefix(pe.Error(), pe.Pos.Source+":")
 }
 
-// oracle compares a result of the parser with a result of LuaJIT for a
+// parseResult renders the result of luascope.Parse for a source.
+func parseResult(src []byte, hashed bool) string {
+	chunk, info, err := luascope.Parse(src, "=m", luascope.Options{})
+	if err != nil {
+		return "error " + escape(errorDetail(err))
+	}
+
+	return render("", globalOps(chunk, info), hashed)
+}
+
+// oracle compares a result of luascope with a result of LuaJIT for a
 // source.
 type oracle struct {
 	// script prints the results of LuaJIT, in testdata/oracle.
 	script string
-	// prefix is the prefix of the golden files.
-	prefix string
-	// result renders the result of the parser.
+	// result renders the result of luascope.
 	result func(src []byte, hashed bool) string
 	// render renders the result printed by the script: the lines after
 	// "ok", or nil.
 	render func(t *testing.T, ok []string, hashed bool) string
-	// same compares a result of LuaJIT with a result of the parser.
+	// same compares a result of LuaJIT with a result of luascope.
 	same func(want, got string) bool
 }
 
@@ -408,10 +398,10 @@ func reportMismatch(t *testing.T, o *oracle, c testCase, want, got string, hashe
 		got = o.result(c.src, false)
 	}
 
-	t.Errorf("%s:\n--- luajit\n%s\n--- parser\n%s\n--- source\n%q", c.name, want, got, c.src)
+	t.Errorf("%s:\n--- luajit\n%s\n--- luascope\n%s\n--- source\n%q", c.name, want, got, c.src)
 }
 
-// checkSuite compares the parser with the golden results of LuaJIT. With
+// checkSuite compares luascope with the golden results of LuaJIT. With
 // -update it regenerates the golden file first.
 func checkSuite(t *testing.T, suite string, cases []testCase, hashed bool) {
 	t.Helper()
@@ -419,11 +409,9 @@ func checkSuite(t *testing.T, suite string, cases []testCase, hashed bool) {
 	checkOracle(t, globalsOracle, suite, cases, hashed)
 }
 
-// checkOracle compares the parser with the golden results of an oracle.
+// checkOracle compares luascope with the golden results of an oracle.
 func checkOracle(t *testing.T, o *oracle, suite string, cases []testCase, hashed bool) {
 	t.Helper()
-
-	suite = o.prefix + suite
 
 	if *update {
 		if *luajit == "" {

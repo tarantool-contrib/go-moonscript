@@ -1,4 +1,4 @@
-package parser
+package luascope_test
 
 import (
 	"fmt"

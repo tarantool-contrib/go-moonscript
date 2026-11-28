@@ -1,4 +1,4 @@
-package parser
+package luascope_test
 
 import (
 	"archive/tar"
@@ -10,19 +10,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-// corpusSuites are the archives in testdata/corpus, see SOURCES.md there.
+// corpusSuites are the archives of internal/luasuites, see SOURCES.md
+// there, which hold the corpus: their Lua files.
 var corpusSuites = []string{"lua5.1-tests", "luajit-tests", "tarantool", "vshard", "crud"}
+
+// archivesDir is the directory of the archives.
+var archivesDir = filepath.Join("..", "internal", "luasuites", "testdata", "archives")
 
 // loadCorpus reads the Lua sources of an archive.
 func loadCorpus(tb testing.TB, suite string) []testCase {
 	tb.Helper()
 
-	f, err := os.Open(filepath.Join("testdata", "corpus", suite+".tar.gz"))
+	f, err := os.Open(filepath.Join(archivesDir, suite+".tar.gz"))
 	require.NoError(tb, err)
 
 	defer f.Close()
@@ -65,6 +70,42 @@ func TestCorpus(t *testing.T) {
 			checkSuite(t, suite, loadCorpus(t, suite), false)
 		})
 	}
+}
+
+// TestParseParallel parses and resolves the same sources in several
+// goroutines: the parsers share the memory of a sync.Pool, and must not
+// share anything else. The race detector checks the sharing, the globals
+// and the errors the results.
+func TestParseParallel(t *testing.T) {
+	t.Parallel()
+
+	var cases []testCase
+
+	for _, suite := range corpusSuites {
+		cases = append(cases, loadCorpus(t, suite)...)
+	}
+
+	cases = cases[:200]
+	want := make([]string, len(cases))
+
+	for i, c := range cases {
+		want[i] = parseResult(c.src, false)
+	}
+
+	var wg sync.WaitGroup
+
+	for g := range 4 {
+		wg.Go(func() {
+			for i := range cases { // Each goroutine starts at another source.
+				j := (i + g*len(cases)/4) % len(cases)
+				if got := parseResult(cases[j].src, false); got != want[j] {
+					t.Errorf("%s: the result differs in goroutine %d", cases[j].name, g)
+				}
+			}
+		})
+	}
+
+	wg.Wait()
 }
 
 // insertions are fragments inserted by mutations. They target the

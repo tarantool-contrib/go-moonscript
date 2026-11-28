@@ -15,7 +15,7 @@ test:
 	@go test ./... -count=1
 
 # -count=100 shakes out tests that depend on the order of execution; the
-# race detector and the corpus tests of the parser need more than the
+# race detector and the oracle tests need more than the
 # default 10-minute timeout of go test.
 .PHONY: testrace
 testrace:
@@ -42,12 +42,12 @@ fmt:
 
 .PHONY: fuzz
 fuzz:
-	@go test ./parser -run '^$$' -fuzz=FuzzParse -fuzztime=5m
+	@go test . -run '^$$' -fuzz=FuzzParse -fuzztime=5m
 
 .PHONY: golden
 golden:
 	@test -n "$(LUAJIT)" || (echo "set LUAJIT to the path of Tarantool's LuaJIT" && false)
-	@go test ./parser -update -luajit=$(LUAJIT) -count=1
+	@go test . -run 'Corpus|Mutations|Generated|Snippets' -update -luajit=$(LUAJIT) -count=1
 
 .PHONY: vulncheck
 vulncheck:

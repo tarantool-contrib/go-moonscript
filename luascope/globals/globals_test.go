@@ -23,10 +23,10 @@ import (
 )
 
 // The corpus is the Lua files of the archives of internal/luasuites, the
-// LuaJIT results are those of the oracle tests of package parser.
+// LuaJIT results are those of the oracle tests of package luascope.
 var (
 	archivesDir = filepath.Join("..", "..", "internal", "luasuites", "testdata", "archives")
-	goldenDir   = filepath.Join("..", "parser", "testdata", "golden")
+	goldenDir   = filepath.Join("..", "testdata", "golden")
 )
 
 // analyze returns the usage of a chunk parsed in the default dialect.
