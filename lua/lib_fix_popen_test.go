@@ -1,6 +1,6 @@
 package lua
 
-// go-moonscript patch: tests of io.popen(cmd, "w") (see moonscript.patch).
+// go-moonscript patch: tests of io.popen(cmd, "w") (see CHANGES.md).
 
 import (
 	"context"

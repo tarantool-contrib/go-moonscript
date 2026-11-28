@@ -11,7 +11,7 @@ name: CI
 # configs luascope/ and luamerge/ had in their repositories; codespell over
 # luascope/ and luamerge/ (.codespellrc).
 # generate: the generated files (moonscript/parse/parser_gen.go,
-# moonscript/runtime/lua), go.mod and lua/moonscript.patch are up to date.
+# moonscript/runtime/lua) and go.mod are up to date.
 # test: the test suite on the oldest and the newest supported Go, with the
 # Lua interpreters luamerge's tests run bundles on, and pristine
 # gopher-lua's own suites against the fork; the race detector and coverage
@@ -123,9 +123,6 @@ jobs:
 
       - name: go mod tidy
         run: go mod tidy -diff
-
-      - name: lua/moonscript.patch
-        run: scripts/gen-gopher-lua-patch.sh --check
 
       - name: go generate
         run: |

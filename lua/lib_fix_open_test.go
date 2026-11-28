@@ -3,7 +3,7 @@
 package lua
 
 // go-moonscript patch: io.open creates files with the permissions fopen
-// gives them (see moonscript.patch).
+// gives them (see CHANGES.md).
 
 import (
 	"os"

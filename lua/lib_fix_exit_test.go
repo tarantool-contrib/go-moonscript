@@ -1,6 +1,6 @@
 package lua
 
-// go-moonscript patch: tests of os.exit (see moonscript.patch), run in a
+// go-moonscript patch: tests of os.exit (see CHANGES.md), run in a
 // child process: os.exit(true/false) is LuaJIT 2.1's (DialectLuaJIT only).
 
 import (

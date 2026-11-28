@@ -1,7 +1,7 @@
 package lua
 
 // go-moonscript patch: tests of the VM, coroutine and context fixes ported
-// from other gopher-lua forks and pull requests (see moonscript.patch); the
+// from other gopher-lua forks and pull requests (see CHANGES.md); the
 // Lua-visible behaviour is tested against Lua 5.1 in testdata/compat
 // (vm_*.lua).
 

@@ -1,7 +1,7 @@
 package lua
 
 // go-moonscript patch: Lua 5.1 compatibility tests of the fixes ported from
-// other gopher-lua forks and pull requests (see moonscript.patch). Every
+// other gopher-lua forks and pull requests (see CHANGES.md). Every
 // script in testdata/compat is run here and its output compared with the
 // reference interpreter's, recorded by scripts/gen-compat-ref.sh in
 // testdata/compat/ref: PUC Lua 5.1.5 for <name>.lua, run with

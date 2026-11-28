@@ -17,7 +17,7 @@ of the Go Lua tooling of tarantool-contrib.
   - the gopher-lua fork moves from `third_party/gopher-lua` to `lua/`:
     its packages are `.../lua`, `.../lua/ast`, `.../lua/parse`,
     `.../lua/scope`, `.../lua/format`, `.../lua/flow`, `.../lua/sandbox`
-    and `.../lua/pm`, and `moonscript.patch` is `lua/moonscript.patch`;
+    and `.../lua/pm`;
   - the MoonScript packages move from the root to `moonscript/`:
     `.../moonscript` (`ToLua`), `.../moonscript/parse`,
     `.../moonscript/compiler`, `.../moonscript/lint`,
@@ -27,6 +27,10 @@ of the Go Lua tooling of tarantool-contrib.
     and [go-luamerge](https://github.com/tarantool/go-luamerge) is
     `luamerge/`, imported with their history; luamerge parses with the
     fork instead of gopher-lua v1.1.2 (see `luamerge/CHANGELOG.md`).
+- `moonscript.patch`, the full diff of the fork against gopher-lua v1.1.2
+  with its list of changes, is gone: the list is `lua/CHANGES.md`, and
+  `scripts/diff-upstream.sh` prints the diff (it replaces
+  `scripts/gen-gopher-lua-patch.sh` and its CI check).
 - The module requires Go 1.26.5 (luamerge's dependency jsonschema
   v0.9.8 does) and has dependencies, luamerge's: go-config, pflag and
   testify.
@@ -50,7 +54,7 @@ of the Go Lua tooling of tarantool-contrib.
 - A patched gopher-lua v1.1.2 in `lua/`, moved towards
   PUC Lua 5.1 (and LuaJIT 2.1's extensions where they don't change 5.1
   programs), each change tested against real Lua 5.1/LuaJIT and listed with
-  its source in `moonscript.patch`:
+  its source in `lua/CHANGES.md`:
   - upvalues are no longer closed for frames that survive an error caught
     by `pcall`; `debug.sethook`/`debug.gethook`; luac's line numbers;
   - the table engine in Lua 5.1's layout (`#`, `next`, `pairs` order, sparse

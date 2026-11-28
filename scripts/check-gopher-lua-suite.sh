@@ -34,7 +34,7 @@ work=$(mktemp -d "$cache/go-moonscript-glsuite.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 cp -a "$root/lua/." "$work/"
-rm -f "$work/moonscript.patch"
+rm -f "$work/CHANGES.md"
 chmod -R u+w "$work"
 # the fork's import paths back to gopher-lua's ($ourpath alone is a prefix
 # of .../luamerge and .../luascope too)

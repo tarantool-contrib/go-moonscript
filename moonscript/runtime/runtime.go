@@ -39,7 +39,7 @@
 // driver loses the error its xpcall handler stored). This module therefore
 // carries a patched copy as one of its packages,
 // github.com/tarantool-contrib/go-moonscript/lua
-// (lua/moonscript.patch is the change); the *lua.LState
+// (lua/CHANGES.md lists the changes); the *lua.LState
 // and other Lua types of this package's API are that package's, not
 // github.com/yuin/gopher-lua's.
 //

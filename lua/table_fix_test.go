@@ -1,7 +1,7 @@
 package lua
 
 // go-moonscript patch: tests of the LTable rewrite (table.go,
-// table_hash.go; see moonscript.patch). The Lua side, against Lua 5.1, is
+// table_hash.go; see CHANGES.md). The Lua side, against Lua 5.1, is
 // in testdata/compat/table_*.lua (table_fuzz.lua is a differential fuzz
 // test).
 

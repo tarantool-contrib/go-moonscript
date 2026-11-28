@@ -1,7 +1,7 @@
 package lua
 
 // go-moonscript patch: tests of the compiler fixes ported from yuin/gopher-lua
-// pull requests (see moonscript.patch).
+// pull requests (see CHANGES.md).
 
 import (
 	"fmt"

@@ -54,7 +54,7 @@ THE SOFTWARE.
 gopher-lua v1.1.2 (https://github.com/yuin/gopher-lua)
 
 lua/ is a modified copy, the fork of gopher-lua of this repository (see
-lua/moonscript.patch for the changes).
+lua/CHANGES.md for the changes).
 
 The MIT License (MIT)
 

@@ -10,7 +10,7 @@ share one Lua front end and VM, the gopher-lua fork.
 
 | Tree | What |
 | --- | --- |
-| [`lua/`](lua) | the gopher-lua fork: a Lua 5.1 and LuaJIT 2.1 VM in Go (package `lua`), its parser (`lua/parse`, `lua/ast`), name resolution (`lua/scope`), printing and formatting (`lua/format`), control and data flow (`lua/flow`), sandboxes (`lua/sandbox`); its changes to gopher-lua v1.1.2 are in [`lua/moonscript.patch`](lua/moonscript.patch) |
+| [`lua/`](lua) | the gopher-lua fork: a Lua 5.1 and LuaJIT 2.1 VM in Go (package `lua`), its parser (`lua/parse`, `lua/ast`), name resolution (`lua/scope`), printing and formatting (`lua/format`), control and data flow (`lua/flow`), sandboxes (`lua/sandbox`); its changes to gopher-lua v1.1.2 are listed in [`lua/CHANGES.md`](lua/CHANGES.md) |
 | [`moonscript/`](moonscript), [`cmd/moonc`](cmd/moonc), [`cmd/moon`](cmd/moon) | the MoonScript port, the subject of the rest of this file |
 | [`luascope/`](luascope) | static analysis of Lua code: globals, required modules, allowlists ([README](luascope/README.md)); was [bigbes/go-luascope](https://github.com/bigbes/go-luascope) |
 | [`luamerge/`](luamerge) | bundles a multi-file Lua project into one self-contained file: a library and the `luamerge` CLI ([README](luamerge/README.md)); was [tarantool/go-luamerge](https://github.com/tarantool/go-luamerge) |
@@ -320,7 +320,7 @@ matcher, coroutine and compiler fixes, Lua 5.1's runtime error messages,
 `string.format`, number formatting,
 and fixes collected from other gopher-lua forks and pull requests. Every
 change, with its source, is in
-[`moonscript.patch`](lua/moonscript.patch); the official
+[`lua/CHANGES.md`](lua/CHANGES.md); the official
 Lua 5.1 and LuaJIT test suites run against it in
 [`internal/luasuites`](internal/luasuites). On LuaJIT's benchmark suite it
 is about 2.6 times slower than PUC Lua 5.1 (geometric mean; MoonScript

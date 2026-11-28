@@ -1,7 +1,7 @@
 package lua
 
 // go-moonscript patch: Go tests of the string library and pattern matching
-// fixes listed in moonscript.patch.
+// fixes listed in CHANGES.md.
 
 import (
 	"context"

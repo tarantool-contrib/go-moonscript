@@ -38,7 +38,6 @@ golangci-lint run                   # v2.15.0: .golangci.yml, all but luascope/ 
 (cd luamerge && golangci-lint run)  # luamerge/.golangci.yml
 codespell ./luascope ./luamerge     # .codespellrc
 go generate ./... && git diff --exit-code   # generated files up to date
-scripts/gen-gopher-lua-patch.sh --check     # lua/moonscript.patch up to date
 scripts/check-gopher-lua-suite.sh   # pristine gopher-lua's suites on the fork
 go mod tidy -diff
 ```
@@ -72,7 +71,7 @@ generated reference output.
 | `moonscript/runtime/` | the Lua runtime modules on the fork; `moonscript/runtime/lua` is generated from `moonscript/runtime/moonsrc` |
 | `moonscript/testdata/` | MoonScript's reference outputs: specs, parse trees, lint reports, `moon` runs, the corpus manifest |
 | `cmd/moonc`, `cmd/moon` | the commands |
-| `lua/` | the gopher-lua fork: patched gopher-lua v1.1.2, see `moonscript.patch`, and its own packages (`scope`, `format`, `flow`, `sandbox`) |
+| `lua/` | the gopher-lua fork: patched gopher-lua v1.1.2, see `CHANGES.md`, and its own packages (`scope`, `format`, `flow`, `sandbox`) |
 | `luascope/`, `luamerge/` | luascope and luamerge (see their CONTRIBUTING.md); luamerge's CLI is `luamerge/cmd/luamerge`, as it uses luamerge's internal packages |
 | `internal/luasuites/` | the official Lua 5.1 and LuaJIT test suites on the VM |
 | `internal/tools/` | generators, the fuzzer, the benchmark runner and the corpus checker |
@@ -87,11 +86,11 @@ generated reference output.
 the change that caused it.
 
 `lua/` has generated files of its own (`vm.go`,
-`state.go`, `parse/parser.go`); `moonscript.patch` explains how to
-regenerate them. A change there also updates `moonscript.patch`, the full
-diff against the original v1.1.2: `scripts/gen-gopher-lua-patch.sh`
-regenerates its diff part (edit its header, the list of changes and where
-they come from, by hand); CI checks it with `--check`. A fix for Lua
+`state.go`); `lua/CHANGES.md` explains how to regenerate them. Every
+change to `lua/` adds an entry to `lua/CHANGES.md`: what changes, in which
+files, where it comes from (credit the fork or pull request and its author)
+and how it is tested. `scripts/diff-upstream.sh` prints the full diff
+against the original gopher-lua v1.1.2. A fix for Lua
 behaviour comes with a script in `lua/testdata/compat`
 whose reference output is recorded from real Lua 5.1 (and LuaJIT for
 `*.jit.lua`) by `scripts/gen-compat-ref.sh`.
