@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking: support for Lua 5.2, 5.3, 5.4 and 5.5 is dropped**, as the
+  source dialects of the files and as the interpreters of the bundles.
+  luamerge supports Lua 5.1, LuaJIT (with the syntax of its
+  `LUAJIT_ENABLE_LUA52COMPAT` builds) and Tarantool.
+  - A file is parsed as LuaJIT reads it, then in the syntax of LuaJIT's
+    `LUAJIT_ENABLE_LUA52COMPAT` builds, then as Lua 5.1 reads it (an escape
+    LuaJIT does not know, `"\."`, a numeral such as `1e5..x` or `1e1048576`).
+    A file none of them reads is scanned for its requires with a
+    `token-scan` warning, as a file with a syntax error is. That is a file
+    with the operators of Lua 5.3 (`//`, `&`, `|`, `~`, `<<`, `>>`), the
+    attributes of Lua 5.4 (`<const>`, `<close>`), the `global` declarations
+    of Lua 5.5, a numeral that Lua 5.2 and 5.3 end before a letter
+    (`3then`), a `\u{...}` escape beyond Unicode, or the syntax of the
+    newest builds of LuaJIT that neither Debian's LuaJIT, nor Tarantool 3.9,
+    nor any packaged LuaJIT reads (`!=`, `!`, `&&`, `||`, `c ? a : b`, `??`,
+    `~>>`, `x += 1`, `continue`); the bundle embeds such a file as it is.
+    The copy of the file with those written the Lua 5.1 way, and its offset
+    map, are gone.
+  - `_ENV.require("x")` is no call of `require`: `_ENV` is a name in the
+    supported runtimes. It is no longer found, nor renamed by
+    `--package-prefix`.
+  - The bundle has no `_ENV` local around each module, and no `_VERSION`
+    check: the arg line is `if not rawget(_G, "jit") then arg = ... end`, the
+    searcher of `--fallback` starts its message with a line break and a tab,
+    `--debug` loads chunks with `loadstring` and `setfenv`, and the entry
+    with `--suffix` needs no wrapper function and returns its results with
+    `unpack`. The bundles are the same otherwise.
+  - The built-in modules of Lua 5.2 to 5.5 are no longer known: a `bit32.lua`
+    of a project is a module like any other, a `require("bit32")` with no
+    file is unresolved, and a `utf8.lua` has the `shadows-builtin` warning
+    for Tarantool only.
+  - The tests run bundles on `lua5.1`, `luajit` and `tarantool` only
+    (`LUATEST_INTERPRETERS=lua5.1,luajit,tarantool`); an interpreter that is
+    another Lua is left out.
 - luamerge moved into the monorepo of the Go Lua tooling of
   tarantool-contrib, as `luamerge/` of the module
   `github.com/tarantool-contrib/go-moonscript`: the package is
@@ -18,15 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The requires are found with the parser of the monorepo's gopher-lua fork
   in its LuaJIT dialect instead of gopher-lua v1.1.2, on the file as it
   is, about twice as fast: the position of a module name is the span of
-  its literal. A file it refuses, one written for Lua 5.2 and later or for
-  LuaJIT 2.1 builds of 2026, is parsed again in the syntax of LuaJIT built
-  with `LUAJIT_ENABLE_LUA52COMPAT`, which reads the empty statements, the
-  statements after `break` and the calls across a line break of Lua 5.2
-  as they are, from a copy with the rest of the newer syntax written the
-  Lua 5.1 way, as before. A file that neither reads, or that LuaJIT does
-  not compile (a `...` outside a vararg function, a `break` outside a
-  loop, a `goto` into the scope of a local), is read by the token
-  scanner, with a warning. The reasons of those warnings are the parser's
+  its literal. A file it refuses is parsed again in the syntax of LuaJIT
+  built with `LUAJIT_ENABLE_LUA52COMPAT`, which reads the empty
+  statements, the statements after `break` and the calls across a line
+  break of Lua 5.2 as they are, and then in the fork's Lua 5.1 dialect.
+  A file that none reads, or that LuaJIT does not compile (a `...`
+  outside a vararg function, a `break` outside a loop, a `goto` into the
+  scope of a local), is read by the token scanner, with a warning. The reasons of those warnings are the parser's
   messages and name the file's tokens: `unexpected symbol near "="` where
   gopher-lua said `syntax error near "="`, `'end' expected (to close
   'function' at line 1) at the end of the file`.
@@ -34,8 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a suffix such as `1LLU`, and `goto` used as a name right after a name,
   as in `x = goto goto l`.
 - The source transforms read the tokens of the fork's lexer, with the
-  strings and numerals that only other dialects read as before; their
-  output is the same.
+  strings and numerals that only Lua 5.1 reads as before; their output is
+  the same.
 
 ### Added
 
@@ -159,8 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `require("x").field:m()` and every require inside a method chain such as
   `app:use(require "a"):listen()`. These modules were left out of the bundle
   without a warning, even with `--strict`.
-- `_G.require("x")`, `_ENV.require("x")` and `xpcall(require, handler, "x")`
-  embed their module, and `pcall(require, name)` with a computed name warns
+- `_G.require("x")` and `xpcall(require, handler, "x")` embed their module, and `pcall(require, name)` with a computed name warns
   as a dynamic require, like `require(name)`. All of them used to be ignored
   silently. `require("x", …)` is the require of `"x"`, as in Lua, rather
   than a dynamic require.
@@ -187,7 +218,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays where two tokens would otherwise run together (`local x`,
   `a - -b`, `1 ..2`), and a line break where the source had one, since
   Lua 5.1 and LuaJIT read a `(` at the start of a line differently from
-  Lua 5.2+.
+  LuaJIT built with `LUAJIT_ENABLE_LUA52COMPAT`.
 - Every file is read the way the interpreter reads a file it loads: a byte
   order mark is dropped, and a first line starting with `#` is left empty,
   its line break kept, so every line keeps its number. The bundler used to
@@ -246,12 +277,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `require("mylib")` on Lua 5.1, LuaJIT and Tarantool.
 - With `--fallback`, a `main.lua` in the working directory no longer replaces
   the bundle's entry.
-- With `--fallback`, the error for a module found nowhere has no line holding
-  only a tab on Lua 5.4 and later. The bundle's searcher started its part of
-  the message with a line break and a tab, as Lua 5.1 to 5.3, LuaJIT and
-  Tarantool expect of a searcher, while Lua 5.4 and later put them in front
-  of every searcher's part themselves. It now starts it with them only where
-  they are expected.
 - A bundle built with `--suffix` failed to load with a syntax error: the
   suffix was emitted after the final `return`. The suffix now runs after the
   entry, and the bundle still returns every value the entry returns.
@@ -375,8 +400,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LuaJIT's `bit` or Tarantool's `csv`, failed `--strict` as an unresolved
   require when the project had no file for it. Such a require is now left to
   the runtime without a warning, from a list of the modules that PUC Lua
-  5.2 to 5.5, LuaJIT, OpenResty's LuaJIT and Tarantool 2.11 to 3.9 have
-  without a file.
+  5.1, LuaJIT, OpenResty's LuaJIT and Tarantool 2.11 to 3.9 have without a
+  file.
 - A module of the project named like a module a runtime has built in, such
   as a `csv.lua` on Tarantool, was registered in `package.preload`, which
   Tarantool consults before its own built-in modules: the bundle loaded the
@@ -387,25 +412,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   module wins over every file on disk, as the modules in `package.preload`
   do; a `shadows-builtin` warning names those runtimes. With `--fallback`
   such a module goes to `package.postload` like every other one.
-- A module name is decoded the way Lua 5.2 and later, LuaJIT and Tarantool
-  decode it: `require("\x61x")` embeds the module `ax`,
+- A module name is decoded the way LuaJIT and Tarantool decode it: `require("\x61x")` embeds the module `ax`,
   `require("\u{62}ar")` the module `bar` and `require("c\z   z")` the module
   `cz`. Names were decoded as Lua 5.1 decodes them, reading an escape it
   does not know as the character after the backslash, so the bundler looked
   for `x61x`, `u{62}ar` and `cz   z`, and the modules the program loads were
   not embedded. A string with a `\z` escape over a line break, and a form
   feed or a vertical tab between tokens, no longer fail the build.
-- A module written for Lua 5.2 to 5.5, LuaJIT or Tarantool bundles, and its
-  requires are found on their lines: next to the operators of Lua 5.3 (`//`,
-  `&`, `|`, `~`, `<<`, `>>`), the attributes of Lua 5.4 and 5.5
-  (`<const>`, `<close>`), the `global` declarations of Lua 5.5, hexadecimal
-  floats, the 64-bit integer, imaginary and binary numerals of LuaJIT and
-  Tarantool (`1ULL`, `0x10LL`, `2i`, `0b101`), a statement after `break`,
-  names beyond ASCII, and `goto` used as a name. Every module was parsed as
-  Lua 5.1, so any of these failed the whole build with a syntax error. So
-  does the syntax that LuaJIT 2.1 builds of 2026 add, which LuaJIT's own
-  `jit.*` modules use: `!=` and `!`, `&&` and `||`, `c ? a : b`, `??`,
-  `~>>`, compound assignments such as `x += 1`, and `continue`.
+- A module written for Lua 5.1, LuaJIT or Tarantool bundles, and its
+  requires are found on their lines: next to hexadecimal floats, the 64-bit
+  integer, imaginary and binary numerals of LuaJIT and Tarantool (`1ULL`,
+  `0x10LL`, `2i`, `0b101`), a statement after `break` (LuaJIT's
+  `LUAJIT_ENABLE_LUA52COMPAT` builds), names beyond ASCII, and `goto` used
+  as a name. Every module was parsed as Lua 5.1, so any of these failed the
+  whole build with a syntax error.
 - A local named `require` that is a function of its own — a local function,
   a local whose value is a function, a parameter or a loop variable — hides
   the global `require` for the rest of its scope, as in Lua, so the calls

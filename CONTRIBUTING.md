@@ -42,9 +42,9 @@ scripts/check-gopher-lua-suite.sh   # pristine gopher-lua's suites on the fork
 go mod tidy -diff
 ```
 
-luamerge's tests run its bundles on every Lua interpreter on `PATH` (CI
-installs lua5.1 to lua5.4 and luajit and sets `LUATEST_INTERPRETERS`) and
-skip those tests when there is none. The corpus tests of luamerge read the
+luamerge's tests run its bundles on every interpreter of Lua 5.1, LuaJIT
+and Tarantool on `PATH` (CI installs lua5.1 and luajit and sets
+`LUATEST_INTERPRETERS`) and skip those tests when there is none. The corpus tests of luamerge read the
 Lua 5.1 and gopher-lua test suites of the gopher-lua v1.1.2 module, which
 `go mod download` fetches into the module cache.
 

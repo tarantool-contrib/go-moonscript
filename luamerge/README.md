@@ -21,7 +21,7 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 ### Requirements
 
 - Go 1.26.5 or later (to build the CLI or import the library).
-- A Lua interpreter (Lua 5.1 to 5.5, LuaJIT or Tarantool) to *run* the produced
+- A Lua interpreter (Lua 5.1, LuaJIT or Tarantool) to *run* the produced
   bundle. It is not required to build one.
 
 ## Features
@@ -33,7 +33,7 @@ It is a Go reimplementation of the ideas in [siffiejoe/lua-amalg](https://github
 - **Directly executable output** (`--shebang`) — prepend a shebang and run the bundle as a program.
 - **Source transforms** — strip comments or blank lines, or minify.
 - **Module-name remapping** — strip/add package prefixes so library modules resolve to a flat file layout, and a library bundle registers its modules under its prefix only.
-- **Every Lua dialect** — modules may be written for Lua 5.1 to 5.5, LuaJIT or Tarantool, and the bundle works on each of them (the `_ENV`/`arg` handling is version-aware).
+- **Lua 5.1, LuaJIT and Tarantool** — modules may be written for any of them, and the bundle works on each of them (the `arg` handling is version-aware). Lua 5.2 to 5.5 are not supported, as sources or as targets.
 
 ## Installation
 
@@ -89,9 +89,8 @@ Each module is registered into Lua's native `package.preload` table instead of b
 -- Entry: main
 
 do
-local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
 local __luamerge_loader = function(...)
-if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
+if not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 -- ... original module source, verbatim ...
 end
 if package.preload["lib.utils"] == nil then package.preload["lib.utils"] = __luamerge_loader end
@@ -104,7 +103,7 @@ Why each piece is there:
 - **`package.preload[name]`** — standard `require()` finds the loader here before searching the filesystem, so the embedded copy is used, and `require` itself manages `package.loaded`: a module is cached once it has loaded, a module that raised while loading is not, and a require cycle fails as it does natively (Lua 5.1, LuaJIT and Tarantool report the loop; later versions run out of C stack).
 - **Registered only when the slot is empty** — a loader the embedding application put in `package.preload` before running the program wins over the embedded copy, as it wins over the file on `package.path` natively; so does LuaJIT's built-in `table.new`.
 - **Names of runtime built-ins right after the first searcher** — a module required by a name that some runtime has a built-in module of (a pure-Lua `bit.lua` or `utf8.lua`, a `csv.lua` on Tarantool) is not put in `package.preload` under that name. The module wraps the interpreter's first searcher instead: `package.preload` on PUC Lua and LuaJIT, where LuaJIT keeps `table.new`, and on Tarantool the chain of `package.preload`, override modules and its built-in modules, which comes after `package.preload`, where the embedded copy would win. The wrapper asks that searcher first and hands out the embedded module only when it finds nothing. So the runtime's own module wins where there is one, as natively, and everywhere else the embedded module wins over every file on disk, as the modules in `package.preload` do. For any other name the wrapper returns what the first searcher returns, so the message of a module that is not found stays the interpreter's own.
-- **The `_ENV` local in the enclosing `do` block** — makes `_ENV` the loader's *first upvalue*, which Lua 5.2's `module`/`_ENV` handling depends on. It lives outside the function on purpose. On Lua 5.1, LuaJIT and Tarantool `_ENV` is an ordinary name, and the `and` keeps the line from reading it as a global, which strict mode would reject.
+- **No `_ENV` local** — in Lua 5.1, LuaJIT (its `LUAJIT_ENABLE_LUA52COMPAT` builds too) and Tarantool `_ENV` is an ordinary name, so the bundle puts nothing by that name around a module.
 - **`local __luamerge_loader = function(...)`** — the name comes into scope only after the function, so the module's code sees no local of the wrapper: its globals stay globals whatever their names, and the function's local variable slots are all the module's.
 - **The `arg` line** — PUC Lua 5.1 (`LUA_COMPAT_VARARG`) gives every vararg function an implicit local `arg`, which would hide the global `arg` from the module; there the line fills that local with the global table. On every other interpreter the condition is false and the line touches nothing, so an assignment to `arg` in a module stays global. It reads the global with `rawget`, so a strict `_G` without a global `arg` does not make it raise. Disable with `--no-arg-fix`.
 - **Module source is emitted verbatim** (no reindentation) so multi-line `[[ ... ]]` string literals keep their exact contents.
@@ -162,11 +161,11 @@ The output is written only once the build has succeeded: a failed build leaves a
 
 ## Source transforms
 
-The transforms read each module with the lexer of this repository's [gopher-lua fork](../lua) in its LuaJIT dialect, which reads the lexical grammar of LuaJIT and nearly all of Lua 5.1 to 5.5 and Tarantool (long brackets of any level, the string escapes of Lua 5.2 and later, the line breaks `\n`, `\r`, `\r\n` and `\n\r`); a string or a numeral that only another dialect reads, such as `"\."` (Lua 5.1) or `3then` (Lua 5.2 and 5.3), is one token, as that dialect reads it. They never change a token: strings, numbers and names reach the bundle byte for byte. A module that no dialect can split into tokens, such as one with an unfinished string, fails the build.
+The transforms read each module with the lexer of this repository's [gopher-lua fork](../lua) in its LuaJIT dialect, which reads the lexical grammar of LuaJIT and Tarantool (long brackets of any level, the string escapes `\x`, `\z` and `\u{...}`, the line breaks `\n`, `\r`, `\r\n` and `\n\r`); a string or a numeral that only Lua 5.1 reads, such as `"\."` or `1e5..x`, is one token, as Lua 5.1 reads it. They never change a token: strings, numbers and names reach the bundle byte for byte. A module that no dialect can split into tokens, such as one with an unfinished string, fails the build.
 
 - `--remove-comments` removes every comment. A removed comment keeps the line breaks it contained, so every line keeps its number and `--debug` tracebacks stay exact; where the tokens on both sides would otherwise run together (`local--[[c]]b`), a space stays between them.
 - `--remove-empty-lines` removes the lines that hold nothing but white space between tokens; a blank line inside a long string or a long comment is part of it and stays. The lines after a removed one move up, so `--debug` line numbers no longer match the source.
-- `--minify` removes the comments and the white space between tokens. A single space stays where two tokens would otherwise run together (`local x`, `a - -b`, `1 ..2`), and a single line break where the source had one or more: Lua 5.1 and LuaJIT read a `(` at the start of a line differently from Lua 5.2+, so no line break is taken out or put in. Line numbers are not kept.
+- `--minify` removes the comments and the white space between tokens. A single space stays where two tokens would otherwise run together (`local x`, `a - -b`, `1 ..2`), and a single line break where the source had one or more: Lua 5.1 and LuaJIT read a `(` at the start of a line differently from LuaJIT built with `LUAJIT_ENABLE_LUA52COMPAT`, so no line break is taken out or put in. Line numbers are not kept.
 
 ## Configuration
 
@@ -414,11 +413,11 @@ Implementation packages live under `internal/` and are intentionally not importa
 
 ## Finding requires
 
-Every file is parsed with the parser of this repository's [gopher-lua fork](../lua) in its LuaJIT dialect: Lua 5.1 with `goto` and labels, hexadecimal floats, the numerals of LuaJIT and Tarantool (`1LL`, `0x10ULL`, `2i`, `0b101`), names beyond ASCII and the string escapes of Lua 5.2 and later. A file it refuses is parsed again in the syntax of LuaJIT built with `LUAJIT_ENABLE_LUA52COMPAT`, which reads the empty statements (`;;`), the statements after `break` and the calls across a line break of Lua 5.2 as they are, from a copy of the file with the rest of the newer syntax written the Lua 5.1 way: the operators of Lua 5.3 (`//`, `&`, `|`, `~`, `<<`, `>>`), the attributes of Lua 5.4 and 5.5 (`<const>`, `<close>`), the `global` declarations of Lua 5.5, the syntax LuaJIT 2.1 builds of 2026 add (`!=`, `!`, `&&`, `||`, `c ? a : b`, `??`, `~>>`, compound assignments such as `x += 1`, `continue`), and the strings and numerals that only another dialect reads (see below). Every token of the copy stays on its line, and a module name is found where it is in the file, so a warning names the line of the file; a call whose `(` starts a line is on the line of its function. The copy is only read to find the requires: the bundle embeds every file as it is.
+Every file is parsed with the parser of this repository's [gopher-lua fork](../lua), in the dialects of the runtimes luamerge supports, the first that accepts it deciding: its LuaJIT dialect (Lua 5.1 with `goto` and labels, hexadecimal floats, the numerals of LuaJIT and Tarantool (`1LL`, `0x10ULL`, `2i`, `0b101`), names beyond ASCII and the string escapes `\x`, `\z` and `\u{...}`), then the syntax of LuaJIT built with `LUAJIT_ENABLE_LUA52COMPAT`, which also reads the empty statements (`;;`), the statements after `break` and the calls across a line break of Lua 5.2 (and takes `goto` for a keyword everywhere, where LuaJIT's default build reads it as a name too), then its Lua 5.1 dialect, for what only Lua 5.1 reads: a string with an escape LuaJIT does not know (`"\."`, read as the character after the backslash) and a numeral that LuaJIT does not end where Lua 5.1 does (`1e5..x`) or reads as out of range (`1e1048576`). The file is parsed as it is, so a module name is found where it is in the file and a warning names its line; a call whose `(` starts a line, in the syntax of LuaJIT's `LUAJIT_ENABLE_LUA52COMPAT` builds, is on the line of its function.
 
-Where the dialects read the same text differently, it is read the way the dialect that accepts it reads it. A string is decoded as Lua 5.2 and later, LuaJIT and Tarantool decode it: `require("\x61x")` loads the module `ax`, where Lua 5.1 reads an escape it does not know as the character after the backslash, `x61x`. `goto` is a name where it cannot start a `goto` statement (Lua 5.1, LuaJIT), and `global` wherever it does not start a Lua 5.5 declaration. A numeral ends before `..` where Lua 5.1 ends it (`1e5..x`), and before a letter where Lua 5.2 and 5.3 end it (`3then`).
+Where the dialects read the same text differently, it is read the way the first dialect that accepts it reads it. A string is decoded as LuaJIT and Tarantool decode it: `require("\x61x")` loads the module `ax`, where Lua 5.1 reads an escape it does not know as the character after the backslash, `x61x`; a file only Lua 5.1 reads gets its module names decoded Lua 5.1's way. `goto` is a name where it cannot start a `goto` statement (Lua 5.1, and LuaJIT's default build).
 
-A file the parser cannot read, usually one with a syntax error, does not fail the build: its tokens are scanned for the requires instead, and a `token-scan` warning names the line the parser failed on and its message, such as `unexpected symbol near "="`. So is a file that LuaJIT does not compile, with a `...` outside a vararg function, a `break` outside a loop or a `goto` into the scope of a local. The token scanner finds the calls the parser finds, in the same forms, and reports every other use of `require` as an `indirect-require`, but it knows no scopes: a local named `require` is the global one to it. Only a file that no dialect can even split into tokens, such as one with a string or a long comment without its end, fails the build, with the line of the token.
+A file the parser cannot read, usually one with a syntax error, does not fail the build: its tokens are scanned for the requires instead, and a `token-scan` warning names the line the parser failed on and its message, such as `unexpected symbol near "="`: LuaJIT's, but for a file with a string or a numeral that only Lua 5.1 reads, where it is Lua 5.1's if that got further into the file. So is a file that LuaJIT does not compile, with a `...` outside a vararg function, a `break` outside a loop or a `goto` into the scope of a local, and a file written for another Lua: the operators of Lua 5.3 (`//`, `&`, `|`, `~`, `<<`, `>>`), the attributes of Lua 5.4 (`<const>`, `<close>`), the `global` declarations of Lua 5.5, or the syntax of the newest builds of LuaJIT, which no packaged LuaJIT nor Tarantool reads (`!=`, `&&`, `c ? a : b`, `x += 1`, `continue`, ...). The token scanner finds the calls the parser finds, in the same forms, and reports every other use of `require` as an `indirect-require`, but it knows no scopes: a local named `require` is the global one to it. Only a file that no dialect can even split into tokens, such as one with a string or a long comment without its end, fails the build, with the line of the token.
 
 ## Module resolution
 
@@ -432,7 +431,7 @@ The file that contains the `require()` plays no part, as in Lua: `require("util"
 
 The standard library — `_G`, `coroutine`, `debug`, `io`, `math`, `os`, `package`, `string` and `table` — is never looked up. Every interpreter has it in `package.loaded` before the program starts, so `require("debug")` returns it without searching and never loads a file of that name; the bundler neither embeds nor reports it, even with `--strict`. `--include` of one of these names is skipped with a warning.
 
-Some modules only some runtimes have built in: `bit32` (Lua 5.2 and 5.3), `utf8` (Lua 5.3 and later, and Tarantool), LuaJIT's `bit`, `ffi`, `jit`, `table.new`, `string.buffer` and the like, and Tarantool's own, such as `json`, `fiber` or `csv`. A `require` of one that the project has no file for is left to the runtime and not reported, even with `--strict`: where the runtime has the module it loads it, and elsewhere the program fails as it does natively. A file the project does have for such a name — a pure-Lua `bit.lua` or `utf8.lua` for the runtimes without one — is embedded and served right after the interpreter's first searcher (see [How it works](#how-it-works)), with a `shadows-builtin` warning that names the runtimes which load their own module instead. The list, read from the interpreters themselves, is in [`internal/graph/builtin.go`](internal/graph/builtin.go).
+Some modules only some runtimes have built in: `utf8` (Tarantool's own), LuaJIT's `bit`, `ffi`, `jit`, `table.new`, `string.buffer` and the like, and Tarantool's own, such as `json`, `fiber` or `csv`. A `require` of one that the project has no file for is left to the runtime and not reported, even with `--strict`: where the runtime has the module it loads it, and elsewhere the program fails as it does natively. A file the project does have for such a name — a pure-Lua `bit.lua` or `utf8.lua` for the runtimes without one — is embedded and served right after the interpreter's first searcher (see [How it works](#how-it-works)), with a `shadows-builtin` warning that names the runtimes which load their own module instead. The list, read from the interpreters themselves, is in [`internal/graph/builtin.go`](internal/graph/builtin.go).
 
 ### Prefix stripping
 
@@ -452,9 +451,8 @@ Normal (default) — a module required as both `mymod` and `mymod.init` is regis
 -- Entry: main
 
 do
-local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
 local __luamerge_loader = function(...)
-if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
+if not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 -- module source, verbatim
 end
 if package.preload["mymod"] == nil then package.preload["mymod"] = __luamerge_loader end
@@ -494,31 +492,24 @@ do
 end
 
 -- ... modules ...
-local __luamerge_main = (function()
-local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
-return function(...)
-if _VERSION == "Lua 5.1" and not rawget(_G, "jit") then arg = rawget(_G, "arg") end
+local __luamerge_main = function(...)
+if not rawget(_G, "jit") then arg = rawget(_G, "arg") end
 -- entry source, verbatim
 end
-end)()
 local __luamerge_n, __luamerge_results = (function(...) return select("#", ...), { ... } end)(__luamerge_main(...))
 do
 -- suffix code
 end
-return (table.unpack or unpack)(__luamerge_results, 1, __luamerge_n)
+return unpack(__luamerge_results, 1, __luamerge_n)
 ```
 
 Debug (`--debug`) — bodies are embedded as strings and loaded in the bundle's environment, each as a chunk named after its file as the interpreter names it when the program runs from the root (here `--entry src/main.lua`, so the root is `src`; see [Development build with accurate tracebacks](#development-build-with-accurate-tracebacks)):
 
 ```lua
-local __luamerge_load
-do
-local _ENV = _VERSION ~= "Lua 5.1" and _ENV or nil
-__luamerge_load = function(source, chunkname)
-  local chunk = assert((rawget(_G, "loadstring") or load)(source, chunkname, "t", _ENV))
-  if _ENV == nil then setfenv(chunk, getfenv(1)) end
+local __luamerge_load = function(source, chunkname)
+  local chunk = assert(loadstring(source, chunkname))
+  setfenv(chunk, getfenv(1))
   return chunk
-end
 end
 
 do
@@ -539,18 +530,17 @@ package.postload = package.postload or {}
 do
   local postload = package.postload
   local searchers = package.searchers or package.loaders
-  local sep = (_VERSION == "Lua 5.1" or _VERSION == "Lua 5.2" or _VERSION == "Lua 5.3") and "\n\t" or ""
   searchers[#searchers+1] = function(mod)
     local loader = postload[mod]
     if loader == nil then
-      return sep .. "no field package.postload['" .. mod .. "']"
+      return "\n\tno field package.postload['" .. mod .. "']"
     end
     return loader
   end
 end
 ```
 
-For a module it does not have, the searcher adds a line to `require`'s "module 'x' not found:" message. Lua 5.4 and later start each searcher's line themselves, while Lua 5.1 to 5.3, LuaJIT and Tarantool expect the searcher to start it with `"\n\t"`, so `sep` holds that on those only.
+For a module it does not have, the searcher adds a line to `require`'s "module 'x' not found:" message. Lua 5.1, LuaJIT and Tarantool expect the searcher to start it with `"\n\t"`, so the searcher does.
 
 A module required by the name of a runtime's built-in module wraps the interpreter's first searcher for that name, right after its loader, and its other names stay in `package.preload` (with `--fallback`, every name goes to `package.postload` as above):
 
@@ -568,18 +558,18 @@ end
 ## Limitations
 
 - **Dynamic requires** (`require(someVariable)`, `pcall(require, name)`) are detected but can't be resolved statically — they produce a `dynamic-require` warning and are left as runtime requires.
-- **Indirect uses of `require`** — aliasing it (`local r = require`), storing it in a table, passing it to a function — hide the calls made through it: they produce an `indirect-require` warning, and the modules loaded that way are embedded only if listed with `--include`. A presence check such as `if not require then` is reported the same way. Calls are recognized as `require(…)`, `_G.require(…)`, `_ENV.require(…)`, `pcall(require, …)` and `xpcall(require, handler, …)`. A local named `require` that is a function of its own — a local function, a local whose value is a function, a parameter or a loop variable — hides the global one for the rest of its scope, as in Lua, so the calls through it are no requires. A local of any other value is taken for the global `require` or a wrapper of it: `local require = require` and `local require = _G.require` hold the global, and a lazy require such as `local require = require("lazy")`, common in Neovim plugins, loads the modules of the names it gets, so the calls through it are found and their modules embedded. What such a local is assigned later does not count, but storing the global `require` in one that hides it is reported as an indirect use. `_G`, `_ENV`, `pcall` and `xpcall` are recognized by name.
+- **Indirect uses of `require`** — aliasing it (`local r = require`), storing it in a table, passing it to a function — hide the calls made through it: they produce an `indirect-require` warning, and the modules loaded that way are embedded only if listed with `--include`. A presence check such as `if not require then` is reported the same way. Calls are recognized as `require(…)`, `_G.require(…)`, `pcall(require, …)` and `xpcall(require, handler, …)`. A local named `require` that is a function of its own — a local function, a local whose value is a function, a parameter or a loop variable — hides the global one for the rest of its scope, as in Lua, so the calls through it are no requires. A local of any other value is taken for the global `require` or a wrapper of it: `local require = require` and `local require = _G.require` hold the global, and a lazy require such as `local require = require("lazy")`, common in Neovim plugins, loads the modules of the names it gets, so the calls through it are found and their modules embedded. What such a local is assigned later does not count, but storing the global `require` in one that hides it is reported as an indirect use. `_G`, `pcall` and `xpcall` are recognized by name.
 - **C modules** (`.so`/`.dll`) are not embedded; they remain runtime requires.
-- **Module names are decoded as Lua 5.2 and later decode them.** On Lua 5.1, which reads an escape it does not know as the character after the backslash, `require("\x61x")` loads the module `x61x`, but the bundler embeds `ax` (see [Finding requires](#finding-requires)).
+- **Module names are decoded as LuaJIT and Tarantool decode them.** On PUC Lua 5.1, which reads an escape it does not know as the character after the backslash, `require("\x61x")` loads the module `x61x`, but the bundler embeds `ax` (see [Finding requires](#finding-requires)).
 - **A file the parser cannot read is scanned for its requires** (a `token-scan` warning), and the token scanner takes a local named `require` for the global one. Such a file usually has a syntax error; it is embedded all the same, so without `--debug` the bundle fails to load where the interpreter compiles it (see below).
 - **No asset embedding** — only `.lua` modules are bundled.
 - **Every module is compiled when the bundle loads.** Each module must compile on the interpreter that runs the bundle, even one the program only tries through `pcall(require, ...)`: natively such a module fails when it is required, in the bundle the whole bundle fails to load. With `--debug` a module is compiled when it is first required.
 - **Modules inherit the bundle's environment.** Natively `require` runs a module in the global environment; in a bundle, modules and the entry run in the environment the bundle itself was loaded with, in both modes. That differs only when a host loads the bundle with an environment of its own (`setfenv`, or `load`'s `env` argument).
-- **An embedded module gets no file path as its loader data.** Natively, Lua 5.2 and later pass a module found in a file the path of that file as its second argument (`select(2, ...)` is `"./m.lua"`), and Lua 5.4 and later return the path as the second result of `require` as well. A bundle has no file per module, and a made-up path would send a module that looks for its data files next to itself to files that are not there. So an embedded module gets what a module in `package.preload` gets natively: the string `":preload:"` on Lua 5.4 and later, `nil` on Lua 5.2 and 5.3. It gets `nil` on both with `--fallback`, whose searcher gives no loader data, and under the name of a runtime's built-in module, which the bundle serves from its wrapper around the first searcher (see [How it works](#how-it-works)). Lua 5.1, LuaJIT and Tarantool pass a module nothing but its name, natively and in a bundle alike, and before Lua 5.4 `require` returns nothing but the module's value. The first argument, the name the module was required by, is the same as natively everywhere.
+- **An embedded module gets what `package.preload` gives natively.** Lua 5.1, LuaJIT and Tarantool pass a module nothing but its name, natively and in a bundle alike, and `require` returns nothing but the module's value. The first argument, the name the module was required by, is the same as natively.
 - **With `--suffix`, the entry runs one stack level deeper than a script**, inside a function the bundle calls and returns from before the suffix runs. A check that counts stack levels to tell whether it is the main script, such as `pcall(debug.getlocal, 4, 1)`, sees a module there on every interpreter but Tarantool. So does it with `--debug` on PUC Lua 5.1, where the bundle's call of the entry's chunk leaves a tail-call level.
-- **Module code runs inside a vararg function.** On PUC Lua 5.1 and Lua 5.5 such a function keeps one of its 200 local variable slots for itself, so a module can declare at most 199 locals at its top level there (200 natively); the same holds for the entry with `--suffix`. On PUC Lua 5.1 an assignment to `arg` in a module (or, with `--suffix`, in the entry) sets that function's implicit `arg` local, not the global.
+- **Module code runs inside a vararg function.** On PUC Lua 5.1 such a function keeps one of its 200 local variable slots for itself, so a module can declare at most 199 locals at its top level there (200 natively); the same holds for the entry with `--suffix`. An assignment to `arg` in a module (or, with `--suffix`, in the entry) sets that function's implicit `arg` local, not the global.
 - **A first line that starts with `#` ends at the first `\n`, as in PUC Lua.** LuaJIT and Tarantool also end it at a `\r`, which makes a difference only for a file whose line breaks are all `\r`: PUC Lua and the bundler read the whole file as that one line, so such a file is empty in the bundle, while LuaJIT and Tarantool skip the first line and run the rest.
-- **The default templates find `init.lua` where not every interpreter does.** `--path` defaults to `?.lua;?/init.lua`, as the `./?.lua;./?/init.lua` in the default `package.path` of Lua 5.3 and later, and Tarantool finds a `./foo/init.lua` for `require("foo")` as well. The default `package.path` of Lua 5.1, Lua 5.2 and LuaJIT has no `./?/init.lua`, so there a module that only a `foo/init.lua` provides fails to load natively and loads in the bundle. `--path '?.lua'` bundles only what those interpreters find.
+- **The default templates find `init.lua` where not every interpreter does.** `--path` defaults to `?.lua;?/init.lua`, and Tarantool finds a `./foo/init.lua` for `require("foo")` as well. The default `package.path` of Lua 5.1 and LuaJIT has no `./?/init.lua`, so there a module that only a `foo/init.lua` provides fails to load natively and loads in the bundle. `--path '?.lua'` bundles only what those interpreters find.
 - **Tarantool's `override.<name>` modules are not modeled.** Natively Tarantool loads a module named `override.foo` (such as `override/foo.lua`) for `require("foo")` ahead of both `foo.lua` and a built-in `foo`; the bundler neither embeds such a module nor lets it take the place of an embedded one.
 
 ## Contributing

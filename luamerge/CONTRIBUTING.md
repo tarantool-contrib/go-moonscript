@@ -52,18 +52,19 @@ go test ./internal/parse
 
 The tests that execute generated bundles (`internal/integration`, the Lua
 test of the root package and the harness in `internal/luatest`) run each
-bundle on every Lua interpreter found on `PATH`: `lua5.1`, `lua5.2`,
-`lua5.3`, `lua5.4`, `lua5.5`, `luajit`, `tarantool` and `lua`, once per
-distinct binary. The original program runs from its project directory and
-the bundle from an empty directory, so a module missing from the bundle
-cannot be loaded from disk.
+bundle on every Lua interpreter of the runtimes luamerge supports found on
+`PATH`: `lua5.1`, `luajit`, `tarantool` and a plain `lua`, once per distinct
+binary. An interpreter that is another Lua, such as a `lua` that is Lua 5.4, is
+left out, and one named in `LUATEST_INTERPRETERS` is an error. The original
+program runs from its project directory and the bundle from an empty directory,
+so a module missing from the bundle cannot be loaded from disk.
 
 With no interpreter on `PATH` these tests are skipped. To make a missing
 interpreter a failure instead, list the interpreters that must be present
 in `LUATEST_INTERPRETERS`; CI sets it to the interpreters it installs:
 
 ```bash
-LUATEST_INTERPRETERS=lua5.1,lua5.4,luajit make test
+LUATEST_INTERPRETERS=lua5.1,luajit,tarantool make test
 ```
 
 The variable does not start with `LUAMERGE_`: that prefix belongs to the
@@ -74,9 +75,9 @@ container:
 
 ```bash
 docker run --rm -v "$PWD:/src:ro" golang:1.26-alpine sh -c '
-  apk add --no-cache git lua5.1 lua5.2 lua5.3 lua5.4 luajit &&
+  apk add --no-cache git lua5.1 luajit &&
   cp -r /src /work && cd /work &&
-  LUATEST_INTERPRETERS=lua5.1,lua5.2,lua5.3,lua5.4,luajit go test ./...'
+  LUATEST_INTERPRETERS=lua5.1,luajit go test ./...'
 ```
 
 ### Test naming conventions
